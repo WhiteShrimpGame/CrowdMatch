@@ -1,0 +1,93 @@
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CrowdMatch
+{
+    /// <summary>
+    /// 容器单位：配置颜色 ID 与容量，挂载一个 UI Text 显示剩余容量。
+    /// 由 ContainerGroup 生成；gridX / gridZ 记录网格坐标。
+    /// </summary>
+    public class ContainerItem : MonoBehaviour
+    {
+        [Tooltip("容器接受的颜色 ID")]
+        public int colorId;
+
+        [Tooltip("总容量（可容纳的 PixelItem 数量）")]
+        public int capacity = 1;
+
+        [Tooltip("显示容量的 UI Text，留空自动从子物体查找")]
+        public Text capacityText;
+
+        [Tooltip("网格列坐标（横，X 方向）")]
+        public int gridX;
+
+        [Tooltip("网格行坐标（纵，Z 方向），0 为最前排，越大越靠后")]
+        public int gridZ;
+
+        /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
+        [System.NonSerialized] public ContainerGroup group;
+
+        private Renderer _renderer;
+        private int _remaining;
+
+        /// <summary>剩余容量</summary>
+        public int Remaining => _remaining;
+
+        public bool IsEmpty => _remaining <= 0;
+
+        private void Awake()
+        {
+            _renderer = GetComponent<Renderer>();
+            _remaining = capacity;
+            if (capacityText == null)
+                capacityText = GetComponentInChildren<Text>();
+            ApplyMaterial();
+            UpdateText();
+        }
+
+        /// <summary>设置容量（编辑器与运行时都可用），并刷新显示</summary>
+        public void SetCapacity(int cap)
+        {
+            capacity = cap;
+            _remaining = cap;
+            UpdateText();
+        }
+
+        /// <summary>消耗 1 点容量，返回是否耗尽</summary>
+        public bool Consume()
+        {
+            _remaining--;
+            UpdateText();
+            return _remaining <= 0;
+        }
+
+        public void UpdateText()
+        {
+            if (capacityText == null)
+                capacityText = GetComponentInChildren<Text>();
+            if (capacityText != null)
+                capacityText.text = _remaining.ToString();
+        }
+
+        /// <summary>按 colorId 应用材质，config 为空时从 GameManager 获取</summary>
+        public void ApplyMaterial(ColorConfig config = null)
+        {
+            if (config == null)
+            {
+                if (GameManager.Instance != null)
+                    config = GameManager.Instance.colorConfig;
+            }
+            if (config == null)
+                return;
+
+            var mat = config.GetMaterial(colorId);
+            if (mat == null)
+                return;
+
+            if (_renderer == null)
+                _renderer = GetComponent<Renderer>();
+            if (_renderer != null)
+                _renderer.sharedMaterial = mat;
+        }
+    }
+}
