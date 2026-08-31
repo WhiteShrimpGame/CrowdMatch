@@ -114,6 +114,21 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
+            // 同一次匹配内排序：前排优先（gridZ 大），同排靠中心优先（供 CrowdBufferZone 固定顺序模式使用）
+            matched.Sort((a, b) =>
+            {
+                int zcmp = b.gridZ.CompareTo(a.gridZ);
+                if (zcmp != 0)
+                    return zcmp;
+                float center = (pixelGroup.columns - 1) * 0.5f;
+                float da = Mathf.Abs(a.gridX - center);
+                float db = Mathf.Abs(b.gridX - center);
+                int dcmp = da.CompareTo(db);
+                if (dcmp != 0)
+                    return dcmp;
+                return a.gridX.CompareTo(b.gridX);
+            });
+
             // 从网格移除并送去聚集点（有缓冲区则先过闸，否则直接散布聚集）
             foreach (var item in matched)
             {

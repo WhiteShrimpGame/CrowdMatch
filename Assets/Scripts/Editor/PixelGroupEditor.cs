@@ -17,7 +17,7 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "「生成网格」会删除现有 PixelItem 子物体，按当前参数重新生成 Cube，并随机生成局部同色颜色分布。",
+                "「生成网格」会删除现有 PixelItem 子物体，按当前参数重新生成 Sphere，并随机生成局部同色颜色分布。",
                 MessageType.Info);
 
             if (GUILayout.Button("生成网格"))
@@ -51,7 +51,7 @@ namespace CrowdMatch
             {
                 for (int row = 0; row < group.rows; row++)
                 {
-                    var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                     go.name = "Pixel_" + col + "_" + row;
                     go.transform.SetParent(group.transform, false);
                     go.transform.localPosition = group.GetLocalPosition(col, row);

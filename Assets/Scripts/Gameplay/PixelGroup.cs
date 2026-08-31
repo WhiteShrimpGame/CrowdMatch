@@ -10,7 +10,7 @@ namespace CrowdMatch
     public class PixelGroup : MonoBehaviour
     {
         [Header("单位布局")]
-        [Tooltip("单个 Cube 的边长")]
+        [Tooltip("单个像素的直径（球 primitive 直径 = 1，scale 用 unitSize 即得世界直径）")]
         public float unitSize = 1f;
 
         [Tooltip("相邻单位表面之间的间距")]

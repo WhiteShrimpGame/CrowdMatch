@@ -3,7 +3,11 @@
     "allow": [
       "Bash(mkdir -p \"F:/CrowdMatch/.claude\")",
       "Bash(cp \"F:/CrowdMatch/.claude/settings.local.json\" \"F:/CrowdMatch/.claude/settings.local.json.bak\")",
-      "Read(//c/Users/hougo/.claude/skills/unity-colorpool/**)"
+      "Read(//c/Users/hougo/.claude/skills/unity-colorpool/**)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "WebSearch",
+      "WebFetch(domain:docs.unity3d.com)"
     ]
   }
 }
