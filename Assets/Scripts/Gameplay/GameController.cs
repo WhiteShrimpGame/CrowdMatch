@@ -36,6 +36,10 @@ namespace CrowdMatch
         [Tooltip("单位到达聚集点后的散布半径，避免完全重叠")]
         public float gatherScatterRadius = 0.35f;
 
+        [Header("过闸缓冲区（可选）")]
+        [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
+        public CrowdBufferZone crowdBuffer;
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
@@ -110,11 +114,14 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
-            // 从网格移除并送去聚集点
+            // 从网格移除并送去聚集点（有缓冲区则先过闸，否则直接散布聚集）
             foreach (var item in matched)
             {
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
-                GatherItem(item);
+                if (crowdBuffer != null)
+                    crowdBuffer.Enter(item);
+                else
+                    GatherItem(item);
             }
 
             // 各列后排补位
