@@ -1,7 +1,7 @@
 # CrowdMatch「挤地铁」缓冲区效果 — 功能设计文档
 
-> 状态：**已实现（3D 物理版）**。本文描述"像素离开网格后，穿过漏斗缓冲区（入口→缺口）与游戏区封闭区间、从缺口依次通过、
-> 再匀速抵达集结位置"的完整玩法效果，以及它与现有 `GameController` / `ContainerGroup` 的集成方式。
+> 状态：**已实现（3D 物理版）**。本文描述"像素在网格内寻路提取离开，穿过漏斗缓冲区（入口→缺口）与游戏区封闭区间、
+> 从缺口依次通过、再匀速抵达集结位置"的完整玩法效果，以及它与现有 `GameController` / `ContainerGroup` 的集成方式。
 > 早期实现（软力、顺序投影硬约束）已归档到 `CrowdBufferImplementations.md`，本文以最新的 3D 物理实现为准。
 
 ---
@@ -13,7 +13,7 @@
 
 本次效果把"飞到聚集点"这一步，替换成一段更有节奏的**过闸体验**（挤地铁），并把缓冲区与游戏区合并为一个**完全封闭的区间**：
 
-1. 像素离开 `PixelGroup` 后，先**匀速**移动到入口边（保持横向位置、按入口宽度 clamp，不瞬移）。
+1. 像素离开 `PixelGroup` 后，先按**前到后顺序在网格内寻路**（BFS 只走已腾出的格子，绕开未匹配球与尚未离开的同批球），逐格移向入口边（不穿球、不瞬移）。
 2. 到达入口边后**附加刚体**（球碰撞体 + 刚体），每个物理帧把速度直接设定为朝出口方向。
 3. 封闭区间内由**物理引擎**处理：像素间靠球碰撞体互相挤开（直径即期望间距），漏斗斜边 + 游戏区侧边 + 后墙 + 缺口封口墙把像素框在其中、挤向收窄的缺口，球不会漏出。
 4. 像素抵达缺口附近后**移除刚体与碰撞体**，先**匀速**移动到出口位置，再**匀速**移动到集结位置。
@@ -110,8 +110,9 @@
 InGrid ──(点击/FloodFill 匹配)──▶ Matched
                                    │ 从 grid 移除；关闭球碰撞体（点击检测，进入物理阶段时复用）
                                    ▼
-                                Approaching（匀速进入封闭区间）
-                                   │ 匀速移动到入口边（保持横向、按入口宽度 clamp）
+                                Extracting（网格寻路提取，并行 sweep）
+                                   │ 每个 tick 并行算出所有可移动像素的下一格；可移入"本 tick 即将腾出"的格，整列一波一波连续推进
+                                   │ 仅当多球争用同一单格（窄缝）时按"等待次数多者优先"依次通过
                                    ▼
                                 Physical（附加刚体：球碰撞体 + 刚体）
                                    │ 每帧速度朝缺口；物理引擎处理碰撞挤开与漏斗斜边 + 游戏区侧边 + 后墙
@@ -217,7 +218,7 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 
 ### 9.1 组件：`CrowdBufferZone : MonoBehaviour`
 
-职责：拥有缓冲区几何与物理参数，管理"在途像素"（接近阶段 + 物理阶段），步进匀速接近、每帧设定朝缺口速度、调度释放。
+职责：拥有缓冲区几何与物理参数，管理"在途像素"（提取寻路阶段 + 物理阶段），步进网格寻路提取、每帧设定朝缺口速度、调度释放。
 
 | 分类 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|---|
@@ -228,6 +229,7 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 | 几何 | `backDepth` | float | 9 | 后墙到入口中心的距离（游戏区封闭区间沿 -Z 的深度） |
 | 像素物理 | `radius` | float | 0.25 | 碰撞球世界半径（球视觉直径 = 像素直径 0.5，0.25 即刚好接触；调小可穿插表现拥挤） |
 | 像素物理 | `crowdSpeed` | float | 5 | 进入阶段（匀速）与物理阶段的驱动速度（每帧朝缺口方向设定速度） |
+| 提取 | `extractSpeed` | float | 5 | 网格寻路提取阶段的移动速度（世界单位/秒） |
 | 墙 | `wallThickness` | float | 0.1 | 墙厚度 |
 | 墙 | `wallHeight` | float | 2 | 墙高度（应 ≥ 像素直径） |
 | 释放 | `releaseRadius` | float | 0.6 | 距缺口多近触发释放（缺口已封口，需 ≥ radius + wallThickness/2） |
@@ -239,18 +241,19 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 
 | 方法 | 说明 |
 |---|---|
-| `Enter(PixelItem item)` | 像素离开网格时调用：关闭点击碰撞体，计算入口边落位点（保持横向、按入口宽度 clamp），加入接近阶段 |
+| `EnterBatch(List<PixelItem> matched, PixelGroup group)` | 一批匹配像素离开网格时调用：关闭点击碰撞体，建立网格占用表，加入提取阶段（前到后寻路离开） |
 | `EnterPhysical(PixelItem item)` | 内部：附加球碰撞体 + 刚体，进入物理阶段 |
 | `Release(PixelItem item)` | 内部：移除刚体与碰撞体，先匀速到出口位置，再匀速到 `collectPoint` |
 | `OnArrived(PixelItem item)` | 内部：置 `arrivedAtGatherPoint`、加入 `gatheredItems`、parent 到 `collectPoint` |
 | `FixedUpdate()` | 每物理帧：把物理阶段像素的速度直接设定为朝出口方向 |
-| `Update()` | 每帧：匀速接近步进（进入物理）+ 释放调度 |
+| `Update()` | 每帧：网格寻路提取步进（进入物理）+ 释放调度 |
 | `BuildWalls()` | 内部：运行时创建六条墙（漏斗斜边 + 游戏区侧边 + 后墙 + 缺口封口墙，static `BoxCollider`，封闭区间） |
 
-### 9.2 进入缓冲区（Enter）
+### 9.2 进入缓冲区（EnterBatch）
 
-`Enter` 只做：关闭球碰撞体（像素已离开网格，停止点击检测，进入阶段不参与物理；进入物理阶段时复用同一碰撞体）+ 计算入口边落位点 + 加入接近阶段。像素**保持当前网格位置出发**，
-由 `Update` 匀速移动到入口边（保持横向位置，按入口宽度 clamp，不瞬移），到达后由 `EnterPhysical` 附加刚体。
+`EnterBatch` 只做：关闭球碰撞体（像素已离开网格，停止点击检测，进入阶段不参与物理；进入物理阶段时复用同一碰撞体）+ 建立网格占用表 `_matchedOccupied` + 加入提取阶段，并按 `CellSize / extractSpeed` 设定 sweep 时间片。像素**保持当前网格位置出发**，
+由 `Update` 的 `StepExtracting` 驱动：每到一个 tick，`SweepOnce` **并行**算出所有可移动像素的下一格——BFS 可穿过"本 tick 即将腾出的格"（`vacated`），绕过未匹配球与不会本 tick 离开的同批球，从而整列/整批一波一波同时推进，而非逐个串行；
+只有当多个像素争用同一个单格（窄缝）时才依次通过，且按 `waitCount`（等待次数）降序给更久等待者优先权。格子间移动用平滑动画（时长 = tick 间隔），抵达入口边后由 `EnterPhysical` 附加刚体。整批提取完成后触发 `OnBatchExtracted` 回调（`GameController` 借此推迟补位）。
 
 > 视觉：像素在生成时即为 Sphere（`PixelGroupEditor`「生成网格」用 `PrimitiveType.Sphere`，球 primitive 直径 = 1 与 Cube 边长一致，
 > scale 直接用 `unitSize`），运行时无需任何网格替换；自带 `SphereCollider` 同时充当点击碰撞体与物理碰撞体。
@@ -262,13 +265,13 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 | 位置 | 现状 | 改动 |
 |---|---|---|
 | `GameController` | 新增字段 `crowdBuffer`（`CrowdBufferZone`，可选） | 引用缓冲区组件 |
-| `GameController.ResolveMatch` | 对每个匹配像素调 `GatherItem(item)` | 改为：`crowdBuffer != null ? crowdBuffer.Enter(item) : GatherItem(item)`（保留旧散布作 fallback） |
+| `GameController.ResolveMatch` | 对每个匹配像素调 `GatherItem(item)` | 改为：`crowdBuffer != null ? crowdBuffer.EnterBatch(matched, pixelGroup) : GatherItem(...)`（保留旧散布作 fallback）；补位推迟到提取完成回调 |
 | `GameController.GatherItem` | 关碰撞体 + parent + 加入列表 + 散布协程 | 保留（作为 fallback） |
 | `ContainerGroup` | 消费 `gatheredItems` | **不改**（契约不变） |
 | `PixelItem.Awake` | 初始化 renderer + 材质 | **不改**（像素生成时已是 Sphere，无需运行时替换网格） |
 | `PixelItem.arrivedAtGatherPoint` | 到聚集点置 true | **语义不变**（改为"过闸抵达集结位置后置 true"） |
 
-> 关键不变量：**只有完整走过"匀速进入 → 物理过闸 → 集结位置"的像素，才会 `arrivedAtGatherPoint = true`**，
+> 关键不变量：**只有完整走过"网格寻路提取 → 物理过闸 → 集结位置"的像素，才会 `arrivedAtGatherPoint = true`**，
 > 因此 `ContainerGroup` 只会消费真正到位的像素，过闸节奏天然限流了消费速率。
 
 ---
@@ -277,10 +280,10 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 
 ```
 GameController.ResolveMatch
-    │  crowdBuffer.Enter(item)   ← 替换原 GatherItem
+    │  crowdBuffer.EnterBatch(matched)   ← 替换原 GatherItem（补位推迟到提取完成）
     ▼
-CrowdBufferZone._approaching（匀速接近）
-    │  Update：匀速移到入口边落位点 → EnterPhysical
+CrowdBufferZone._extracting（网格寻路提取，并行 sweep）
+    │  Update：SweepOnce 并行推进（BFS 可穿过"即将腾出"的格）→ 抵达入口边 → EnterPhysical
     ▼
 CrowdBufferZone._physical（球碰撞体 + 刚体）
     │  FixedUpdate：朝缺口设定速度；物理引擎处理碰撞挤开 + 漏斗斜边 + 游戏区侧边 + 后墙
@@ -294,6 +297,8 @@ GameController.gatheredItems
     ▼
 ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 ```
+
+> 提取完成（`_extracting` 清空）后触发 `OnBatchExtracted`，`GameController` 才执行 `CollapseColumns` 补位，避免补位与提取并发冲突。
 
 ---
 
@@ -309,7 +314,10 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 | `releaseRadius` 过小（< radius + wallThickness/2） | 像素永远到不了释放范围，卡死——调参时需保证该不等式成立 |
 | `entranceWidth` / `backWidth` / `backDepth` 过小 | 像素网格落在封闭区间外，球可能漏出——调参时需保证盖住整个游戏区 |
 | `crowdBuffer` 未赋值 | `GameController` 回退到现有散布聚集（向后兼容） |
-| 缓冲区与 PixelGroup 距离较远 | 像素从网格位置匀速走到入口边再进入物理（正常表现） |
+| 缓冲区与 PixelGroup 距离较远 | 像素在网格内寻路到入口边（BFS 逐格），再进入物理（正常表现） |
+| 提取中前路被同批球挡住 | 若前排球本 tick 会腾出（`vacated`），后排同一 tick 跟进，整列连续推进；若前排球也被挡（窄缝争用），后排按 `waitCount` 排队依次通过 |
+| 提取中某列前方被未匹配球挡住 | BFS 绕行到相邻已腾出（或即将腾出）的格子（横向邻接），不会穿过 |
+| 提取进行中 | `GameController` 屏蔽点击（`crowdBuffer.IsExtracting`），补位推迟，保证网格状态一致 |
 
 ---
 
@@ -319,6 +327,7 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 |---|---|---|---|
 | `radius` | 碰撞球半径 / 拥挤程度 | 更松散、更整齐 | 更挤、更"挤地铁" |
 | `crowdSpeed` | 进入与物理阶段驱动速度 | 更快推进、更"冲" | 更慢、更"拥挤排队"感 |
+| `extractSpeed` | 网格寻路提取速度 | 更快出网格 | 更慢、更有序 |
 | `releaseRadius` | 触发释放的松紧 | 更早释放 | 更贴缺口才释放（不可 < radius + wallThickness/2） |
 | `minReleaseInterval` | 过闸节奏 | 更慢、间隔大 | 更快、几乎连过 |
 | `gapWidth` | 缺口收窄程度 | 缺口更宽、更易通过 | 更窄、更"单文件"排队 |
@@ -330,9 +339,9 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 
 ## 13. 待确认决策
 
-> 落地情况：1-B（先匀速进入，再附加刚体）、2-A（封闭区间）、3-A（单点集结）、4-保留 fallback、
-> 5-`FixedUpdate`（物理）+ `Update`（接近/释放）、6-单组件 `CrowdBufferZone`（墙由组件运行时创建）。
-> 另有：物理引擎选 **3D 物理（SphereCollider + Rigidbody + BoxCollider 墙，XZ 平面）**，而非迁移到 XY 平面的 2D 物理。
+> 落地情况：1-B（先在网格内寻路提取到入口边，再附加刚体）、2-A（封闭区间）、3-A（单点集结）、4-保留 fallback、
+> 5-`FixedUpdate`（物理）+ `Update`（提取/释放）、6-单组件 `CrowdBufferZone`（墙由组件运行时创建）、
+> 7-提取阶段（网格寻路）。另有：物理引擎选 **3D 物理（SphereCollider + Rigidbody + BoxCollider 墙，XZ 平面）**，而非迁移到 XY 平面的 2D 物理。
 >
 > 最新落地：**缓冲区 + 游戏区合并为完全封闭区间**——窄缺口为唯一出口（已封口），漏斗两条斜边（入口 → 缺口）保持不变，
 > 从斜边两个端点（入口两端）向 -Z 延伸两条新墙至后墙（上底封口，宽 `backWidth`、深 `backDepth`），
@@ -351,17 +360,22 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 5. **物理引擎选择**：
    - A（已选）：3D 物理（XZ 平面，冻结 Y）——改动最小，现有点击射线/生成器/坐标/摄像机全保留；
    - B：2D 物理（CircleCollider2D / Rigidbody2D / EdgeCollider2D）——需迁移到 XY 平面，改动大。
-6. **代码组织**：单组件 `CrowdBufferZone`（六条墙运行时创建），保留"接近阶段 + 物理阶段"两列表管理。
+6. **代码组织**：单组件 `CrowdBufferZone`（六条墙运行时创建），保留"提取阶段 + 物理阶段"两列表管理。
+7. **提取寻路**（本次新增）：
+   - 把"匀速进入"替换为**网格寻路提取**：匹配批次按前到后顺序，每球用 BFS 只走"已腾出或本 tick 即将腾出的格子"（这一批匹配像素腾出的空间），绕过未匹配球与不会本 tick 离开的同批球，逐格移向入口边；
+   - **并行 sweep**：每个 tick 一次性算出所有可移动像素的下一格，整列/整批同时推进（非逐个串行）；仅当多球争用同一单格时依次通过，按 `waitCount`（等待次数）降序给更久等待者优先；
+   - 提取完成触发 `OnBatchExtracted`，`GameController` 推迟 `CollapseColumns` 补位，提取期间屏蔽点击。
 
 ---
 
 ## 14. 实现步骤（已完成）
 
-1. 重写 `CrowdBufferZone.cs` 为 3D 物理版（封闭几何、匀速接近、物理附加、每帧设定朝缺口速度、释放调度、墙）。
-2. `GameController` 增加 `crowdBuffer` 字段，`ResolveMatch` 分流到 `Enter`/`GatherItem`（已改，保留）。
+1. 重写 `CrowdBufferZone.cs` 为 3D 物理版（封闭几何、物理附加、每帧设定朝缺口速度、释放调度、墙）。
+2. `GameController` 增加 `crowdBuffer` 字段，`ResolveMatch` 分流到 `EnterBatch`/`GatherItem`（已改，保留）。
 3. 像素改为生成时即 Sphere：`PixelGroupEditor.GenerateGrid` 改用 `PrimitiveType.Sphere`（球 primitive 直径 = 1，scale 仍为 `unitSize`），移除 `PixelItem.Awake` 的运行时换网格逻辑；**在场景里选中 `PixelGroup` 点「生成网格」重新生成一次**。
-4. 把缓冲区 + 游戏区改成封闭区间：`BuildWalls` 创建六条墙——漏斗斜边（入口 → 缺口，保持不变）+ 游戏区侧边（入口两端 → 后墙，向 -Z 延伸）+ 后墙（上底封口）+ 缺口封口墙，恢复 `entranceWidth` 字段、新增 `backWidth` / `backDepth`，`Enter` 改为按入口宽度 clamp 落位。
+4. 把缓冲区 + 游戏区改成封闭区间：`BuildWalls` 创建六条墙——漏斗斜边（入口 → 缺口，保持不变）+ 游戏区侧边（入口两端 → 后墙，向 -Z 延伸）+ 后墙（上底封口）+ 缺口封口墙，恢复 `entranceWidth` 字段、新增 `backWidth` / `backDepth`。
 5. 释放改为两段匀速：`MoveToCollect` 先 `MoveUniform` 到 `gapPoint`（出口位置），再 `MoveUniform` 到 `collectPoint`。
-6. 场景里配置 `CrowdBufferZone` 组件：`gapPoint`（可用 `gatherPoint` 同物体或独立点）、`collectPoint`（= `gatherPoint`）、`entranceWidth` / `backWidth` / `backDepth` 及其它几何/物理/释放参数（确保后墙盖住整个 PixelGroup）。
-7. 自测：点击匹配 → 观察像素匀速进入、物理挤向缺口、依次过闸、先到出口位置再抵达集结位置、被容器消费；确认球不漏出封闭区间。
-8. 按第 12 节调参，达到"挤地铁"的拥挤与节奏感。
+6. **提取阶段改网格寻路（并行 sweep）**：`CrowdBufferZone.Enter` → `EnterBatch(matched, group)`，新增 `StepExtracting` + `SweepOnce`（并行推进 + "即将腾出" + `waitCount` 公平性）、`extractSpeed` 字段、`IsExtracting` / `OnBatchExtracted`；`GameController.ResolveMatch` 调用 `EnterBatch`，补位推迟到 `OnBatchExtracted` 回调，提取期间屏蔽点击。
+7. 场景里配置 `CrowdBufferZone` 组件：`gapPoint`（可用 `gatherPoint` 同物体或独立点）、`collectPoint`（= `gatherPoint`）、`entranceWidth` / `backWidth` / `backDepth` 及其它几何/物理/释放/提取参数（确保后墙盖住整个 PixelGroup）。
+8. 自测：点击匹配 → 观察像素前到后寻路出网格（不穿球、绕开未匹配球）、物理挤向缺口、依次过闸、先到出口位置再抵达集结位置、被容器消费、随后补位；确认球不漏出封闭区间。
+9. 按第 12 节调参，达到"挤地铁"的拥挤与节奏感。

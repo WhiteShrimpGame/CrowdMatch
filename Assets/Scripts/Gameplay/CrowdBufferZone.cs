@@ -49,6 +49,10 @@ namespace CrowdMatch
         [Tooltip("墙高度（应 ≥ 像素直径，覆盖像素竖直范围）")]
         public float wallHeight = 2f;
 
+        [Header("提取（网格寻路）")]
+        [Tooltip("匹配像素在网格内寻路离开（前到后 BFS）时的移动速度（世界单位/秒）")]
+        public float extractSpeed = 5f;
+
         [Header("释放")]
         [Tooltip("距缺口中心多近触发释放（缺口已封口，需 ≥ radius + wallThickness/2，否则贴墙像素够不到释放范围、卡死）")]
         public float releaseRadius = 0.6f;
@@ -66,16 +70,47 @@ namespace CrowdMatch
         /// <summary>抵达集结位置 / 落位点的判定阈值（世界单位）</summary>
         private const float ArriveEpsilon = 0.05f;
 
-        /// <summary>匀速进入缓冲区阶段的像素</summary>
-        private readonly List<PixelItem> _approaching = new List<PixelItem>();
+        /// <summary>提取阶段（在网格内寻路离开）单个像素的状态</summary>
+        private class ExtractState
+        {
+            public PixelItem item;
+            public int col, row;        // 当前逻辑格（本 tick 结束后所在格）
+            public int waitCount;       // 等待计数：被挡住的次数（公平性，等待越多下次越优先）
 
-        /// <summary>进入阶段每个像素的落位点（入口边处）</summary>
-        private readonly Dictionary<PixelItem, Vector3> _entryTargets = new Dictionary<PixelItem, Vector3>();
+            public bool moving;         // 是否在网格内做格子到格子的平滑动画
+            public Vector3 animFrom;    // 动画起点（世界坐标）
+            public Vector3 animTo;      // 动画终点（世界坐标）
+            public float animT;         // 动画进度 0..1
+
+            public bool exiting;        // 已离开网格、正在移向入口边
+
+            // 本 tick 的决策（瞬态，每次 sweep 前重置）
+            public bool pendingExit;            // 本 tick 决定退出网格
+            public Vector2Int pendingNext;      // 本 tick 决定移入的格（-1,-1 = 不动）
+            public bool resolved;               // 本 tick 是否已确定（移动或退出）
+        }
+
+        /// <summary>提取阶段的像素（保持前到后顺序）</summary>
+        private readonly List<ExtractState> _extracting = new List<ExtractState>();
+
+        /// <summary>提取期间引用的 PixelGroup 及其网格占用表</summary>
+        private PixelGroup _extractGroup;
+        private bool[,] _matchedOccupied;   // 尚未离开的匹配像素占用的格（每次 sweep 原子更新）
+
+        /// <summary>并行 sweep 的时间片（一个 tick 移动一格，时长 = 格距 / 速度，动画与逻辑同步）</summary>
+        private float _extractTickInterval;
+        private float _extractTickTimer;
 
         /// <summary>物理阶段（已附加刚体）的像素</summary>
         private readonly List<PixelItem> _physical = new List<PixelItem>();
 
         private float _lastReleaseTime = float.NegativeInfinity;
+
+        /// <summary>是否正在提取（还有匹配像素在网格内寻路离开）</summary>
+        public bool IsExtracting => _extracting.Count > 0;
+
+        /// <summary>一批像素全部离开网格、进入缓冲区后触发（供 GameController 补位）</summary>
+        public event System.Action OnBatchExtracted;
 
         // 封闭区间的墙（运行时创建，static 碰撞体）：漏斗两条斜边 + 游戏区两条侧边 + 后墙 + 缺口封口墙
         private GameObject _funnelLeftWall;
@@ -90,35 +125,50 @@ namespace CrowdMatch
             BuildWalls();
         }
 
-        /// <summary>像素离开网格时调用：关闭点击碰撞体，计算入口边落位点，进入匀速接近阶段</summary>
-        public void Enter(PixelItem item)
+        /// <summary>
+        /// 一批匹配像素离开网格时调用：按前到后顺序在网格内寻路（BFS）离开，
+        /// 只走已腾出或"本 tick 即将腾出"的格子，抵达入口边后进入物理阶段。补位由 OnBatchExtracted 回调触发。
+        /// </summary>
+        public void EnterBatch(List<PixelItem> matched, PixelGroup group)
         {
-            if (item == null)
+            if (matched == null || matched.Count == 0 || group == null)
                 return;
 
-            // 像素已离开网格：关闭球碰撞体（停止点击检测，进入阶段不参与物理），进入物理阶段时复用同一碰撞体
-            var sphere = item.GetComponent<SphereCollider>();
-            if (sphere != null)
-                sphere.enabled = false;
+            _extractGroup = group;
+            _matchedOccupied = new bool[group.columns, group.rows];
+            _extractTickInterval = group.CellSize / Mathf.Max(0.0001f, extractSpeed);
+            _extractTickTimer = 0f;
 
-            // 落位点：保持横向位置，轴向移动到入口边（不瞬移，横向顺序自然保持）
-            RefreshGeometry(out Vector3 entrance, out _, out _, out Vector3 perp, out _);
-            Vector3 rel = item.transform.position - entrance;
-            rel.y = 0f;
-            float lateral = Vector3.Dot(rel, perp);
-            float clampHalf = Mathf.Max(0f, entranceWidth * 0.5f - radius);
-            lateral = Mathf.Clamp(lateral, -clampHalf, clampHalf);
+            foreach (var item in matched)
+            {
+                if (item == null)
+                    continue;
 
-            Vector3 entry = entrance + perp * lateral;
-            entry.y = item.transform.position.y;
+                // 像素已离开网格：关闭球碰撞体（停止点击检测，进入阶段不参与物理），进入物理阶段时复用同一碰撞体
+                var sphere = item.GetComponent<SphereCollider>();
+                if (sphere != null)
+                    sphere.enabled = false;
 
-            _entryTargets[item] = entry;
-            _approaching.Add(item);
+                if (!group.IsInRange(item.gridX, item.gridZ))
+                    continue;
+
+                _matchedOccupied[item.gridX, item.gridZ] = true;
+                _extracting.Add(new ExtractState
+                {
+                    item = item,
+                    col = item.gridX,
+                    row = item.gridZ,
+                });
+            }
+
+            // 空批（全部越界 / 为 null）：直接通知补位
+            if (_extracting.Count == 0)
+                OnBatchExtracted?.Invoke();
         }
 
         private void Update()
         {
-            StepApproaching();
+            StepExtracting();
             TryRelease();
         }
 
@@ -155,37 +205,321 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>匀速移动进入阶段的像素到落位点，到达后切换为物理阶段</summary>
-        private void StepApproaching()
+        /// <summary>提取阶段：推进退出动画、网格内平滑动画，并按 tick 触发并行 sweep。</summary>
+        private void StepExtracting()
         {
-            for (int i = _approaching.Count - 1; i >= 0; i--)
+            if (_extracting.Count == 0)
+                return;
+
+            float dt = Time.deltaTime;
+
+            RefreshGeometry(out Vector3 entrance, out _, out _, out Vector3 perp, out _);
+
+            // 1. 已离开网格的像素：连续匀速移向入口边落位点
+            for (int i = 0; i < _extracting.Count; i++)
             {
-                var p = _approaching[i];
-                if (p == null)
+                var st = _extracting[i];
+                if (!st.exiting)
+                    continue;
+
+                if (st.item == null)
                 {
-                    _approaching.RemoveAt(i);
+                    _extracting.RemoveAt(i);
+                    i--;
                     continue;
                 }
 
-                Vector3 target = _entryTargets[p];
-                Vector3 pos = p.transform.position;
-                Vector3 to = target - pos;
-                to.y = 0f;
-                float dist = to.magnitude;
-
-                if (dist <= ArriveEpsilon)
+                Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
+                MoveToward(st, target);
+                if (XZDistance(st.item.transform.position, target) <= ArriveEpsilon)
                 {
-                    _approaching.RemoveAt(i);
-                    _entryTargets.Remove(p);
-                    EnterPhysical(p);
-                    continue;
+                    _extracting.RemoveAt(i);
+                    i--;
+                    EnterPhysical(st.item);
                 }
-
-                Vector3 dir = to / dist;
-                pos += dir * Mathf.Min(crowdSpeed * Time.deltaTime, dist);
-                pos.y = p.transform.position.y;
-                p.transform.position = pos;
             }
+
+            // 2. 网格内移动动画推进（格子到格子平滑插值，时长 = tick 间隔）
+            for (int i = 0; i < _extracting.Count; i++)
+            {
+                var st = _extracting[i];
+                if (st.exiting || !st.moving)
+                    continue;
+                if (st.item == null)
+                {
+                    _extracting.RemoveAt(i);
+                    i--;
+                    continue;
+                }
+
+                st.animT += dt / _extractTickInterval;
+                if (st.animT >= 1f)
+                {
+                    st.animT = 1f;
+                    st.moving = false;
+                }
+                st.item.transform.position = Vector3.Lerp(st.animFrom, st.animTo, st.animT);
+            }
+
+            // 3. tick 累积 + 并行 sweep（每次 sweep 让所有可移动像素同时推进一格）
+            _extractTickTimer += dt;
+            if (_extractTickTimer >= _extractTickInterval)
+            {
+                _extractTickTimer -= _extractTickInterval;
+                SweepOnce();
+            }
+
+            // 4. 全部离开 → 清理并通知补位
+            if (_extracting.Count == 0)
+            {
+                _extractGroup = null;
+                _matchedOccupied = null;
+                OnBatchExtracted?.Invoke();
+            }
+        }
+
+        /// <summary>
+        /// 一次并行 sweep：基于本 tick 开始前的占用快照，算出所有可移动像素的下一格。
+        /// 关键语义——"本 tick 即将腾出的格"可被同时移入（vacated），从而整列/整批能一波一波连续推进；
+        /// 唯一会等待的是多个球争用同一个单格（窄缝），此时按"等待次数多者优先"依次通过。
+        /// </summary>
+        private void SweepOnce()
+        {
+            int cols = _extractGroup.columns;
+            int rows = _extractGroup.rows;
+
+            // 重置本 tick 决策
+            foreach (var st in _extracting)
+            {
+                st.pendingExit = false;
+                st.pendingNext = new Vector2Int(-1, -1);
+                st.resolved = false;
+            }
+
+            // 参与决策的球（在网格内、未退出）
+            var order = new List<ExtractState>();
+            foreach (var st in _extracting)
+                if (st.item != null && !st.exiting)
+                    order.Add(st);
+
+            // 公平性排序：等待次数多者优先；同等待按"前到后、同排靠中心"
+            order.Sort((a, b) =>
+            {
+                int w = b.waitCount.CompareTo(a.waitCount);
+                if (w != 0)
+                    return w;
+                int z = b.row.CompareTo(a.row);
+                if (z != 0)
+                    return z;
+                float center = (cols - 1) * 0.5f;
+                float da = Mathf.Abs(a.col - center);
+                float db = Mathf.Abs(b.col - center);
+                int dc = da.CompareTo(db);
+                if (dc != 0)
+                    return dc;
+                return a.col.CompareTo(b.col);
+            });
+
+            // vacated：本 tick 被腾出的格（"即将腾出"）；claimed：本 tick 被移入的格（防两球同格）
+            var vacated = new bool[cols, rows];
+            var claimed = new bool[cols, rows];
+
+            var exits = new List<ExtractState>();
+            var movers = new List<ExtractState>();
+
+            // 迭代到不动点：链式"即将腾出"需要多轮（后排依赖前排腾出后才看得到）
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (var st in order)
+                {
+                    if (st.item == null || st.exiting || st.resolved)
+                        continue;
+
+                    // 能直接沿 +Z 退出吗（前方无障碍或前方"即将腾出"）
+                    if (CanExit(st.col, st.row, vacated))
+                    {
+                        exits.Add(st);
+                        st.resolved = true;
+                        st.pendingExit = true;
+                        vacated[st.col, st.row] = true;
+                        changed = true;
+                        continue;
+                    }
+
+                    Vector2Int next = FindNextCell(st.col, st.row, vacated);
+                    if (next.x < 0)
+                        continue;          // 无路：等下一轮（可能因 vacated 扩展而出现新路）
+                    if (claimed[next.x, next.y])
+                        continue;          // 目标格已被本 tick 的其他球抢占
+
+                    movers.Add(st);
+                    st.resolved = true;
+                    st.pendingNext = next;
+                    claimed[next.x, next.y] = true;
+                    vacated[st.col, st.row] = true;
+                    changed = true;
+                }
+            }
+
+            // 未解决的球：等待计数 +1（公平性：被挡得越久，下次越优先）
+            foreach (var st in _extracting)
+            {
+                if (st.item == null || st.exiting || st.resolved)
+                    continue;
+                st.waitCount++;
+            }
+
+            // 原子更新占用表 + 触发动画
+            foreach (var st in exits)
+            {
+                _matchedOccupied[st.col, st.row] = false;
+                st.waitCount = 0;
+                st.moving = false;
+                st.exiting = true;
+            }
+            foreach (var st in movers)
+            {
+                _matchedOccupied[st.col, st.row] = false;
+                _matchedOccupied[st.pendingNext.x, st.pendingNext.y] = true;
+                StartCellMove(st, st.pendingNext);
+                st.col = st.pendingNext.x;
+                st.row = st.pendingNext.y;
+                st.waitCount = 0;
+            }
+        }
+
+        /// <summary>开始一次格子到格子的平滑动画</summary>
+        private void StartCellMove(ExtractState st, Vector2Int to)
+        {
+            st.animFrom = st.item.transform.position;
+            st.animTo = _extractGroup.GetWorldPosition(to.x, to.y);
+            st.animT = 0f;
+            st.moving = true;
+        }
+
+        /// <summary>某格能否直接沿 +Z 退出网格（前方无障碍，或前方"即将腾出"）</summary>
+        private bool CanExit(int col, int row, bool[,] vacated)
+        {
+            for (int r = row + 1; r < _extractGroup.rows; r++)
+            {
+                if (IsObstacle(col, r, vacated))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>某格是否为障碍：未匹配球、尚未离开且本 tick 未腾出的匹配球</summary>
+        private bool IsObstacle(int col, int row, bool[,] vacated)
+        {
+            if (_extractGroup.grid[col, row] != null)
+                return true;
+            if (_matchedOccupied[col, row] && !vacated[col, row])
+                return true;
+            return false;
+        }
+
+        /// <summary>BFS 从 (startCol,startRow) 找到可达的出口格，返回"第一步"的格子坐标；无路返回 (-1,-1)</summary>
+        private Vector2Int FindNextCell(int startCol, int startRow, bool[,] vacated)
+        {
+            int cols = _extractGroup.columns;
+            int rows = _extractGroup.rows;
+
+            var prev = new Vector2Int[cols, rows];
+            for (int c = 0; c < cols; c++)
+                for (int r = 0; r < rows; r++)
+                    prev[c, r] = new Vector2Int(-1, -1);
+
+            var start = new Vector2Int(startCol, startRow);
+            var queue = new Queue<Vector2Int>();
+            queue.Enqueue(start);
+            prev[startCol, startRow] = start;
+
+            int[] dx = { 0, 0, 1, -1 };
+            int[] dz = { 1, -1, 0, 0 };
+
+            Vector2Int goal = new Vector2Int(-1, -1);
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + dx[d];
+                    int nz = cur.y + dz[d];
+                    if (!_extractGroup.IsInRange(nx, nz))
+                        continue;
+                    if (prev[nx, nz].x >= 0)
+                        continue;
+                    if (IsObstacle(nx, nz, vacated))
+                        continue;
+
+                    prev[nx, nz] = cur;
+                    if (CanExit(nx, nz, vacated))
+                    {
+                        goal = new Vector2Int(nx, nz);
+                        queue.Clear();
+                        break;
+                    }
+                    queue.Enqueue(new Vector2Int(nx, nz));
+                }
+            }
+
+            if (goal.x < 0)
+                return new Vector2Int(-1, -1);
+
+            // 回溯到起点，取第一步
+            var path = new List<Vector2Int>();
+            var node = goal;
+            while (node != start)
+            {
+                path.Add(node);
+                node = prev[node.x, node.y];
+                if (node.x < 0)
+                    return new Vector2Int(-1, -1);
+            }
+            if (path.Count == 0)
+                return new Vector2Int(-1, -1);
+
+            return path[path.Count - 1];
+        }
+
+        /// <summary>计算入口边落位点：保持横向位置、按入口宽度 clamp（不瞬移）</summary>
+        private Vector3 ComputeEntryTarget(Vector3 pos, Vector3 entrance, Vector3 perp)
+        {
+            Vector3 rel = pos - entrance;
+            rel.y = 0f;
+            float lateral = Vector3.Dot(rel, perp);
+            float clampHalf = Mathf.Max(0f, entranceWidth * 0.5f - radius);
+            lateral = Mathf.Clamp(lateral, -clampHalf, clampHalf);
+
+            Vector3 entry = entrance + perp * lateral;
+            entry.y = pos.y;
+            return entry;
+        }
+
+        /// <summary>匀速移动像素到目标点（保持 Y 不变）</summary>
+        private void MoveToward(ExtractState st, Vector3 target)
+        {
+            Vector3 pos = st.item.transform.position;
+            Vector3 to = target - pos;
+            to.y = 0f;
+            float dist = to.magnitude;
+            if (dist <= ArriveEpsilon)
+                return;
+
+            Vector3 dir = to / dist;
+            pos += dir * Mathf.Min(extractSpeed * Time.deltaTime, dist);
+            pos.y = st.item.transform.position.y;
+            st.item.transform.position = pos;
+        }
+
+        /// <summary>XZ 平面距离（忽略 Y）</summary>
+        private static float XZDistance(Vector3 a, Vector3 b)
+        {
+            Vector3 d = a - b;
+            d.y = 0f;
+            return d.magnitude;
         }
 
         /// <summary>附加 SphereCollider + Rigidbody，进入物理模拟（碰撞挤开 + 侧边墙约束）；速度由 FixedUpdate 每帧设定</summary>

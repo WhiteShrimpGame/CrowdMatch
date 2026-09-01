@@ -59,6 +59,14 @@ namespace CrowdMatch
         {
             if (pixelGroup == null)
                 pixelGroup = FindObjectOfType<PixelGroup>();
+            if (crowdBuffer != null)
+                crowdBuffer.OnBatchExtracted += HandleBatchExtracted;
+        }
+
+        /// <summary>一批像素全部离开网格后补位（由 CrowdBufferZone 在提取完成时回调）</summary>
+        private void HandleBatchExtracted()
+        {
+            CollapseColumns();
         }
 
         private void Update()
@@ -77,8 +85,10 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
-            // 补位动画进行中时暂不响应，保证网格状态一致
+            // 补位动画进行中或提取（寻路离开）进行中时暂不响应，保证网格状态一致
             if (_refillMovingCount > 0)
+                return;
+            if (crowdBuffer != null && crowdBuffer.IsExtracting)
                 return;
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
                 return;
@@ -114,7 +124,7 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
-            // 同一次匹配内排序：前排优先（gridZ 大），同排靠中心优先（供 CrowdBufferZone 固定顺序模式使用）
+            // 同一次匹配内排序：前排优先（gridZ 大），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
             {
                 int zcmp = b.gridZ.CompareTo(a.gridZ);
@@ -129,18 +139,22 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
-            // 从网格移除并送去聚集点（有缓冲区则先过闸，否则直接散布聚集）
+            // 从网格移除（匹配格先置空）
             foreach (var item in matched)
-            {
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
-                if (crowdBuffer != null)
-                    crowdBuffer.Enter(item);
-                else
-                    GatherItem(item);
-            }
 
-            // 各列后排补位
-            CollapseColumns();
+            // 有缓冲区：进入提取阶段（网格寻路离开），补位推迟到提取完成（OnBatchExtracted 回调）
+            // 否则：回退到旧的直接散布聚集 + 立即补位
+            if (crowdBuffer != null)
+            {
+                crowdBuffer.EnterBatch(matched, pixelGroup);
+            }
+            else
+            {
+                foreach (var item in matched)
+                    GatherItem(item);
+                CollapseColumns();
+            }
         }
 
         private List<PixelItem> FloodFill(PixelItem start)
