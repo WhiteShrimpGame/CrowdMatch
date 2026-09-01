@@ -9,6 +9,7 @@ namespace CrowdMatch
     ///
     /// 本工程版改造为「槽位承载物（carrier）」模型：传送带每帧移动每个槽位对应的 carrier（belt 子物体，scale=1），
     /// 乘员（IConveyorItem）reparent 到 carrier 上（localPosition 收敛到 0），由 carrier 带着循环，从而实现无瞬移进入。
+    /// 入口收集：每个槽位世界 X 越过入口关口（entryGate）时触发 SlotPassedEntry(i)，由宿主在该槽位直接收一个乘员。
     ///
     /// Abstract conveyor belt: moves items in an evenly-spaced loop along an
     /// ArcPathController-defined path. Enter/leave are interface hooks — the host
@@ -42,6 +43,16 @@ namespace CrowdMatch
 
         /// <summary>归一化循环偏移 [0,1)。内部驱动整个传送带循环。/ Normalized loop offset [0,1).</summary>
         private float offset;
+
+        [Header("Entry collection / 入口收集")]
+        [Tooltip("收集关口（只用其世界 X 坐标）。近侧槽位世界 X 从大于该值跨到小于等于该值时，触发一次收集。")]
+        public Transform entryGate;
+
+        [Tooltip("某槽位过关口时触发的收集回调（参数 = 槽位索引），由宿主注入，负责取球并上车。")]
+        public Action<int> SlotPassedEntry;
+
+        /// <summary>每个槽位上一帧的世界 X，用于检测「过关口」跨越。/ Per-slot previous-frame world X for entry-gate crossing.</summary>
+        private float[] _prevSlotX;
 
         /// <summary>
         /// 离开判定钩子：返回 true 表示该物体应当离开传送带。
@@ -132,6 +143,14 @@ namespace CrowdMatch
         {
             float totalLength = path.GetTotalPathLength();
 
+            // 关口 X（未指定则用传送带自身 X）
+            float gateX = entryGate != null ? entryGate.position.x : transform.position.x;
+            bool firstTrack = _prevSlotX == null || _prevSlotX.Length != slots.Length;
+            if (firstTrack)
+            {
+                _prevSlotX = new float[slots.Length];
+            }
+
             for (int i = 0; i < slots.Length; i++)
             {
                 if (carriers[i] == null)
@@ -147,6 +166,14 @@ namespace CrowdMatch
 
                 carriers[i].position = path.GetGlobalPosition(slotOffset * totalLength);
                 carriers[i].rotation = Quaternion.Euler(path.GetGlobalEulerAngles(slotOffset * totalLength));
+
+                // 过关口检测：世界 X 从 > gateX 跨到 <= gateX（即近侧沿 -X 方向运动）时触发一次收集
+                float currX = carriers[i].position.x;
+                if (!firstTrack && _prevSlotX[i] > gateX && currX <= gateX)
+                {
+                    SlotPassedEntry?.Invoke(i);
+                }
+                _prevSlotX[i] = currX;
             }
         }
 

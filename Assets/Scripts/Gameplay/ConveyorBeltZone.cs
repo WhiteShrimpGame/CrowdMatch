@@ -5,8 +5,8 @@ namespace CrowdMatch
 {
     /// <summary>
     /// 传送带宿主：负责把「缓冲区释放出的像素」送入闭环传送带，并在远侧正前方同色 Container 处触发匹配吸收。
-    /// 注入 ConveyorBelt 的 ShouldLeave / OnLeave 钩子，管理「移向入口锚点 → reparent 到 carrier → localPosition→0」的无瞬移进入，
-    /// 以及入口槽位空闲门控（背压）。
+    /// 注入 ConveyorBelt 的 ShouldLeave / OnLeave 钩子；入口采用「槽位直接收集」——订阅 ConveyorBelt.SlotPassedEntry，
+    /// 每个槽位过关口时独立地到缓冲区出口取最近的小球上车（reparent + localPosition→0 无瞬移），无全局单飞门控。
     /// </summary>
     public class ConveyorBeltZone : MonoBehaviour
     {
@@ -17,12 +17,8 @@ namespace CrowdMatch
         [Tooltip("容器组（匹配 / 吸收目标）")]
         public ContainerGroup containerGroup;
 
-        [Tooltip("近侧入口锚点（应摆在轨迹近侧直线上）")]
-        public Transform entryAnchor;
-
-        [Header("进入")]
-        [Tooltip("释放后移向入口锚点的速度（世界单位/秒）")]
-        public float releaseSpeed = 8f;
+        [Tooltip("缓冲区（出口小球来源）。槽位过关口时从这里取最近的小球")]
+        public CrowdBufferZone crowdBuffer;
 
         [Header("匹配")]
         [Tooltip("正前方横向判定范围（约半列间距）")]
@@ -33,9 +29,6 @@ namespace CrowdMatch
 
         private const float ArriveEpsilon = 0.05f;
         private const float BoardSmoothRate = 10f;   // localPosition 收敛速率（指数平滑）
-
-        /// <summary>单飞标记：一次只允许一个像素在「出口 → 锚点 → 上车」途中</summary>
-        private PixelItem _boarding;
 
         /// <summary>占用槽位数（供 UI）。</summary>
         public int OccupiedSlots => belt != null ? belt.OccupiedCount : 0;
@@ -49,41 +42,35 @@ namespace CrowdMatch
             {
                 belt.ShouldLeave = ShouldLeave;
                 belt.OnLeave = OnLeave;
+                belt.SlotPassedEntry += OnSlotPassedEntry;
             }
         }
 
-        /// <summary>能否接受一个像素：无在途像素，且入口锚点附近存在空槽。</summary>
-        public bool CanAccept()
+        /// <summary>某槽位过关口：若该槽仍空且出口有球，取最近小球直接上车。每个槽位独立，互不阻塞。</summary>
+        private void OnSlotPassedEntry(int slotIndex)
         {
-            return _boarding == null && FindNearestFreeSlot() != -1;
-        }
+            if (belt == null || crowdBuffer == null)
+                return;
+            if (belt.GetItem(slotIndex) != null)
+                return;   // 该槽仍被占（异常），跳过本次收集
 
-        /// <summary>接受一个释放出的像素，起「移向锚点 → 上车 → localPosition→0」协程。</summary>
-        public void AcceptPixel(PixelItem pixel)
-        {
+            var pixel = crowdBuffer.CollectNearest();
             if (pixel == null)
                 return;
 
-            _boarding = pixel;
-            StartCoroutine(BoardRoutine(pixel));
-        }
-
-        private IEnumerator BoardRoutine(PixelItem pixel)
-        {
-            // 1. 匀速移到入口锚点
-            if (entryAnchor != null)
-                yield return MoveUniform(pixel, entryAnchor.position);
-
-            // 2. 找最近空槽并上车（reparent 到 carrier，保持世界位置 → 不瞬移）
-            int slot = FindNearestFreeSlot();
-            if (pixel == null || slot < 0 || belt == null || !belt.TryEnter(pixel, slot))
+            if (!belt.TryEnter(pixel, slotIndex))
             {
-                // 防御兜底：理论上 CanAccept 已挡住（无空槽 / 无 belt）；失败则释放单飞标记
-                _boarding = null;
-                yield break;
+                // 防御：此处槽位刚确认仍空，单线程下不会失败；真失败则销毁避免泄漏
+                Destroy(pixel.gameObject);
+                return;
             }
 
-            // 3. localPosition 平滑到 0：像素从当前偏移收敛到 carrier 上，随后被 carrier 带着走
+            StartCoroutine(SettleRoutine(pixel));
+        }
+
+        /// <summary>上车后的收敛：localPosition 平滑到 0。每个小球一条协程，互不阻塞。</summary>
+        private IEnumerator SettleRoutine(PixelItem pixel)
+        {
             while (pixel != null && pixel.transform.localPosition.sqrMagnitude > ArriveEpsilon * ArriveEpsilon)
             {
                 float k = 1f - Mathf.Exp(-BoardSmoothRate * Time.deltaTime);
@@ -92,35 +79,6 @@ namespace CrowdMatch
             }
             if (pixel != null)
                 pixel.transform.localPosition = Vector3.zero;
-
-            _boarding = null;
-        }
-
-        /// <summary>找距入口锚点最近的空槽；无则 -1。</summary>
-        private int FindNearestFreeSlot()
-        {
-            if (belt == null)
-                return -1;
-
-            Vector3 anchor = entryAnchor != null ? entryAnchor.position : belt.transform.position;
-            int best = -1;
-            float bestDist = float.MaxValue;
-            for (int i = 0; i < belt.slotCount; i++)
-            {
-                if (belt.GetItem(i) != null)
-                    continue;
-
-                Vector3 slotPos = belt.GetSlotWorldPosition(i);
-                Vector3 d = slotPos - anchor;
-                d.y = 0f;
-                float dist = d.sqrMagnitude;
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    best = i;
-                }
-            }
-            return best;
         }
 
         /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container。</summary>
@@ -142,34 +100,6 @@ namespace CrowdMatch
             var container = containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ);
             if (container != null)
                 containerGroup.ConsumePixel(pixel, container);
-        }
-
-        /// <summary>从当前位置匀速直线移动到目标点（保持 Y 不变）。</summary>
-        private IEnumerator MoveUniform(PixelItem item, Vector3 target)
-        {
-            float y = item.transform.position.y;
-            while (item != null)
-            {
-                Vector3 pos = item.transform.position;
-                Vector3 to = target - pos;
-                to.y = 0f;
-                float dist = to.magnitude;
-                if (dist <= ArriveEpsilon)
-                    break;
-
-                Vector3 dir = to / dist;
-                pos += dir * Mathf.Min(releaseSpeed * Time.deltaTime, dist);
-                pos.y = y;
-                item.transform.position = pos;
-                yield return null;
-            }
-
-            if (item != null)
-            {
-                Vector3 final = target;
-                final.y = y;
-                item.transform.position = final;
-            }
         }
     }
 }

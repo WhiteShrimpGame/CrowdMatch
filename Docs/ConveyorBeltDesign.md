@@ -16,7 +16,7 @@
 
 本次把「释放后到集结点」这一步，替换为一段**传送带运送**体验：
 
-1. 像素过闸释放后，不再去单点集结点，而是移向传送带的**近侧入口锚点**。
+1. 像素过闸释放后，不再去单点集结点，而是直接移向传送带近侧最近的空槽并上车。
 2. 像素在入口处 `reparent` 到传送带某个槽位的**承载物（carrier）**上（保持世界位置不瞬移），`localPosition` 平滑到 0，成为该槽位的乘员。
 3. 传送带带动 carrier（以及其上的像素）在**闭环轨迹**上循环（近侧直线 → 180°圆弧 → 远侧直线 → 180°圆弧）。
 4. 当像素到达**对侧（远侧直线）**、并进入某个**同色非空前排 Container 的正前方范围**时，`ShouldLeave` 触发 → 像素离开传送带。
@@ -52,7 +52,6 @@
 | **承载物（Carrier）** | 每个槽位对应的 Transform（`ConveyorBelt` 的子物体，scale=1），传送带每帧移动 carrier 的世界坐标，像素作为 carrier 的子物体被带着走 |
 | **近侧（Entry Side）** | 闭环的其中一条直线段，紧邻缓冲区缺口，像素在此上车 |
 | **对侧 / 远侧（Match Side）** | 闭环的另一条直线段，正对 ContainerGroup 前排，像素在此匹配 |
-| **入口锚点（Entry Anchor）** | 近侧直线上的一个固定世界点，释放后的像素先移到这里再上车 |
 | **正前方范围（Match Range）** | 以 Container 前排位置为中心的 2D 判定范围（`matchRangeX` 横向 + `matchRangeZ` 纵向），像素落入且同色即匹配 |
 | **背压（Backpressure）** | 入口槽位被占用时暂停放行，像素留在缓冲区出口物理队列里等待 |
 
@@ -67,10 +66,10 @@
         ┌─────────  ●────────────────────────●  ─────────┐
         │           │  (像素在此匹配)            │          │
         │180°圆弧   │                          │  180°圆弧 │
-        │           │  近侧直线段（入口锚点在此）  │          │
+        │           │  近侧直线段（像素在此上车）  │          │
         └─────────  ●────────────────────────●  ─────────┘
                         ▲
-                    入口锚点（紧邻缓冲区缺口）
+                    像素上车（紧邻缓冲区缺口）
 ```
 
 - 两条直线段沿 **X** 方向，长度 ≈ `ContainerGroup` 的横向跨度（`columns × xSpacing`）。
@@ -98,10 +97,10 @@ InGrid ──(点击/FloodFill)──▶ Matched
                     │ 有传送带               │ 无传送带(fallback)
                     ▼                        ▼
                Boarding                     MoveToCollect(gap→collectPoint)
-                    │ 匀速移到入口锚点            │
+                    │ 直接上车（reparent）            │
                     ▼                        ▼
                OnBelt（槽位循环）             Arrived(gatheredItems)
-                    │ reparent 到 carrier + localPosition→0
+                    │
                     ▼
                远侧 + 同色前排容器正前方?
                     │ 否 → 继续循环（无限绕圈）
@@ -110,7 +109,7 @@ InGrid ──(点击/FloodFill)──▶ Matched
                EnterContainer（Consume + Lerp进容器 + 销毁 + 容器耗尽补位）
 ```
 
-> `Boarding` 是 `Released` 像素在"去入口锚点途中"的瞬时状态，由 `ConveyorBeltZone` 用单飞标记（`_boarding`）管理，保证一次只有一个像素在途。
+> `Boarding` 是 `Released` 像素在"上车途中"的瞬时状态，由 `ConveyorBeltZone` 用单飞标记（`_boarding`）管理，保证一次只有一个像素在途。
 
 ---
 
@@ -130,14 +129,11 @@ InGrid ──(点击/FloodFill)──▶ Matched
 `ConveyorBeltZone` 的 `Boarding` 协程：
 
 ```csharp
-// 1. 像素（已无碰撞体）从缓冲区出口匀速移到入口锚点
-yield return MoveUniform(pixel, entryAnchor.position);   // 复用 releaseSpeed
-
-// 2. 上车：reparent 到最近空槽的 carrier（保持世界位置 → 不瞬移）
-int slot = FindNearestFreeSlot(entryAnchor.position);
+// 1. 上车：直接找距像素当前位置最近的空槽，reparent 到该槽 carrier（保持世界位置 → 不瞬移）
+int slot = FindNearestFreeSlot(pixel.transform.position);
 belt.TryEnter(pixel, slot);   // 内部：pixel.Transform.SetParent(carriers[slot], worldPositionStays:true)
 
-// 3. localPosition 平滑到 0：像素从当前偏移收敛到 carrier 上，随后被 carrier 带着走
+// 2. localPosition 平滑到 0：像素从当前偏移收敛到 carrier 上，随后被 carrier 带着走
 while (pixel.transform.localPosition.sqrMagnitude > eps)
 {
     pixel.transform.localPosition = Vector3.Lerp(pixel.transform.localPosition, Vector3.zero, k);
@@ -146,7 +142,7 @@ while (pixel.transform.localPosition.sqrMagnitude > eps)
 ```
 
 > 由于 reparent 时用 `worldPositionStays:true`，像素世界位置不变（零瞬移）；随后 `localPosition → 0` 让它平滑追赶上移动中的 carrier。
-> 只需 pick「离入口锚点最近的空槽」，local 偏移最大不过半个槽距，追赶动画很短。
+> 只需 pick「离像素当前位置最近的空槽」，local 偏移最大不过半个槽距，追赶动画很短。
 
 ### 6.2 离开（解绑 + 吸收）
 
@@ -201,15 +197,15 @@ R2 确认：**完全交给槽位空闲**，`minReleaseInterval` 不再参与传�
 `ConveyorBeltZone` 维护一个"单飞"标记 `_boarding`（一次只允许一个像素在途）：
 
 ```csharp
-public bool CanAccept()
+public bool CanAccept(Vector3 reference)
 {
-    return _boarding == null && FindNearestFreeSlot(entryAnchor.position) != -1;
+    return _boarding == null && FindNearestFreeSlot(reference) != -1;
 }
 
 public void AcceptPixel(PixelItem pixel)   // 由 CrowdBufferZone.Release 调用
 {
     _boarding = pixel;
-    StartCoroutine(BoardRoutine(pixel));   // 移向锚点 → TryEnter → localPosition→0 → _boarding=null
+    StartCoroutine(BoardRoutine(pixel));   // TryEnter → localPosition→0 → _boarding=null
 }
 ```
 
@@ -219,7 +215,7 @@ public void AcceptPixel(PixelItem pixel)   // 由 CrowdBufferZone.Release 调用
 if (_physical.Count == 0) return;
 if (conveyorZone != null)
 {
-    if (!conveyorZone.CanAccept()) return;                 // 槽位空闲门控（背压）
+    if (!conveyorZone.CanAccept(gap)) return;                 // 槽位空闲门控（背压）
 }
 else
 {
@@ -231,7 +227,7 @@ Release(front);
 `Release` 分叉：
 
 ```csharp
-// 有传送带：交给 conveyorZone（它负责"过缺口→锚点→上车"）
+// 有传送带：交给 conveyorZone（它负责"过缺口→直接上车"）
 if (conveyorZone != null) { conveyorZone.AcceptPixel(item); }
 else { StartCoroutine(MoveToCollect(item)); }   // 旧路径
 ```
@@ -267,14 +263,12 @@ else { StartCoroutine(MoveToCollect(item)); }   // 旧路径
 |---|---|---|---|
 | 引用 | `ConveyorBelt belt` | — | 传送带 |
 | 引用 | `ContainerGroup containerGroup` | — | 容器组（匹配/吸收目标） |
-| 引用 | `Transform entryAnchor` | — | 近侧入口锚点（应摆在轨迹近侧直线上） |
-| 进入 | `float releaseSpeed` | 8 | 释放后移向锚点的速度（可复用 buffer 的 releaseSpeed） |
 | 匹配 | `float matchRangeX` | 0.6 | 正前方横向判定（约半列间距） |
 | 匹配 | `float matchRangeZ` | 0.8 | 正前方纵向判定（远侧到容器前排的间隙） |
 | 方法 | `Start()` | 注入 `ShouldLeave` / `OnLeave` |
-| 方法 | `bool CanAccept()` | 入口槽位空闲且无在途像素 |
-| 方法 | `void AcceptPixel(PixelItem)` | 起 `BoardRoutine`（移向锚点 → 上车 → localPosition→0） |
-| 方法 | `FindNearestFreeSlot(Vector3)` | 距锚点最近的空槽索引 |
+| 方法 | `bool CanAccept(Vector3)` | reference 附近有空槽且无在途像素 |
+| 方法 | `void AcceptPixel(PixelItem)` | 起 `BoardRoutine`（上车 → localPosition→0） |
+| 方法 | `FindNearestFreeSlot(Vector3)` | 距 reference 最近的空槽索引 |
 | 属性 | `int OccupiedSlots` / `int TotalSlots` | 供 UI |
 
 ### 9.3 其余改动
@@ -310,7 +304,7 @@ CrowdBufferZone.Release(pixel)
     │  conveyorZone.AcceptPixel(pixel)     ← 有传送带（否则 MoveToCollect）
     ▼
 ConveyorBeltZone.BoardRoutine
-    │  匀速移到 entryAnchor → FindNearestFreeSlot → belt.TryEnter（reparent）→ localPosition→0
+    │  FindNearestFreeSlot(像素位置) → belt.TryEnter（reparent）→ localPosition→0
     ▼
 ConveyorBelt.Update：offset 推进 → ApplyPositions（移动 carrier）→ 像素随 carrier 循环
     │  CheckLeave 每帧对占用槽调 ShouldLeave
@@ -351,7 +345,6 @@ ContainerGroup.ConsumePixel(pixel, container)
 | `speed` | 运动倍率（等价于 `1/cycleTime` 缩放） | 更快 | 更慢 |
 | `matchRangeX` | 正前方横向判定 | 更易命中（跨列） | 更严格对齐列 |
 | `matchRangeZ` | 正前方纵向判定 | 更易命中 | 只在紧贴容器时才匹配 |
-| `releaseSpeed` | 释放后移向锚点速度 | 更快上车 | 更慢、更有序 |
 | 直线段长度 | 覆盖容器横向跨度 | — | 需 ≥ `columns × xSpacing` |
 | 圆弧半径 | 传送带宽度（近/远侧 Z 间距） | 更宽、两段分离更远 | 更窄、更紧凑 |
 
@@ -379,6 +372,6 @@ ContainerGroup.ConsumePixel(pixel, container)
 6. `ContainerGroup` 新增 `FindFrontContainerInFrontOf` + `ConsumePixel`（复用现有 `MovePixelToContainer`/`DisappearAndRefill`）。
 7. `CrowdBufferZone` 加 `conveyorZone` 字段，`TryRelease`/`Release` 分叉（§8）。
 8. `GameController` 加 `conveyorZone` 字段，`UpdateCountText` 改显示（§9.4）。
-9. 场景配置：`Path`（ArcPathController，4 段闭环）→ `ConveyorBelt`（belt，连 path）→ `ConveyorBeltZone`（连 belt/containerGroup/entryAnchor）→ `CrowdBufferZone.conveyorZone`、`GameController.conveyorZone` 连线；`gatherCountText` 保持。
-10. 自测：过闸释放 → 移向锚点 → 无瞬移上车 → 循环到远侧 → 同色前排容器正前方匹配 → 吸收进容器 → 容器耗尽补位；入口槽位满时像素在 gap 排队；UI 显示「占用/总容量」。
+9. 场景配置：`Path`（ArcPathController，4 段闭环）→ `ConveyorBelt`（belt，连 path）→ `ConveyorBeltZone`（连 belt/containerGroup）→ `CrowdBufferZone.conveyorZone`、`GameController.conveyorZone` 连线；`gatherCountText` 保持。
+10. 自测：过闸释放 → 无瞬移上车 → 循环到远侧 → 同色前排容器正前方匹配 → 吸收进容器 → 容器耗尽补位；入口槽位满时像素在 gap 排队；UI 显示「占用/总容量」。
 11. 按 §12 调参，达到"上车 → 运送 → 远侧被吸收"的节奏感。

@@ -67,7 +67,7 @@ namespace CrowdMatch
         [Tooltip("集结位置（= GameController.gatherPoint），像素解除约束后移动到这里")]
         public Transform collectPoint;
 
-        [Tooltip("释放后像素进入的闭环传送带；留空则回退到旧的集结位置 + gatheredItems 路径")]
+        [Tooltip("释放后像素进入的闭环传送带；留空则回退到旧的集结位置 + gatheredItems 路径。指定后关闭按帧释放，改由 ConveyorBeltZone 槽位过关口时调 CollectNearest 收集")]
         public ConveyorBeltZone conveyorZone;
 
         /// <summary>抵达集结位置 / 落位点的判定阈值（世界单位）</summary>
@@ -575,19 +575,14 @@ namespace CrowdMatch
         /// <summary>每个满足间隔的帧，释放距缺口最近的已就位像素（每次最多一个）</summary>
         private void TryRelease()
         {
-            if (_physical.Count == 0)
+            // 传送带模式：释放由「槽位过关口」驱动（ConveyorBeltZone 调 CollectNearest），这里不再按帧释放
+            if (conveyorZone != null)
                 return;
 
-            // 有传送带：完全交给入口槽位空闲门控（背压）；否则沿用最小释放间隔节流（fallback）
-            if (conveyorZone != null)
-            {
-                if (!conveyorZone.CanAccept())
-                    return;
-            }
-            else if (Time.time - _lastReleaseTime < minReleaseInterval)
-            {
+            if (_physical.Count == 0)
                 return;
-            }
+            if (Time.time - _lastReleaseTime < minReleaseInterval)
+                return;
 
             RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
 
@@ -613,12 +608,51 @@ namespace CrowdMatch
             Release(front);
         }
 
-        /// <summary>移除刚体与碰撞体，先匀速移动到出口位置，再匀速移动到集结位置</summary>
+        /// <summary>解除小球物理约束并匀速移动到集结位置（仅 fallback 无传送带路径）。</summary>
         private void Release(PixelItem item)
         {
             _physical.Remove(item);
             _lastReleaseTime = Time.time;
+            DetachPhysics(item);
+            StartCoroutine(MoveToCollect(item));
+        }
 
+        /// <summary>从物理队列取出距缺口最近（且在 releaseRadius 内）的小球并解除物理约束；无则 null。供传送带「槽位过关口」直接收集。</summary>
+        public PixelItem CollectNearest()
+        {
+            if (_physical.Count == 0)
+                return null;
+
+            RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
+
+            PixelItem best = null;
+            float bestDist = float.MaxValue;
+            foreach (var p in _physical)
+            {
+                if (p == null)
+                    continue;
+                Vector3 toGap = gap - p.transform.position;
+                toGap.y = 0f;
+                float d = toGap.magnitude;
+                if (d <= releaseRadius && d < bestDist)
+                {
+                    bestDist = d;
+                    best = p;
+                }
+            }
+
+            if (best == null)
+                return null;
+
+            _physical.Remove(best);
+            _lastReleaseTime = Time.time;
+            DetachPhysics(best);
+            return best;
+        }
+
+        /// <summary>移除刚体与碰撞体（停止物理影响与碰撞）。</summary>
+        private void DetachPhysics(PixelItem item)
+        {
             var rb = item.GetComponent<Rigidbody>();
             if (rb != null)
             {
@@ -633,11 +667,6 @@ namespace CrowdMatch
                 sphere.enabled = false;  // 立即停止碰撞
                 Destroy(sphere);
             }
-
-            if (conveyorZone != null)
-                conveyorZone.AcceptPixel(item);       // 传送带：交给 ConveyorBeltZone（移向锚点 → 上车）
-            else
-                StartCoroutine(MoveToCollect(item)); // 旧路径：gap → collectPoint → OnArrived
         }
 
         /// <summary>解除约束后，先匀速移动到出口（gap）位置，再匀速移动到集结位置</summary>

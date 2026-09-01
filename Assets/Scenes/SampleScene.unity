@@ -11663,6 +11663,7 @@ MonoBehaviour:
   cycleTime: 6
   speed: 1
   slotCount: 30
+  entryGate: {fileID: 1467064619}
 --- !u!4 &782126358
 Transform:
   m_ObjectHideFlags: 0
@@ -22597,7 +22598,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1467064618}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0.5}
+  m_LocalPosition: {x: 0.5, y: 0, z: 0.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -24434,8 +24435,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   belt: {fileID: 782126357}
   containerGroup: {fileID: 1428373511}
-  entryAnchor: {fileID: 1467064619}
-  releaseSpeed: 8
+  crowdBuffer: {fileID: 424865907}
   matchRangeX: 0.6
   matchRangeZ: 2
 --- !u!4 &1582382722
