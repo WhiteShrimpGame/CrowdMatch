@@ -4,7 +4,7 @@ namespace CrowdMatch
 {
     /// <summary>
     /// 管理一个 columns × rows 的 PixelItem 网格。
-    /// 可配置单位大小 unitSize、间距 spacing、横向数量 columns、纵向数量 rows。
+    /// 可配置单位大小 unitSize、横向间距 spacingX、纵向间距 spacingZ、横向数量 columns、纵向数量 rows。
     /// 运行时通过扫描子物体重建 grid。
     /// </summary>
     public class PixelGroup : MonoBehaviour
@@ -13,14 +13,17 @@ namespace CrowdMatch
         [Tooltip("单个像素的直径（球 primitive 直径 = 1，scale 用 unitSize 即得世界直径）")]
         public float unitSize = 1f;
 
-        [Tooltip("相邻单位表面之间的间距")]
-        public float spacing = 0.1f;
+        [Tooltip("横向（X 方向）相邻单位表面之间的间距")]
+        public float spacingX = 0.1f;
+
+        [Tooltip("纵向（Z 方向）相邻单位表面之间的间距")]
+        public float spacingZ = 0.1f;
 
         [Header("网格数量")]
         [Tooltip("横向（X 方向）数量")]
         public int columns = 5;
 
-        [Tooltip("纵向（Z 方向）数量，Z 越大越靠前")]
+        [Tooltip("纵向（Z 方向）数量，row 0 为最前排（Z 最大），向后沿 -Z 延伸")]
         public int rows = 5;
 
         [Header("颜色分布生成")]
@@ -33,11 +36,14 @@ namespace CrowdMatch
         [Tooltip("每个同色区域的最大连续格子数")]
         public int maxRunLength = 5;
 
-        /// <summary>运行时网格 [column, row]，row 0 为后排，row = rows-1 为前排（+Z）</summary>
+        /// <summary>运行时网格 [column, row]，row 0 为最前排（+Z），row = rows-1 为后排（-Z）</summary>
         [System.NonSerialized] public PixelItem[,] grid;
 
-        /// <summary>相邻两格中心点的距离</summary>
-        public float CellSize => unitSize + spacing;
+        /// <summary>相邻两格中心点的横向（X）距离</summary>
+        public float CellSizeX => unitSize + spacingX;
+
+        /// <summary>相邻两格中心点的纵向（Z）距离</summary>
+        public float CellSizeZ => unitSize + spacingZ;
 
         private void Start()
         {
@@ -74,11 +80,14 @@ namespace CrowdMatch
             return col >= 0 && col < columns && row >= 0 && row < rows;
         }
 
-        /// <summary>某格子的本地坐标（以自身为中心，前排 +Z）</summary>
+        /// <summary>
+        /// 某格子的本地坐标：X 以自身为中心（col 0 = 最小 X），row 0 落在自身中心点（z=0），
+        /// 后续行依次向 -Z 延伸一个 CellSizeZ。
+        /// </summary>
         public Vector3 GetLocalPosition(int col, int row)
         {
-            float x = (col - (columns - 1) * 0.5f) * CellSize;
-            float z = (row - (rows - 1) * 0.5f) * CellSize;
+            float x = (col - (columns - 1) * 0.5f) * CellSizeX;
+            float z = -row * CellSizeZ;
             return new Vector3(x, 0f, z);
         }
 

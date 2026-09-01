@@ -73,7 +73,7 @@ namespace CrowdMatch
                 for (int row = 0; row < group.rows; row++)
                 {
                     var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                    go.name = "Pixel_" + col + "_" + row;
+                    go.name = "Pixel_" + row + "_" + col; // 命名 row_col：row 0 = 前排（Z 最大），col 0 = 最左（X 最小）
                     go.transform.SetParent(group.transform, false);
                     go.transform.localPosition = group.GetLocalPosition(col, row);
                     go.transform.localScale = Vector3.one * group.unitSize;
@@ -236,11 +236,13 @@ namespace CrowdMatch
 
             group.RebuildGrid();
 
+            // 导出：图片顶行 = 最前排（gridZ 0），底行 = 后排；左 = 最小 X（gridX 0）。
+            // 即图片按 row_col 表格从上到下、从左到右读取（顶行 0_0 0_1 …，下行 1_0 …）。
             var tex = SquareGridColorTool.Export(
                 group.columns, group.rows, CellSize,
                 (col, row) =>
                 {
-                    var item = group.GetItem(col, row);
+                    var item = group.GetItem(col, group.rows - 1 - row);
                     return item != null ? (Color?)config.GetColor(item.colorId) : null;
                 });
 
@@ -316,7 +318,8 @@ namespace CrowdMatch
                 if (colorIndex < 0)
                     continue;
 
-                var item = group.GetItem(col, row);
+                // 图片顶行 = 最前排（gridZ 0）：把工具按「底行 0」采样的 row 反转到 gridZ
+                var item = group.GetItem(col, group.rows - 1 - row);
                 if (item == null)
                     continue;
 

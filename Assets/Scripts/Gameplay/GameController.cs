@@ -121,7 +121,8 @@ namespace CrowdMatch
 
         private bool IsFrontmost(PixelItem item)
         {
-            for (int r = item.gridZ + 1; r < pixelGroup.rows; r++)
+            // 前排 = gridZ 更小（row 0 = 最前排）；检查该列更前排是否仍有像素
+            for (int r = 0; r < item.gridZ; r++)
             {
                 if (pixelGroup.GetItem(item.gridX, r) != null)
                     return false;
@@ -133,10 +134,10 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
-            // 同一次匹配内排序：前排优先（gridZ 大），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
+            // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
             {
-                int zcmp = b.gridZ.CompareTo(a.gridZ);
+                int zcmp = a.gridZ.CompareTo(b.gridZ);
                 if (zcmp != 0)
                     return zcmp;
                 float center = (pixelGroup.columns - 1) * 0.5f;
@@ -257,9 +258,9 @@ namespace CrowdMatch
                     pixelGroup.grid[col, r] = null;
                 }
 
-                // 依次把剩余单位挤到最前排（从 rows-1 往下填）
-                int targetRow = pixelGroup.rows - 1;
-                for (int i = remaining.Count - 1; i >= 0; i--)
+                // 依次把剩余单位挤到最前排（从 row 0 往下填）
+                int targetRow = 0;
+                for (int i = 0; i < remaining.Count; i++)
                 {
                     var it = remaining[i];
                     int oldRow = it.gridZ;
@@ -269,7 +270,7 @@ namespace CrowdMatch
                     if (oldRow != targetRow)
                         StartCoroutine(MoveToGridCell(it, col, targetRow));
 
-                    targetRow--;
+                    targetRow++;
                 }
             }
         }

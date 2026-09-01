@@ -11,10 +11,10 @@ namespace CrowdMatch
         [Tooltip("颜色 ID，对应 ColorConfig 中的材质下标")]
         public int colorId;
 
-        [Tooltip("网格列坐标（横，X 方向）")]
+        [Tooltip("网格列坐标（横，X 方向），0 = 最小 X（最左）")]
         public int gridX;
 
-        [Tooltip("网格行坐标（纵，Z 方向），越大越靠前")]
+        [Tooltip("网格行坐标（纵，Z 方向），0 = 最前排（Z 最大），越大越靠后（向 -Z）")]
         public int gridZ;
 
         /// <summary>所属的 PixelGroup（运行时由 RebuildGrid 赋值，不序列化）</summary>

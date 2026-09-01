@@ -67,7 +67,7 @@ namespace CrowdMatch
                 var colorConfig = ColorConfigLocator.Find();
                 Debug.Log(Tag + " colorConfig = " + (colorConfig != null ? colorConfig.name : "NULL（找不到 ColorConfig）"));
 
-                // 1) 扫描 PixelItem → (layer, color) 列表，layer 0 = 最前排（gridZ 最大）
+                // 1) 扫描 PixelItem → (layer, color) 列表，layer 0 = 最前排（gridZ 0 = Z 最大）
                 int colorCount = colorConfig != null ? colorConfig.Count : 0;
                 var pixels = new List<(int layer, int color)>();
                 int maxColorId = -1;
@@ -81,7 +81,7 @@ namespace CrowdMatch
                                          " colorId=" + it.colorId);
                         continue;
                     }
-                    int layer = (pixelGroup.rows - 1) - it.gridZ; // 反转：PixelGroup 前排（gridZ 大）→ layer 0
+                    int layer = it.gridZ; // PixelGroup 前排（gridZ 0 = Z 最大）→ layer 0
                     pixels.Add((layer, it.colorId));
                     if (it.colorId > maxColorId) maxColorId = it.colorId;
                     totalPixels++;

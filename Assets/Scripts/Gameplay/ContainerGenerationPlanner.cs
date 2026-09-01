@@ -19,7 +19,7 @@ namespace CrowdMatch
     /// <summary>
     /// 容器生成规划器（纯 C#，无 MonoBehaviour）。
     /// 参考分层颜色池：把像素按（层, 颜色）分层统计，从最浅层起逐次抽同色 pack，
-    /// 输出容器铺放计划。层 0 = 最前排（PixelGroup 的 gridZ 最大）。
+    /// 输出容器铺放计划。层 0 = 最前排（PixelGroup 的 gridZ 0 = Z 最大）。
     /// </summary>
     public class ContainerGenerationPlanner
     {

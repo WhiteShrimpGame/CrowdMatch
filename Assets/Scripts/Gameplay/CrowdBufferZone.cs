@@ -50,7 +50,7 @@ namespace CrowdMatch
         public float wallHeight = 2f;
 
         [Header("提取（网格寻路）")]
-        [Tooltip("匹配像素在网格内寻路离开（并行 sweep）时的移动速度（世界单位/秒），同时决定 sweep 时间片 = CellSize / 该值")]
+        [Tooltip("匹配像素在网格内寻路离开（并行 sweep）时的移动速度（世界单位/秒），同时决定 sweep 时间片 = CellSizeZ / 该值")]
         public float extractSpeed = 5f;
 
         [Header("释放")]
@@ -139,7 +139,7 @@ namespace CrowdMatch
 
             _extractGroup = group;
             _matchedOccupied = new bool[group.columns, group.rows];
-            _extractTickInterval = group.CellSize / Mathf.Max(0.0001f, extractSpeed);
+            _extractTickInterval = group.CellSizeZ / Mathf.Max(0.0001f, extractSpeed);
             _extractTickTimer = 0f;
 
             foreach (var item in matched)
@@ -311,7 +311,7 @@ namespace CrowdMatch
                 int w = b.waitCount.CompareTo(a.waitCount);
                 if (w != 0)
                     return w;
-                int z = b.row.CompareTo(a.row);
+                int z = a.row.CompareTo(b.row);
                 if (z != 0)
                     return z;
                 float center = (cols - 1) * 0.5f;
@@ -402,10 +402,10 @@ namespace CrowdMatch
             st.moving = true;
         }
 
-        /// <summary>某格能否直接沿 +Z 退出网格（前方无障碍，或前方"即将腾出"）</summary>
+        /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍或前方"即将腾出"）</summary>
         private bool CanExit(int col, int row, bool[,] vacated)
         {
-            for (int r = row + 1; r < _extractGroup.rows; r++)
+            for (int r = 0; r < row; r++)
             {
                 if (IsObstacle(col, r, vacated))
                     return false;
