@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEditor;
 
@@ -7,6 +8,9 @@ namespace CrowdMatch
     [CustomEditor(typeof(PixelGroup))]
     public class PixelGroupEditor : Editor
     {
+        /// <summary>导入/导出 PNG 时每格像素边长（方阵网格，一格一个色块）。</summary>
+        private const int CellSize = 32;
+
         public override void OnInspectorGUI()
         {
             var group = (PixelGroup)target;
@@ -34,6 +38,23 @@ namespace CrowdMatch
             {
                 AssignClusteredColors(group);
             }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
+                "「导出颜色」把当前网格配色导出为 PNG（每格 " + CellSize + "px 色块）；\n" +
+                "「导入颜色」从 PNG 读回配色——每格需为正方形色块，尺寸为 columns×rows 的整数倍。",
+                MessageType.Info);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("导出颜色 (PNG)"))
+            {
+                ExportColors(group);
+            }
+            if (GUILayout.Button("导入颜色 (PNG)"))
+            {
+                ImportColors(group);
+            }
+            EditorGUILayout.EndHorizontal();
         }
 
         private void GenerateGrid(PixelGroup group)
@@ -182,6 +203,138 @@ namespace CrowdMatch
                     EditorUtility.SetDirty(item);
                 }
             }
+        }
+
+        // ===== 颜色导入 / 导出 =====
+
+        /// <summary>从 ColorConfig 构建纯色调色板（与 colorId 对齐）。</summary>
+        private static Color[] BuildPalette(ColorConfig config)
+        {
+            if (config == null || config.materials == null)
+                return new Color[0];
+            var colors = new Color[config.materials.Length];
+            for (int i = 0; i < config.materials.Length; i++)
+            {
+                var mat = config.materials[i];
+                colors[i] = mat != null ? mat.color : Color.magenta;
+            }
+            return colors;
+        }
+
+        private void ExportColors(PixelGroup group)
+        {
+            var config = ColorConfigLocator.Find();
+            if (config == null)
+            {
+                EditorUtility.DisplayDialog("导出颜色", "未找到 ColorConfig，无法读取颜色。", "确定");
+                return;
+            }
+
+            string path = EditorUtility.SaveFilePanel("导出颜色 PNG", "Assets", "PixelGroup.png", "png");
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            group.RebuildGrid();
+
+            var tex = SquareGridColorTool.Export(
+                group.columns, group.rows, CellSize,
+                (col, row) =>
+                {
+                    var item = group.GetItem(col, row);
+                    return item != null ? (Color?)config.GetColor(item.colorId) : null;
+                });
+
+            File.WriteAllBytes(path, tex.EncodeToPNG());
+            Object.DestroyImmediate(tex);
+
+            Debug.Log("[PixelGroup] 已导出颜色到 " + path);
+        }
+
+        private void ImportColors(PixelGroup group)
+        {
+            var config = ColorConfigLocator.Find();
+            if (config == null)
+            {
+                EditorUtility.DisplayDialog("导入颜色", "未找到 ColorConfig，无法映射颜色 ID。", "确定");
+                return;
+            }
+
+            string path = EditorUtility.OpenFilePanel("导入颜色 PNG", "Assets", "png");
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(path);
+            }
+            catch (System.Exception e)
+            {
+                EditorUtility.DisplayDialog("导入颜色", "读取文件失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            var tex = new Texture2D(2, 2);
+            if (!tex.LoadImage(bytes))
+            {
+                Object.DestroyImmediate(tex);
+                EditorUtility.DisplayDialog("导入颜色", "无法解码 PNG 图片。", "确定");
+                return;
+            }
+
+            // 校验尺寸：每格应为正方形色块，且宽/高分别被列/行整除
+            if (group.columns <= 0 || group.rows <= 0
+                || tex.width % group.columns != 0
+                || tex.height % group.rows != 0)
+            {
+                Object.DestroyImmediate(tex);
+                EditorUtility.DisplayDialog("导入颜色",
+                    "图片尺寸需为网格（" + group.columns + " 列 × " + group.rows + " 行）的整数倍色块。\n当前 " + tex.width + "×" + tex.height + "。",
+                    "确定");
+                return;
+            }
+
+            int cellSizeX = tex.width / group.columns;
+            int cellSizeY = tex.height / group.rows;
+            if (cellSizeX != cellSizeY || cellSizeX <= 0)
+            {
+                Object.DestroyImmediate(tex);
+                EditorUtility.DisplayDialog("导入颜色",
+                    "每格必须是正方形色块（宽/列 应等于 高/行）。\n当前每格 " + cellSizeX + "×" + cellSizeY + "px。",
+                    "确定");
+                return;
+            }
+
+            var palette = BuildPalette(config);
+            var cells = SquareGridColorTool.Import(tex, cellSizeX, palette);
+
+            group.RebuildGrid();
+
+            int applied = 0;
+            foreach (var (col, row, colorIndex) in cells)
+            {
+                if (colorIndex < 0)
+                    continue;
+
+                var item = group.GetItem(col, row);
+                if (item == null)
+                    continue;
+
+                Undo.RecordObject(item, "Import Pixel Color");
+                var rend = item.GetComponent<Renderer>();
+                if (rend != null)
+                    Undo.RecordObject(rend, "Import Pixel Material");
+
+                item.colorId = colorIndex;
+                item.ApplyMaterial(config);
+                EditorUtility.SetDirty(item);
+                applied++;
+            }
+
+            Object.DestroyImmediate(tex);
+            EditorUtility.SetDirty(group);
+
+            Debug.Log("[PixelGroup] 已从 " + path + " 导入 " + applied + " 个格子颜色。");
         }
     }
 }
