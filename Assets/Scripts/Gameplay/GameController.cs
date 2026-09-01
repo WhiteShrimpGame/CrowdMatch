@@ -110,29 +110,29 @@ namespace CrowdMatch
             if (item == null)
                 return;
 
-            // 只在仍处于网格中、且是所在列最前排（Z 最大）时才触发
+            // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需连通到首排）
             if (pixelGroup.GetItem(item.gridX, item.gridZ) != item)
-                return;
-            if (!IsFrontmost(item))
                 return;
 
             ResolveMatch(item);
         }
 
-        private bool IsFrontmost(PixelItem item)
+        /// <summary>同色组是否连通到首排（任意成员 gridZ == 0）。连通到首排才可能被移出网格。</summary>
+        private bool ReachesFront(List<PixelItem> matched)
         {
-            // 前排 = gridZ 更小（row 0 = 最前排）；检查该列更前排是否仍有像素
-            for (int r = 0; r < item.gridZ; r++)
-            {
-                if (pixelGroup.GetItem(item.gridX, r) != null)
-                    return false;
-            }
-            return true;
+            foreach (var item in matched)
+                if (item.gridZ == 0)
+                    return true;
+            return false;
         }
 
         private void ResolveMatch(PixelItem start)
         {
             List<PixelItem> matched = FloodFill(start);
+
+            // 只有能连通到首排（gridZ 0）的同色组才可移出；否则点击无效
+            if (!ReachesFront(matched))
+                return;
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
