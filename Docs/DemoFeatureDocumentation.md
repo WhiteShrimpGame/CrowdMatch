@@ -13,6 +13,8 @@ CrowdMatch 是一个 **点击匹配 + 容器消耗** 的休闲玩法原型，核
 
 1. 屏幕下方是一个 `PixelGroup` 网格（15×15 等），每个格子一个 `PixelItem`，按**局部同色区域**分布颜色。
 2. 玩家点击**最前排**（最靠近屏幕上方）的一个像素，游戏用 **Flood Fill** 找出相邻同色单位，全部移到中间的**聚集点**。
+   - 若配置了 `CrowdBufferZone`，则先走「网格寻路提取 → 封闭缓冲区物理过闸 → 依次过缺口 → 抵达集结位置」的过闸流程（见 5.8 节）；
+   - 否则回退到「直接匀速散布到聚集点」。
 3. 屏幕上方是一个 `ContainerGroup` 网格，每个 `ContainerItem` 有**颜色 ID + 容量**。
 4. 聚集点中已到达的像素，会被**同色**的**最前排容器**按列逐一吸收；每吸收一个，容器容量 −1。
 5. 容器容量耗尽后消失，该列**后排容器向前补位**。
@@ -57,6 +59,7 @@ Assets/
     │   ├── PixelItem.cs               # 像素单位
     │   ├── PixelGroup.cs              # 像素网格
     │   ├── GameController.cs          # 点击匹配 / 聚集 / 补位
+    │   ├── CrowdBufferZone.cs         # 过闸缓冲区（提取 + 物理过闸 + 释放）
     │   ├── ContainerItem.cs           # 容器单位
     │   ├── ContainerGroup.cs          # 容器网格（运行时消费）
     │   └── ContainerGenerationPlanner.cs  # 容器生成规划器（纯 C#）
@@ -131,7 +134,7 @@ Assets/
 
 ### 5.3 PixelItem（`Gameplay/PixelItem.cs`）
 
-像素单位。挂在一个 Cube 上（`PixelGroupEditor` 创建 `PrimitiveType.Cube`）。
+像素单位。挂在一个 Sphere 上（`PixelGroupEditor` 创建 `PrimitiveType.Sphere`，球 primitive 直径 = 1，scale 用 `unitSize`）。
 
 | 成员 | 说明 |
 |---|---|
@@ -148,7 +151,7 @@ Assets/
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `unitSize` | 1 | Cube 边长 |
+| `unitSize` | 1 | Sphere 直径（球 primitive 直径 = 1，scale 用 unitSize 即得世界直径） |
 | `spacing` | 0.1 | 相邻表面间距 |
 | `columns` / `rows` | 5 / 5 | 网格数量 |
 | `colorIds` | `{0..5}` | 生成配色的候选颜色 |
@@ -172,19 +175,21 @@ Assets/
 | `gatherPoint` | — | 聚集点 Transform |
 | `gatherCountText` | — | 显示聚集点数量的 UI Text |
 | `pixelGroup` | — | 管理的 PixelGroup，空则自动查找 |
-| `gatherSpeed` | 12 | 单位向聚集点移动速度 |
+| `gatherSpeed` | 12 | 单位向聚集点移动速度（旧散布 fallback 用） |
 | `refillSpeed` | 10 | 后排补位速度 |
-| `gatherScatterRadius` | 0.35 | 到达聚集点后的散布半径 |
+| `gatherScatterRadius` | 0.35 | 到达聚集点后的散布半径（旧散布 fallback 用） |
+| `crowdBuffer` | — | 过闸缓冲区 `CrowdBufferZone`，可选；留空回退到旧散布聚集 |
 | `gatheredItems` | — | 聚集点中的单位列表 |
 
 **流程**（详见第 7 节）：
 
 - `Update()` → 更新计数文本；左键按下 → `HandleClick()`。
-- `HandleClick()`：`_refillMovingCount > 0`（补位中）时忽略；`Physics.Raycast` 命中 → 取 `PixelItem`；
+- `HandleClick()`：`_refillMovingCount > 0`（补位中）或 `crowdBuffer.IsExtracting`（提取中）时忽略；`Physics.Raycast` 命中 → 取 `PixelItem`；
   校验该单位仍在其网格位置且是**所在列最前排** → `ResolveMatch()`。
 - `FloodFill(start)`：BFS 找相邻同色单位。
-- `ResolveMatch()`：匹配单位从 grid 移除 → `GatherItem()` 送去聚集点；随后 `CollapseColumns()` 补位。
-- `MoveToGatherPoint()`：关碰撞体 → `SetParent(gatherPoint, true)` → 协程 Lerp 到随机散布点 → 标记 `arrivedAtGatherPoint = true`。
+- `ResolveMatch()`：匹配单位排序（前排优先、同排靠中心优先）→ 从 grid 移除 → 有缓冲区走 `crowdBuffer.EnterBatch(matched, pixelGroup)`，否则 `GatherItem()` 送去聚集点；
+  补位 `CollapseColumns()` 有缓冲区时推迟到 `OnBatchExtracted` 回调执行，否则立即执行。
+- `MoveToGatherPoint()`（旧 fallback）：关碰撞体 → `SetParent(gatherPoint, true)` → 协程 Lerp 到随机散布点 → 标记 `arrivedAtGatherPoint = true`。
 - `CollapseColumns()`：每列把剩余单位挤到最前排，需要移动的走 `MoveToGridCell()`（`_refillMovingCount` 计数）。
 
 ### 5.6 ContainerItem（`Gameplay/ContainerItem.cs`）
@@ -232,6 +237,45 @@ Assets/
 | `MovePixelToContainer()` | 像素 world-space Lerp 到容器位置 → 销毁像素 → 若 isLast 则 `DisappearAndRefill` |
 | `DisappearAndRefill()` | 销毁前排容器，后排容器逐排前移（`MoveContainer` 协程） |
 
+### 5.8 CrowdBufferZone（`Gameplay/CrowdBufferZone.cs`）
+
+「挤地铁」过闸缓冲区（可选）。把「像素直接飞到聚集点」替换为一段有节奏的过闸体验：
+**网格寻路提取（并行 sweep）→ 封闭缓冲区物理过闸 → 依次过缺口 → 两段匀速抵达集结位置**。详见 `CrowdBufferDesign.md`。
+
+几何（XZ 平面）：`transform.position` 为**入口中心**；缺口由 `gapPoint` 定位；封闭区间由「漏斗梯形（入口 → 缺口）+ 游戏区梯形（入口 → 后墙）」共享入口边拼成，
+由六条运行时创建的 static `BoxCollider` 墙围住（漏斗斜边 ×2、游戏区侧边 ×2、后墙、缺口封口墙）。
+
+| 分类 | 字段 | 默认 | 说明 |
+|---|---|---|---|
+| 几何 | `entranceWidth` | 8 | 入口边宽度（漏斗宽边 = 共享边） |
+| 几何 | `gapPoint` | — | 缺口中心 / 出口 Transform |
+| 几何 | `gapWidth` | 0.4 | 缺口宽度（收窄后的排队口，已封口） |
+| 几何 | `backWidth` | 9 | 后墙宽度（上底封口，应盖住游戏区） |
+| 几何 | `backDepth` | 9 | 后墙到入口中心的距离（游戏区深度，-Z） |
+| 像素物理 | `radius` | 0.25 | 碰撞球世界半径（直径即期望间距） |
+| 像素物理 | `crowdSpeed` | 5 | 物理阶段朝缺口驱动速度 |
+| 提取 | `extractSpeed` | 5 | 网格寻路提取速度（决定 sweep 时间片 = CellSize / 该值） |
+| 墙 | `wallThickness` / `wallHeight` | 0.1 / 2 | 墙厚度 / 高度 |
+| 释放 | `releaseRadius` | 0.6 | 距缺口多近触发释放（需 ≥ radius + wallThickness/2） |
+| 释放 | `minReleaseInterval` | 0.15 | 最小释放间隔（秒） |
+| 释放 | `releaseSpeed` | 8 | 释放后两段匀速速度 |
+| 引用 | `collectPoint` | — | 集结位置（= `gatherPoint`） |
+
+| 成员 | 说明 |
+|---|---|
+| `EnterBatch(List<PixelItem> matched, PixelGroup group)` | 一批匹配像素离开网格：关碰撞体、建 `_matchedOccupied` 占用表、加入提取阶段 |
+| `IsExtracting` | 提取是否进行中（供 `GameController.HandleClick` 屏蔽点击） |
+| `OnBatchExtracted` | 事件：整批提取完成（进入物理）后触发，`GameController` 借此推迟 `CollapseColumns` |
+| `StepExtracting()` / `SweepOnce()` | 逻辑 tick：并行算出所有可移动球的下一格（"即将腾出"可同 tick 移入），仅窄缝争用按 `waitCount` 依次通过 |
+| `EnterPhysical(item)` | 抵达入口边：附加球碰撞体 + 刚体（冻结 Y、`ContinuousDynamic`），进入物理阶段 |
+| `FixedUpdate()` | 每物理帧把物理阶段像素速度直接设为朝缺口方向 |
+| `TryRelease()` / `Release(item)` | 缺口调度：距缺口最近且间隔已过的像素依次解除约束 |
+| `MoveToCollect(item)` | 释放后两段匀速：先到缺口出口位置，再到 `collectPoint`，最后 `OnArrived` |
+| `BuildWalls()` | 运行时创建六条墙（`Awake` 执行一次） |
+
+> 关键不变量：只有完整走过「提取 → 物理过闸 → 集结位置」的像素才会 `arrivedAtGatherPoint = true`，
+> 因此 `ContainerGroup` 只消费真正到位的像素，过闸节奏天然限流了消费速率。
+
 ---
 
 ## 6. 编辑器组件
@@ -254,7 +298,7 @@ Assets/
 
 两个按钮：
 
-1. **「生成网格」**：删除旧 PixelItem 子物体 → 按 `columns × rows` 生成 Cube → 挂 PixelItem → 区域生长配色。
+1. **「生成网格」**：删除旧 PixelItem 子物体 → 按 `columns × rows` 生成 Sphere → 挂 PixelItem → 区域生长配色。
 2. **「重新生成颜色分布」**：只改颜色不改几何。
 
 配色算法 `AssignClusteredColors`（**区域生长法**）：随机种子格子 + 随机颜色，向相邻未分配格子扩张，形成 `[minRunLength, maxRunLength]` 大小的同色区域，直到填满。
@@ -291,7 +335,7 @@ Assets/
 
 ```
 1. ColorConfig：菜单生成 24 色材质 → ColorConfig.asset
-2. PixelGroup：Inspector 点「生成网格」→ 创建 columns×rows 个 Cube + PixelItem，区域生长配色
+2. PixelGroup：Inspector 点「生成网格」→ 创建 columns×rows 个 Sphere + PixelItem，区域生长配色
 3. ContainerGroup：Inspector 点「生成 Containers」
    → 扫描 PixelGroup 颜色分布 → 分层颜色池 → 生成同色、容量匹配的 ContainerItem 网格
 ```
@@ -304,13 +348,20 @@ Assets/
    ▼
 GameController.HandleClick
    ├─ 补位中？ → 忽略
+   ├─ 提取（寻路离开）进行中？ → 忽略（crowdBuffer.IsExtracting）
    ├─ Raycast 命中 PixelItem？
    ├─ 仍是网格成员 + 所在列最前排？
    ▼
 ResolveMatch → FloodFill(相邻同色)
+   ├─ 匹配单位排序（前排优先、同排靠中心优先）
    ├─ 匹配单位从 pixelGroup.grid 移除
-   ├─ GatherItem → 移到 gatherPoint（散布）
-   └─ CollapseColumns → 各列后排向前补位
+   ├─ 有 crowdBuffer？
+   │     ├─ 是 → crowdBuffer.EnterBatch(matched, pixelGroup)
+   │     │         → 网格寻路提取（并行 sweep）
+   │     │         → 抵达入口边 → EnterPhysical（物理过闸）
+   │     │         → 依次过缺口（最小间隔）→ 两段匀速到集结位置 → arrivedAtGatherPoint
+   │     │         → OnBatchExtracted 回调 → CollapseColumns 补位
+   │     └─ 否 → GatherItem → 移到 gatherPoint（散布）→ CollapseColumns 立即补位
    ▼
 ContainerGroup.Update → ProcessConsumption
    对每列 front 容器（row 0）：
@@ -324,7 +375,10 @@ ContainerGroup.Update → ProcessConsumption
 
 ```
 PixelItem(colorId, gridX, gridZ)
-    │  FloodFill / GatherItem
+    │  FloodFill → ResolveMatch
+    ▼
+crowdBuffer.EnterBatch(matched, pixelGroup)   ← 有缓冲区
+    │  并行 sweep 提取 → EnterPhysical → TryRelease → MoveToCollect → OnArrived
     ▼
 GameController.gatheredItems（List<PixelItem>，arrivedAtGatherPoint 标记）
     │  FindMatchingPixel(按 colorId + arrived)
@@ -335,6 +389,8 @@ ContainerItem.Consume → _remaining -1 → 文本刷新
 DisappearAndRefill → 销毁容器 + 后排前移
 ```
 
+> 无缓冲区时，`EnterBatch` 分支退化为 `GatherItem`（直接 Lerp 到散布点 + 置标记），下游 `gatheredItems` 契约不变。
+
 ---
 
 ## 8. 从零搭建步骤
@@ -344,6 +400,7 @@ DisappearAndRefill → 销毁容器 + 后排前移
    - `GameManager`：挂一个空物体，引用 `ColorConfig`。
    - `PixelGroup`：挂一个空物体，配置 `columns/rows/colorIds/minRunLength/maxRunLength`。
    - `GameController`：挂一个物体，指定 `gatherPoint`（一个空物体）与 `gatherCountText`（屏幕 UI Text）。
+   - `CrowdBufferZone`（可选）：挂一个物体（摆在 PixelGroup 与 gatherPoint 之间），配置 `gapPoint` / `collectPoint`（= gatherPoint）及几何/物理/释放/提取参数（`backWidth`/`backDepth` 需盖住整个 PixelGroup）。
    - `ContainerGroup`：挂一个空物体（放在 PixelGroup 上方），配置 `containerPrefab`、`columns/rows`、`minCapacity/maxCapacity`、`maxSpanLayers`。
    - `ContainerItem` 预制体：一个 Cube（Renderer）+ 世界空间 Canvas/Text（显示容量），挂 `ContainerItem` 组件。
 3. **生成网格**：选中 PixelGroup → 「生成网格」。
@@ -364,3 +421,6 @@ DisappearAndRefill → 销毁容器 + 后排前移
 | 分层颜色池 + 大色块优先 | 容器前后排颜色贴合像素分层 | 层压缩 `maxSpanLayers` 需人工调 |
 | Flood Fill 相邻同色匹配 | 经典消除玩法手感 | 仅上下左右 4 邻接，不含斜向 |
 | 聚集点 + 容器消费两段移动 | 视觉上有"先聚集再吸收"的节奏 | 两个异步移动系统需注意时序（见 review） |
+| 过闸缓冲区（可选，`CrowdBufferZone`） | 把"直接散布"升级为"提取 → 物理过闸 → 依次过缺口"的节奏感 | 引入 3D 物理 + 提取状态机，配置项增多（见 `CrowdBufferDesign.md`） |
+| 3D 物理（XZ 平面，冻结 Y）而非 2D 物理 | 保留现有点击射线/生成器/坐标/摄像机，改动最小 | 依赖 PhysX，需冻结 Y 与旋转、`ContinuousDynamic` 防穿透 |
+| 并行 sweep 提取（即将腾出 + waitCount 公平性） | 整列/整批同时推进，非逐球串行排水 | 需不动点迭代解析窄缝争用，逻辑稍复杂 |

@@ -6,7 +6,7 @@ namespace CrowdMatch
     /// 单个像素单位：持有一个颜色 ID，并根据 ID 应用对应材质。
     /// 由 PixelGroup 生成；gridX / gridZ 记录其在网格中的坐标。
     /// </summary>
-    public class PixelItem : MonoBehaviour
+    public class PixelItem : MonoBehaviour, IConveyorItem
     {
         [Tooltip("颜色 ID，对应 ColorConfig 中的材质下标")]
         public int colorId;
@@ -22,6 +22,9 @@ namespace CrowdMatch
 
         /// <summary>是否已到达聚集点（运行时标记，供 ContainerGroup 消费）</summary>
         [System.NonSerialized] public bool arrivedAtGatherPoint;
+
+        /// <summary>IConveyorItem：供传送带定位的 Transform。</summary>
+        public Transform Transform => transform;
 
         private Renderer _renderer;
 

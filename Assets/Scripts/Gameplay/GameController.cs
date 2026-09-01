@@ -40,6 +40,10 @@ namespace CrowdMatch
         [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
         public CrowdBufferZone crowdBuffer;
 
+        [Header("传送带（可选）")]
+        [Tooltip("释放后像素进入的闭环传送带；留空则显示 gatheredItems 计数")]
+        public ConveyorBeltZone conveyorZone;
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
@@ -80,7 +84,12 @@ namespace CrowdMatch
         private void UpdateCountText()
         {
             if (gatherCountText != null)
-                gatherCountText.text = gatheredItems.Count.ToString();
+            {
+                if (conveyorZone != null)
+                    gatherCountText.text = conveyorZone.OccupiedSlots + " / " + conveyorZone.TotalSlots;
+                else
+                    gatherCountText.text = gatheredItems.Count.ToString();
+            }
         }
 
         private void HandleClick()

@@ -50,7 +50,7 @@ namespace CrowdMatch
         public float wallHeight = 2f;
 
         [Header("提取（网格寻路）")]
-        [Tooltip("匹配像素在网格内寻路离开（前到后 BFS）时的移动速度（世界单位/秒）")]
+        [Tooltip("匹配像素在网格内寻路离开（并行 sweep）时的移动速度（世界单位/秒），同时决定 sweep 时间片 = CellSize / 该值")]
         public float extractSpeed = 5f;
 
         [Header("释放")]
@@ -66,6 +66,9 @@ namespace CrowdMatch
         [Header("引用")]
         [Tooltip("集结位置（= GameController.gatherPoint），像素解除约束后移动到这里")]
         public Transform collectPoint;
+
+        [Tooltip("释放后像素进入的闭环传送带；留空则回退到旧的集结位置 + gatheredItems 路径")]
+        public ConveyorBeltZone conveyorZone;
 
         /// <summary>抵达集结位置 / 落位点的判定阈值（世界单位）</summary>
         private const float ArriveEpsilon = 0.05f;
@@ -574,8 +577,17 @@ namespace CrowdMatch
         {
             if (_physical.Count == 0)
                 return;
-            if (Time.time - _lastReleaseTime < minReleaseInterval)
+
+            // 有传送带：完全交给入口槽位空闲门控（背压）；否则沿用最小释放间隔节流（fallback）
+            if (conveyorZone != null)
+            {
+                if (!conveyorZone.CanAccept())
+                    return;
+            }
+            else if (Time.time - _lastReleaseTime < minReleaseInterval)
+            {
                 return;
+            }
 
             RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
 
@@ -622,7 +634,10 @@ namespace CrowdMatch
                 Destroy(sphere);
             }
 
-            StartCoroutine(MoveToCollect(item));
+            if (conveyorZone != null)
+                conveyorZone.AcceptPixel(item);       // 传送带：交给 ConveyorBeltZone（移向锚点 → 上车）
+            else
+                StartCoroutine(MoveToCollect(item)); // 旧路径：gap → collectPoint → OnArrived
         }
 
         /// <summary>解除约束后，先匀速移动到出口（gap）位置，再匀速移动到集结位置</summary>

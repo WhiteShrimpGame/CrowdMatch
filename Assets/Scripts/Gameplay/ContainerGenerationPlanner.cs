@@ -144,7 +144,14 @@ namespace CrowdMatch
 
             int n = Mathf.CeilToInt((float)total / maxCap);
             int maxN = Mathf.Max(1, total / minCap);
-            if (n > maxN) n = maxN;
+
+            if (n > maxN)
+            {
+                // 区间为空：无法把 total 均分成每块都落在 [minCap, maxCap] 的块
+                //（典型：minCap == maxCap 且 total 不是 maxCap 的倍数，如 4/3）。
+                // 此时宁可填满 maxCap、留一个小尾块，也绝不生成超过 maxCap 的容器。
+                return maxCap;
+            }
 
             int baseCap = total / n;
             int rem = total % n;

@@ -1,12 +1,13 @@
 # CrowdBufferZone 实现方案归档（备用）
 
 > 本文归档「挤地铁」缓冲区效果的两种**手写仿真**实现，含完整代码，供后续参考 / 回滚 / 对比。
-> 两者经实际验证效果均不够理想，当前转向**真实 2D 物理**实现。
+> 两者经实际验证效果均不够理想，已废弃；当前正式实现转向**真实 3D 物理**（PhysX，XZ 平面）。
 >
 > - 版本 1：软力版（separation 互斥 + 侧边向后推力）
 > - 版本 2：顺序投影硬约束版（按 z 序顺序投影 + noBacktrack + fixedOrder）
 >
-> 与正式功能设计文档 `CrowdBufferDesign.md` 对应关系：设计文档第 6 节已改写为版本 2 的算法描述。
+> 与正式功能设计文档 `CrowdBufferDesign.md` 对应关系：当前正式版本为**3D 物理 + 网格寻路提取（并行 sweep）**，
+> 见 `CrowdBufferDesign.md` 第 5–9 节；本文仅作历史归档，代码不再被引用。
 
 ---
 
@@ -706,9 +707,12 @@ namespace CrowdMatch
 
 ---
 
-## 配套改动（两版一致）
+## 配套改动（已过时，仅存档）
 
-`GameController.ResolveMatch` 的改动（与归档版本配套，当前仍在用）：
+> ⚠️ 本节是 v1/v2 手写仿真版的配套改动，**已不再适用**。当前正式实现的接入方式改为：
+> `crowdBuffer.EnterBatch(matched, pixelGroup)`（一次整批进入，内部自建占用表并跑并行 sweep），
+> 补位 `CollapseColumns()` 推迟到 `crowdBuffer.OnBatchExtracted` 回调执行（提取期间 `crowdBuffer.IsExtracting` 屏蔽点击）。
+> 详见 `CrowdBufferDesign.md` 第 9.3 节与 `GameController.cs` 当前实现。以下旧代码仅供参考。
 
 ```csharp
 private void ResolveMatch(PixelItem start)
@@ -762,7 +766,7 @@ public CrowdBufferZone crowdBuffer;
    - 单轮投影**残留重叠**（isotropic push 只把当前像素推开，不回头校正已固定的邻居）。
    - 后排被前排顶住时会**整体向后回退**，形成抖动（`maxFrameMove` 只能缓解不能消除）。
    - 排序突变（相邻两帧像素 z 序交换）会导致位置跳变，尚未处理。
-3. **共同问题**：手写约束本质是在近似刚体碰撞，而真实物理引擎（Box2D）天然、稳定地处理「碰撞挤开 + 边界硬约束」，无需手调强度、无单轮残留。因此转向真实 2D 物理。
+3. **共同问题**：手写约束本质是在近似刚体碰撞，而真实物理引擎天然、稳定地处理「碰撞挤开 + 边界硬约束」，无需手调强度、无单轮残留。因此转向真实 **3D 物理**（PhysX，XZ 平面冻结 Y，见 `CrowdBufferDesign.md`）。
 
 ---
 
@@ -771,4 +775,5 @@ public CrowdBufferZone crowdBuffer;
 | 版本 | Git 提交 | 说明 |
 |---|---|---|
 | v1 软力 | `ad3c1a0` | `git show ad3c1a0:Assets/Scripts/Gameplay/CrowdBufferZone.cs` 可回看 |
-| v2 顺序投影 | 工作区当前版本 | 见本文「版本 2」章节 |
+| v2 顺序投影 | 曾为工作区版本 | 见本文「版本 2」章节；已被下方正式版取代，无独立提交 |
+| 正式：3D 物理 | `46a5e8c`（物理版） | 当前实现，见 `CrowdBufferDesign.md`，不在本文展开 |

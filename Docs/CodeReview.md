@@ -1,8 +1,8 @@
 # CrowdMatch Demo 代码 Review
 
-> Review 范围：`Assets/Scripts/` 下全部 12 个脚本。
+> Review 范围：`Assets/Scripts/` 下全部 **13** 个脚本（含本会话新增的 `CrowdBufferZone.cs`）。
 > 结论先行：**核心玩法逻辑完整、可运行**，命名清晰、中文注释详尽、边界检查到位（`GetMaterial` 越界返回 null、`IsInRange`、Planner 的 `Clamp`）、编辑器有 Undo 与 try/catch。
-> 主要问题集中在**异步移动的时序竞态**，以及少量语义/持久化小问题。按严重度分级如下。
+> 主要问题集中在**异步移动的时序竞态**，以及少量语义/持久化小问题。新增的 `CrowdBufferZone`（并行 sweep 提取 + 3D 物理过闸）实现健壮、无高/中级别缺陷，仅有少量低优先级改进点。按严重度分级如下。
 
 ---
 
@@ -106,6 +106,53 @@ Vector3 target = container.transform.position;   // ← 读到的是动画中途
 
 ---
 
+## 🟢 低 — CrowdBufferZone（新增组件）
+
+> `CrowdBufferZone.cs` 负责「网格寻路提取（并行 sweep）→ 封闭缓冲区物理过闸 → 两段匀速抵达集结位置」。
+> 核心算法（并行 sweep + 即将腾出 + waitCount 公平性 + 不动点迭代）经推导正确，无高/中级别缺陷；以下为低优先级改进点。
+
+### CB1. `FindNextCell` 每次调用重新分配 BFS 结构，存在 GC 抖动
+
+**位置**：`CrowdBufferZone.cs` — `FindNextCell`（每次 `new Vector2Int[cols,rows]` + `Queue` + `List`）+ `SweepOnce` 的不动点循环（每个未解决球每轮重算 BFS）。
+
+**问题**：不动点 `while(changed)` 里，每个未解决的球每轮都跑一次 BFS，且每次 BFS 都从零分配访问数组与队列。批次大、链深时会产生连续小对象分配（GC 抖动）。
+
+**缓解**：实际多数场景（整列/整块提取）走 `CanExit` 的 O(rows) 检查而非 BFS，只有横向绕行才触发 BFS；Demo 规模（≤ 25 球、15×15 格）无压力。
+
+**建议**：后续若扩大规模，可改用「访问戳」（int 轮次 + `visited[col,row]` int 数组）复用缓冲，并对每个球每个 sweep 只算一次 BFS。
+
+### CB2. 静止且 `item == null` 的 `ExtractState` 不会被清理，可能卡死 `IsExtracting`
+
+**位置**：`CrowdBufferZone.cs` — `StepExtracting` 只清理「exiting」与「moving」状态的空 item，静止（非 moving 非 exiting）且 item 已销毁的球不会被任何分支移除。
+
+**问题**：这种球会永久滞留 `_extracting`，令 `IsExtracting` 恒为 `true`，屏蔽后续点击。当前玩法像素在提取期间不会被销毁，故不触发；属防御性缺口。
+
+**建议**：在 `StepExtracting` 顶部加一次全量空 item 清理（`_extracting.RemoveAll(s => s.item == null)`），或统一在移除时置空处理。
+
+### CB3. `BuildWalls` 仅在 `Awake` 执行一次，运行时改参数不重建墙
+
+**位置**：`CrowdBufferZone.cs` — `BuildWalls` 只在 `Awake` 调用；`RefreshGeometry` / `OnDrawGizmos` 只重算用于绘制，不重建碰撞墙。
+
+**问题**：运行中改 `gapPoint` / `entranceWidth` / `backWidth` / `backDepth` 不会更新墙碰撞体。按「场景里配置好再运行」的约定可接受，但调试时易误以为改参数会即时生效。
+
+**建议**：可加 `[ContextMenu("重建墙")]` 或运行开始时 `BuildWalls` 后置空依赖，便于调参。
+
+### CB4. `releaseRadius` 是「footgun」型配置约束
+
+**位置**：`CrowdBufferZone.cs` — `TryRelease` 用 `releaseRadius` 判定可释放；`BuildWalls` 的缺口封口墙把像素挡在缺口前。
+
+**问题**：`releaseRadius` 必须 ≥ `radius + wallThickness/2`，否则像素被封口墙挡住、永远到不了释放范围而卡死。该约束已写在 Tooltip 与设计文档，但属易踩的配置陷阱。
+
+**建议**：`Awake`/`EnterBatch` 时运行时 `releaseRadius = Mathf.Max(releaseRadius, radius + wallThickness / 2f + 0.05f)` 兜底。
+
+### CB5. 多批次可在物理缓冲区并存（共享释放调度）
+
+**位置**：`CrowdBufferZone.cs` — `IsExtracting` 只挡提取阶段；上一批进入 `_physical` 后、补位完成即可发起下一次匹配，两批像素会在 `_physical` 里并存并共享 `_lastReleaseTime`。
+
+**问题**：当前行为正确（后一批在缺口后排队、依次释放），但若未来要「一次只过一批」，需给物理阶段加占用锁。属设计确认点而非缺陷。
+
+---
+
 ## ✅ 做得好的地方（值得保留）
 
 1. **边界防御**：`ColorConfig.GetMaterial` 越界返回 null、`PixelGroup/ContainerGroup.IsInRange`、`Planner` 里 `Mathf.Clamp` / `Mathf.Max` 钳制——多处防越界。
@@ -113,6 +160,8 @@ Vector3 target = container.transform.position;   // ← 读到的是动画中途
 3. **编辑器健壮性**：`Undo.RegisterCreatedObjectUndo` / `Undo.DestroyObjectImmediate` / `Undo.AddComponent` 支持撤销；生成流程外层 try/catch + 详尽日志。
 4. **注释质量**：中文注释 + Tooltip 齐全，坐标约定（前后排方向相反）有明确标注。
 5. **单例与执行顺序**：`GameManager(-1000)` → `GameController(-900)` → `ContainerGroup(0)`，依赖关系清晰。
+6. **并行 sweep 提取**：`CrowdBufferZone` 用「即将腾出（vacated）+ 不动点迭代 + waitCount 公平性」一次并行推进整列/整批，而非逐球串行排水；`CanExit`/`FindNextCell`/`IsObstacle` 统一接收 `vacated`，语义清晰，无死锁/活锁。
+7. **物理与逻辑分离**：网格寻路（`Update` 逻辑 tick）与物理挤开（`FixedUpdate` 直接设速度）分阶段管理，`OnBatchExtracted` 事件把补位推迟到提取完成，避免网格状态并发冲突。
 
 ---
 
@@ -124,3 +173,4 @@ Vector3 target = container.transform.position;   // ← 读到的是动画中途
 | 本次 | M1 | 统一 Consume 时机与文档/注释 |
 | 本次 | M2 | 编辑器 `SetDirty(capacityText)` |
 | 可选 | L1–L5 | 顺带清理 |
+| 可选 | CB1–CB5 | CrowdBufferZone 低优先级改进（GC 复用、空 item 清理、墙重建、releaseRadius 兜底） |

@@ -129,6 +129,47 @@ namespace CrowdMatch
             return null;
         }
 
+        /// <summary>
+        /// 传送带推送模式：找某像素正前方（远侧）的同色非空前排容器；无则 null。
+        /// 遍历每列 front（row 0），要求同色且非空，且 2D 距离（X/Z）落在 matchRange 内，返回横向（X）最近者。
+        /// </summary>
+        public ContainerItem FindFrontContainerInFrontOf(PixelItem pixel, float matchRangeX, float matchRangeZ)
+        {
+            if (pixel == null || grid == null)
+                return null;
+
+            ContainerItem best = null;
+            float bestDx = float.MaxValue;
+            for (int col = 0; col < columns; col++)
+            {
+                var front = GetItem(col, 0);
+                if (front == null || front.IsEmpty || front.colorId != pixel.colorId)
+                    continue;
+
+                float dx = Mathf.Abs(front.transform.position.x - pixel.transform.position.x);
+                float dz = Mathf.Abs(front.transform.position.z - pixel.transform.position.z);
+                if (dx <= matchRangeX && dz <= matchRangeZ && dx < bestDx)
+                {
+                    bestDx = dx;
+                    best = front;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// 传送带推送模式：吸收一个像素——扣容量 → 像素 Lerp 进容器 → 销毁 → 若耗尽则补位。
+        /// 开头用 IsEmpty 兜底（见 review H1/M1），避免同帧竞态下重复消费。
+        /// </summary>
+        public void ConsumePixel(PixelItem pixel, ContainerItem container)
+        {
+            if (pixel == null || container == null || container.IsEmpty)
+                return;
+
+            bool isLast = container.Consume();
+            StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
+        }
+
         private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast)
         {
             Vector3 start = pixel.transform.position;
