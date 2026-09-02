@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEditor;
 
@@ -8,6 +10,9 @@ namespace CrowdMatch
     public class ContainerGroupEditor : Editor
     {
         private const string Tag = "[ContainerGroup]";
+
+        /// <summary>容器布局导入/导出共用的「上次路径」EditorPrefs 键。</summary>
+        private const string LayoutPathKey = "CrowdMatch.ContainerGroup.LastLayoutPath";
 
         public override void OnInspectorGUI()
         {
@@ -27,6 +32,24 @@ namespace CrowdMatch
             {
                 GenerateContainers(group);
             }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
+                "「导出 Containers」把当前容器布局存为文本：每行一列、从最前排到后排，\n" +
+                "每个容器记作 颜色ID/容量，同行（同列前后）用空格分隔，不记录空格。\n" +
+                "「导入 Containers」从文本重建容器布局（按文本调整 columns / rows 并重建子物体）。",
+                MessageType.Info);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("导出 Containers (txt)"))
+            {
+                ExportContainers(group);
+            }
+            if (GUILayout.Button("导入 Containers (txt)"))
+            {
+                ImportContainers(group);
+            }
+            EditorGUILayout.EndHorizontal();
         }
 
         private void GenerateContainers(ContainerGroup group)
@@ -205,6 +228,151 @@ namespace CrowdMatch
                                "\n堆栈=\n" + e.StackTrace);
                 EditorUtility.DisplayDialog("生成 Containers", "生成过程中发生异常：\n" + e.Message, "确定");
             }
+        }
+
+        /// <summary>导出容器布局为文本：每行一列（col 0 → columns-1），行内从最前排（row 0）到后排，空格分隔，不记录空格。</summary>
+        private void ExportContainers(ContainerGroup group)
+        {
+            string path = EditorUtility.SaveFilePanel("导出 Containers", EditorPathMemory.LoadDir(LayoutPathKey), "ContainerGroup.txt", "txt");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(LayoutPathKey, path);
+
+            group.RebuildGrid();
+
+            var sb = new StringBuilder();
+            for (int col = 0; col < group.columns; col++)
+            {
+                bool first = true;
+                for (int row = 0; row < group.rows; row++)
+                {
+                    var item = group.GetItem(col, row);
+                    if (item == null)
+                        continue; // 跳过空格
+                    if (!first)
+                        sb.Append(' ');
+                    sb.Append(item.colorId).Append('/').Append(item.capacity);
+                    first = false;
+                }
+                sb.AppendLine();
+            }
+
+            File.WriteAllText(path, sb.ToString());
+            Debug.Log(Tag + " 已导出容器布局到 " + path + "（" + group.columns + " 列 × " + group.rows + " 行）");
+        }
+
+        /// <summary>从文本导入容器布局：每行一列、从最前排到后排，容器记作 颜色ID/容量，空格分隔，不记录空格。</summary>
+        private void ImportContainers(ContainerGroup group)
+        {
+            string path = EditorUtility.OpenFilePanel("导入 Containers", EditorPathMemory.LoadDir(LayoutPathKey), "txt");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(LayoutPathKey, path);
+
+            string[] lines;
+            try
+            {
+                lines = File.ReadAllLines(path);
+            }
+            catch (System.Exception e)
+            {
+                EditorUtility.DisplayDialog("导入 Containers", "读取文件失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            // 解析：columns 为列数（非空行数），每列按前到后记录一列容器，无空格占位
+            var columns = new List<List<(int colorId, int capacity)>>();
+            int parsedRows = 0;
+            foreach (var raw in lines)
+            {
+                string line = raw.Trim();
+                if (line.Length == 0)
+                    continue;
+
+                var tokens = line.Split(new[] { ' ', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
+                var col = new List<(int, int)>(tokens.Length);
+                foreach (var tok in tokens)
+                {
+                    int slash = tok.IndexOf('/');
+                    if (slash <= 0 || slash >= tok.Length - 1
+                        || !int.TryParse(tok.Substring(0, slash), out int colorId)
+                        || !int.TryParse(tok.Substring(slash + 1), out int cap))
+                    {
+                        EditorUtility.DisplayDialog("导入 Containers",
+                            "无法解析条目「" + tok + "」。\n应为 颜色ID/容量（如 3/4）。", "确定");
+                        return;
+                    }
+                    col.Add((colorId, cap));
+                }
+                columns.Add(col);
+                parsedRows = Mathf.Max(parsedRows, col.Count);
+            }
+
+            int cols = columns.Count;
+            if (cols == 0 || parsedRows == 0)
+            {
+                EditorUtility.DisplayDialog("导入 Containers", "文件中没有有效的容器数据。", "确定");
+                return;
+            }
+
+            if (group.containerPrefab == null)
+            {
+                EditorUtility.DisplayDialog("导入 Containers", "请先指定 ContainerItem 预制体（containerPrefab）。", "确定");
+                return;
+            }
+
+            var colorConfig = ColorConfigLocator.Find();
+
+            // 按文本调整网格尺寸（columns = 列数，rows = 最深的列）
+            Undo.RecordObject(group, "导入 Containers");
+            group.columns = cols;
+            group.rows = parsedRows;
+
+            // 删除旧子物体
+            for (int i = group.transform.childCount - 1; i >= 0; i--)
+            {
+                var child = group.transform.GetChild(i);
+                if (child.GetComponent<ContainerItem>() != null)
+                    Undo.DestroyObjectImmediate(child.gameObject);
+            }
+
+            // 实例化新容器：每列紧凑地从最前排（row 0）往下铺
+            int created = 0;
+            for (int c = 0; c < cols; c++)
+            {
+                var colData = columns[c];
+                for (int r = 0; r < colData.Count; r++)
+                {
+                    var (colorId, capacity) = colData[r];
+
+                    var go = InstantiateTemplate(group.containerPrefab, group.transform);
+                    go.name = "Container_" + c + "_" + r;
+                    go.transform.localPosition = group.GetLocalPosition(c, r);
+
+                    var item = go.GetComponent<ContainerItem>();
+                    if (item == null)
+                    {
+                        Debug.LogError(Tag + " 预制体 " + group.containerPrefab.name + " 缺少 ContainerItem 组件，已销毁该实例。", go);
+                        DestroyImmediate(go);
+                        continue;
+                    }
+
+                    item.gridX = c;
+                    item.gridZ = r;
+                    item.colorId = colorId;
+                    item.SetCapacity(capacity);
+                    item.ApplyMaterial(colorConfig);
+                    EditorUtility.SetDirty(item);
+
+                    Undo.RegisterCreatedObjectUndo(go, "导入 Containers");
+                    created++;
+                }
+            }
+
+            group.RebuildGrid();
+            EditorUtility.SetDirty(group);
+
+            Debug.Log(Tag + " 已从 " + path + " 导入 " + created + " 个容器（" + cols + " 列 × " + parsedRows + " 行）。");
         }
 
         /// <summary>实例化模板：预制体资产走 InstantiatePrefab，场景对象走 Object.Instantiate 克隆</summary>
