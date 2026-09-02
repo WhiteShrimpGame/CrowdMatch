@@ -327,6 +327,7 @@ MonoBehaviour:
   gapWidth: 1
   backWidth: 8.5
   backDepth: 25
+  physicalEntryDepth: 2.8
   radius: 0.25
   crowdSpeed: 5
   wallThickness: 0.1
@@ -865,6 +866,7 @@ MonoBehaviour:
   crowdBuffer: {fileID: 424865907}
   matchRangeX: 0.6
   matchRangeZ: 2
+  settleRotateSpeed: 360
 --- !u!4 &1582382722
 Transform:
   m_ObjectHideFlags: 0

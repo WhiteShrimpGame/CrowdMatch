@@ -27,6 +27,9 @@ namespace CrowdMatch
         [Tooltip("正前方纵向判定范围（远侧到容器前排的间隙）")]
         public float matchRangeZ = 0.8f;
 
+        [Tooltip("上车收敛的旋转角速度（度/秒）：平滑到槽位途中前半段归 0、后半段转至 localEulerY = -90")]
+        public float settleRotateSpeed = 360f;
+
         private const float ArriveEpsilon = 0.05f;
         private const float BoardSmoothRate = 10f;   // localPosition 收敛速率（指数平滑）
 
@@ -68,17 +71,52 @@ namespace CrowdMatch
             StartCoroutine(SettleRoutine(pixel));
         }
 
-        /// <summary>上车后的收敛：localPosition 平滑到 0。每个小球一条协程，互不阻塞。</summary>
+        /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
         private IEnumerator SettleRoutine(PixelItem pixel)
         {
-            while (pixel != null && pixel.transform.localPosition.sqrMagnitude > ArriveEpsilon * ArriveEpsilon)
+            float startDist = pixel.transform.localPosition.magnitude;
+            bool secondHalf = false;
+
+            while (pixel != null)
             {
                 float k = 1f - Mathf.Exp(-BoardSmoothRate * Time.deltaTime);
                 pixel.transform.localPosition = Vector3.Lerp(pixel.transform.localPosition, Vector3.zero, k);
+
+                // 位置收敛进度：0 = 起点，1 = 到达槽位，按已走距离占初始距离的比例划分前后半段
+                float progress = startDist > ArriveEpsilon
+                    ? 1f - pixel.transform.localPosition.magnitude / startDist
+                    : 1f;
+                progress = Mathf.Clamp01(progress);
+
+                if (progress < 0.5f)
+                {
+                    // 前半段：localRotation 归 0
+                    pixel.transform.localRotation = Quaternion.RotateTowards(
+                        pixel.transform.localRotation, Quaternion.identity, settleRotateSpeed * Time.deltaTime);
+                }
+                else
+                {
+                    // 后半段：localEulerY 匀速转至 -90（X/Z 归 0）
+                    secondHalf = true;
+                    Vector3 euler = pixel.transform.localEulerAngles;
+                    float newY = Mathf.MoveTowardsAngle(euler.y, -90f, settleRotateSpeed * Time.deltaTime);
+                    pixel.transform.localRotation = Quaternion.Euler(0f, newY, 0f);
+                }
+
+                bool posDone = pixel.transform.localPosition.sqrMagnitude <= ArriveEpsilon * ArriveEpsilon;
+                bool rotDone = secondHalf
+                    ? Mathf.Abs(Mathf.DeltaAngle(pixel.transform.localEulerAngles.y, -90f)) <= 0.5f
+                    : Quaternion.Angle(pixel.transform.localRotation, Quaternion.identity) <= 0.5f;
+                if (posDone && rotDone)
+                    break;
+
                 yield return null;
             }
             if (pixel != null)
+            {
                 pixel.transform.localPosition = Vector3.zero;
+                pixel.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
+            }
         }
 
         /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container；记录模式下到达远侧即离开。</summary>

@@ -35,6 +35,9 @@ namespace CrowdMatch
         [Tooltip("后墙到入口中心的距离（游戏区封闭区间沿 -Z 的深度）")]
         public float backDepth = 9f;
 
+        [Tooltip("物理阶段起始范围：从入口边沿 -Z（朝像素群）方向延伸的距离。提取中的像素向正前方移动、一旦进入该范围（离入口边还有这段距离）就提前赋予刚体、朝缺口方向移动。设为 0 表示到入口边才进入物理阶段")]
+        public float physicalEntryDepth = 0f;
+
         [Header("像素物理")]
         [Tooltip("碰撞球世界半径（球视觉直径 = 像素直径 0.5，0.25 即刚好接触；调小可穿插表现拥挤）")]
         public float radius = 0.25f;
@@ -224,9 +227,15 @@ namespace CrowdMatch
                 Vector3 dir = gap - p.transform.position;
                 dir.y = 0f;
                 if (dir.sqrMagnitude > 0.0001f)
+                {
                     rb.velocity = dir.normalized * crowdSpeed;
+                    // 物理移动阶段：z 正方向始终朝向出口（gap）
+                    p.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                }
                 else
+                {
                     rb.velocity = Vector3.zero;
+                }
             }
         }
 
@@ -238,9 +247,9 @@ namespace CrowdMatch
 
             float dt = Time.deltaTime;
 
-            RefreshGeometry(out Vector3 entrance, out _, out _, out Vector3 perp, out _);
+            RefreshGeometry(out Vector3 entrance, out _, out Vector3 axis, out Vector3 perp, out _);
 
-            // 1. 已离开网格的像素：连续匀速移向入口边落位点
+            // 1. 已离开网格的像素：连续匀速移向入口边落位点；一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
             for (int i = 0; i < _extracting.Count; i++)
             {
                 var st = _extracting[i];
@@ -256,7 +265,11 @@ namespace CrowdMatch
 
                 Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
                 MoveToward(st, target);
-                if (XZDistance(st.item.transform.position, target) <= ArriveEpsilon)
+
+                bool reachedTarget = XZDistance(st.item.transform.position, target) <= ArriveEpsilon;
+                bool enteredRange = physicalEntryDepth > 0f
+                    && Vector3.Dot(st.item.transform.position - entrance, axis) >= -physicalEntryDepth;
+                if (reachedTarget || enteredRange)
                 {
                     _extracting.RemoveAt(i);
                     i--;
@@ -838,6 +851,17 @@ namespace CrowdMatch
             // 前进方向
             Gizmos.color = Color.green;
             Gizmos.DrawLine(backCenter, gap);
+
+            // 物理阶段起始线（离入口边 -Z 方向 physicalEntryDepth 处，越过即赋予刚体朝缺口）
+            if (physicalEntryDepth > 0f)
+            {
+                Gizmos.color = new Color(1f, 0.55f, 0f);
+                Vector3 entryLineCenter = entrance - axis * physicalEntryDepth;
+                entryLineCenter.y = entrance.y;
+                Vector3 entryLineLeft = entryLineCenter - perp * halfBack;
+                Vector3 entryLineRight = entryLineCenter + perp * halfBack;
+                Gizmos.DrawLine(entryLineLeft, entryLineRight);
+            }
 
             // 缺口可释放范围（releaseRadius）
             Gizmos.color = Color.yellow;
