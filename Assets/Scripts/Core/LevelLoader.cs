@@ -72,8 +72,6 @@ namespace CrowdMatch
             pg.rows = Mathf.Max(0, d.rows);
             pg.tailRows = Mathf.Max(0, d.tailRows);
             pg.unitSize = d.unitSize > 0.0001f ? d.unitSize : 1f;
-            pg.spacingX = d.spacingX;
-            pg.spacingZ = d.spacingZ;
 
             pg.ClearPixels();
 
@@ -91,8 +89,6 @@ namespace CrowdMatch
         {
             cg.columns = Mathf.Max(1, d.columns);
             cg.rows = Mathf.Max(1, d.rows);
-            cg.xSpacing = d.xSpacing;
-            cg.zSpacing = d.zSpacing;
 
             cg.ClearContainers();
 

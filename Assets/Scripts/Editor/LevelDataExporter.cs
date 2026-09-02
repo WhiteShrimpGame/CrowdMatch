@@ -169,8 +169,6 @@ namespace CrowdMatch
             data.pixel.rows = pg.rows;
             data.pixel.tailRows = pg.tailRows;
             data.pixel.unitSize = pg.unitSize;
-            data.pixel.spacingX = pg.spacingX;
-            data.pixel.spacingZ = pg.spacingZ;
 
             int totalRows = pg.TotalRows;
             data.pixel.cells = new int[pg.columns * totalRows];
@@ -195,8 +193,6 @@ namespace CrowdMatch
             // 容器：稀疏列表，只存非空格
             data.container.columns = cg.columns;
             data.container.rows = cg.rows;
-            data.container.xSpacing = cg.xSpacing;
-            data.container.zSpacing = cg.zSpacing;
 
             var items = new List<LevelData.ContainerItemData>();
             for (int c = 0; c < cg.columns; c++)

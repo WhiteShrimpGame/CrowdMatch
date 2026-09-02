@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -26,6 +27,20 @@ namespace CrowdMatch
 
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
+
+        [Header("材质替换")]
+        [Tooltip("按配置替换容器上指定 Renderer 的材质；留空则回退到现有逻辑（用 colorId 给首个 Renderer 上色）")]
+        public List<MaterialReplacement> materialReplacements = new List<MaterialReplacement>();
+
+        [System.Serializable]
+        public class MaterialReplacement
+        {
+            [Tooltip("需要替换材质的 Renderer（指向本预制体上的 Renderer，实例化后自动重映射到实例）")]
+            public Renderer renderer;
+
+            [Tooltip("要替换的材质槽位下标（Renderer.materials 数组的 index），颜色仍按 colorId 取")]
+            public int materialSlotIndex;
+        }
 
         private Renderer _renderer;
         private int _remaining;
@@ -69,7 +84,7 @@ namespace CrowdMatch
                 capacityText.text = _remaining.ToString();
         }
 
-        /// <summary>按 colorId 应用材质，config 为空时从 GameManager 获取</summary>
+        /// <summary>按 colorId 应用材质，config 为空时从 GameManager 获取；随后按 materialReplacements 替换指定 Renderer 的指定材质槽位（颜色仍用 colorId）。</summary>
         public void ApplyMaterial(ColorConfig config = null)
         {
             if (config == null)
@@ -80,6 +95,7 @@ namespace CrowdMatch
             if (config == null)
                 return;
 
+            // 现有逻辑：colorId → 首个 Renderer 的材质
             var mat = config.GetMaterial(colorId);
             if (mat == null)
                 return;
@@ -88,6 +104,26 @@ namespace CrowdMatch
                 _renderer = GetComponent<Renderer>();
             if (_renderer != null)
                 _renderer.sharedMaterial = mat;
+
+            // 按配置替换指定 Renderer 的指定材质槽位（颜色仍用 colorId）
+            if (materialReplacements == null)
+                return;
+            foreach (var rep in materialReplacements)
+            {
+                if (rep == null || rep.renderer == null)
+                    continue;
+                ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, mat);
+            }
+        }
+
+        /// <summary>把 renderer 的 materials 数组里 index 下标处替换为 mat（越界则忽略）。</summary>
+        private static void ApplyToMaterialSlot(Renderer renderer, int index, Material mat)
+        {
+            var mats = renderer.sharedMaterials;
+            if (mats == null || index < 0 || index >= mats.Length)
+                return;
+            mats[index] = mat;
+            renderer.sharedMaterials = mats;
         }
     }
 }

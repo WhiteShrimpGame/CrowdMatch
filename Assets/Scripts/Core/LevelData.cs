@@ -21,8 +21,6 @@ namespace CrowdMatch
             public int rows = 5;
             public int tailRows = 0;
             public float unitSize = 1f;
-            public float spacingX = 0.1f;
-            public float spacingZ = 0.1f;
 
             /// <summary>长度 = columns × (rows + tailRows)，index = row * columns + col。</summary>
             public int[] cells = new int[0];
@@ -34,8 +32,6 @@ namespace CrowdMatch
         {
             public int columns = 5;
             public int rows = 3;
-            public float xSpacing = 1.2f;
-            public float zSpacing = 1.2f;
 
             public ContainerItemData[] items = new ContainerItemData[0];
         }

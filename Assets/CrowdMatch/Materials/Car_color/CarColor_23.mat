@@ -7,11 +7,9 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: BlockColor_22
+  m_Name: CarColor_23
   m_Shader: {fileID: 4800000, guid: 7ffc1bc2bbb1ef64f84b552b2d2f0619, type: 3}
   m_ValidKeywords:
-  - TCP2_OCCLUSION
-  - TCP2_REFLECTIONS
   - TCP2_REFLECTIONS_FRESNEL
   - TCP2_RIM_LIGHTING_LIGHTMASK
   - TCP2_SHADOW_LIGHT_COLOR
@@ -29,7 +27,7 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: 616059187bafb0f499386111f56b85b1, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
@@ -123,29 +121,29 @@ Material:
     - _OutlinePixelSizeType: 1
     - _OutlineTextureLOD: 5
     - _OutlineTextureType: 0
-    - _OutlineWidth: 3
+    - _OutlineWidth: 1
     - _Parallax: 0.02
     - _RampBands: 4
     - _RampBandsSmoothing: 0.1
     - _RampOffset: 0
     - _RampScale: 1
     - _RampSmoothing: 1
-    - _RampThreshold: 0.85
+    - _RampThreshold: 1
     - _RampType: 0
     - _ReceiveShadowsOff: 1
     - _ReflectionMapType: 0
     - _ReflectionSmoothness: 1
     - _RenderingMode: 0
-    - _RimMax: 0
-    - _RimMin: 0.02
+    - _RimMax: 0.34
+    - _RimMin: 0
     - _ShadowColorLightAtten: 1
     - _SingleIndirectColor: 0
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SpecularMapType: 0
-    - _SpecularRoughness: 0.08
-    - _SpecularToonSize: 0.033
-    - _SpecularToonSmoothness: 0.747
+    - _SpecularRoughness: 0.1
+    - _SpecularToonSize: 0.01
+    - _SpecularToonSmoothness: 1
     - _SpecularType: 0
     - _SrcBlend: 1
     - _UVSec: 0
@@ -156,9 +154,9 @@ Material:
     - _UseMatCapMask: 0
     - _UseMobileMode: 0
     - _UseNormalMap: 0
-    - _UseOcclusion: 1
+    - _UseOcclusion: 0
     - _UseOutline: 0
-    - _UseReflections: 1
+    - _UseReflections: 0
     - _UseRim: 0
     - _UseRimLightMask: 1
     - _UseShadowTexture: 0
@@ -170,9 +168,9 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _HColor: {r: 1, g: 1, b: 1, a: 1}
     - _MatCapColor: {r: 0.67358494, g: 0.8651764, b: 1, a: 1}
-    - _OutlineColor: {r: 0.075756475, g: 0.075756475, b: 0.26415092, a: 1}
+    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
     - _ReflectionColor: {r: 0.82452834, g: 0.9594058, b: 1, a: 1}
-    - _RimColor: {r: 0.509434, g: 0.509434, b: 0.509434, a: 0.5}
+    - _RimColor: {r: 1, g: 1, b: 1, a: 0.5}
     - _SColor: {r: 0, g: 0, b: 0, a: 1}
-    - _SpecularColor: {r: 1, g: 0.85929656, b: 0, a: 1}
+    - _SpecularColor: {r: 1, g: 0.9708301, b: 0, a: 1}
   m_BuildTextureStacks: []
