@@ -278,6 +278,26 @@ namespace CrowdMatch
             return colors;
         }
 
+        /// <summary>像素图导入/导出共用的「上次路径」EditorPrefs 键。</summary>
+        private const string PathPrefsKey = "CrowdMatch.PixelGroup.LastColorPath";
+
+        /// <summary>读取上次使用的目录；不存在则回退到 Assets。</summary>
+        private static string LoadLastDir()
+        {
+            string dir = EditorPrefs.GetString(PathPrefsKey, "Assets");
+            return string.IsNullOrEmpty(dir) || !Directory.Exists(dir) ? "Assets" : dir;
+        }
+
+        /// <summary>记录所选文件的目录，供下次打开文件面板时复用。</summary>
+        private static void SaveLastDir(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return;
+            string dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(dir))
+                EditorPrefs.SetString(PathPrefsKey, dir);
+        }
+
         private void ExportColors(PixelGroup group)
         {
             var config = ColorConfigLocator.Find();
@@ -287,9 +307,10 @@ namespace CrowdMatch
                 return;
             }
 
-            string path = EditorUtility.SaveFilePanel("导出颜色 PNG", "Assets", "PixelGroup.png", "png");
+            string path = EditorUtility.SaveFilePanel("导出颜色 PNG", LoadLastDir(), "PixelGroup.png", "png");
             if (string.IsNullOrEmpty(path))
                 return;
+            SaveLastDir(path);
 
             group.RebuildGrid();
 
@@ -318,9 +339,10 @@ namespace CrowdMatch
                 return;
             }
 
-            string path = EditorUtility.OpenFilePanel("导入颜色 PNG", "Assets", "png");
+            string path = EditorUtility.OpenFilePanel("导入颜色 PNG", LoadLastDir(), "png");
             if (string.IsNullOrEmpty(path))
                 return;
+            SaveLastDir(path);
 
             byte[] bytes;
             try
