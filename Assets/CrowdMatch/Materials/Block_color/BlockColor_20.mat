@@ -10,6 +10,7 @@ Material:
   m_Name: BlockColor_20
   m_Shader: {fileID: 4800000, guid: 7ffc1bc2bbb1ef64f84b552b2d2f0619, type: 3}
   m_ValidKeywords:
+  - TCP2_OCCLUSION
   - TCP2_REFLECTIONS
   - TCP2_REFLECTIONS_FRESNEL
   - TCP2_RIM_LIGHTING_LIGHTMASK
@@ -129,22 +130,22 @@ Material:
     - _RampOffset: 0
     - _RampScale: 1
     - _RampSmoothing: 1
-    - _RampThreshold: 0.85
+    - _RampThreshold: 0.9
     - _RampType: 0
     - _ReceiveShadowsOff: 1
     - _ReflectionMapType: 0
     - _ReflectionSmoothness: 1
     - _RenderingMode: 0
-    - _RimMax: 0.96
-    - _RimMin: 0.44
+    - _RimMax: 0
+    - _RimMin: 0.02
     - _ShadowColorLightAtten: 1
     - _SingleIndirectColor: 0
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SpecularMapType: 0
-    - _SpecularRoughness: 0.2
-    - _SpecularToonSize: 0.01
-    - _SpecularToonSmoothness: 1
+    - _SpecularRoughness: 0.08
+    - _SpecularToonSize: 0.033
+    - _SpecularToonSmoothness: 0.747
     - _SpecularType: 0
     - _SrcBlend: 1
     - _UVSec: 0
@@ -155,7 +156,7 @@ Material:
     - _UseMatCapMask: 0
     - _UseMobileMode: 0
     - _UseNormalMap: 0
-    - _UseOcclusion: 0
+    - _UseOcclusion: 1
     - _UseOutline: 0
     - _UseReflections: 1
     - _UseRim: 0
@@ -171,7 +172,7 @@ Material:
     - _MatCapColor: {r: 1, g: 1, b: 1, a: 1}
     - _OutlineColor: {r: 0.2830189, g: 0.2830189, b: 0.2830189, a: 1}
     - _ReflectionColor: {r: 1, g: 1, b: 1, a: 1}
-    - _RimColor: {r: 1, g: 0.5902525, b: 0, a: 0.5}
-    - _SColor: {r: 0, g: 0, b: 0, a: 1}
-    - _SpecularColor: {r: 0.3679245, g: 0.3679245, b: 0.3679245, a: 1}
+    - _RimColor: {r: 0.509434, g: 0.509434, b: 0.509434, a: 0.5}
+    - _SColor: {r: 0.13207549, g: 0.13207549, b: 0.13207549, a: 1}
+    - _SpecularColor: {r: 1, g: 0.85929656, b: 0, a: 1}
   m_BuildTextureStacks: []
