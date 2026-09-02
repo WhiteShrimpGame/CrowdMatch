@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -44,10 +46,19 @@ namespace CrowdMatch
         [Tooltip("释放后像素进入的闭环传送带；留空则显示 gatheredItems 计数")]
         public ConveyorBeltZone conveyorZone;
 
+        [Header("Record 模式")]
+        [Tooltip("勾选后运行时新建序列文件；小球到达传送带远侧时直接消失并把颜色写入文件，不进入容器")]
+        public bool recordMode = false;
+
+        [Tooltip("序列文件输出目录；留空使用 Application.persistentDataPath")]
+        public string recordOutputDir = "";
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
         private int _refillMovingCount;
+        private StreamWriter _recordWriter;
+        private string _recordFilePath;
 
         private void Awake()
         {
@@ -65,12 +76,70 @@ namespace CrowdMatch
                 pixelGroup = FindObjectOfType<PixelGroup>();
             if (crowdBuffer != null)
                 crowdBuffer.OnBatchExtracted += HandleBatchExtracted;
+
+            if (recordMode)
+                BeginRecord();
         }
 
         /// <summary>一批像素全部离开网格后补位（由 CrowdBufferZone 在提取完成时回调）</summary>
         private void HandleBatchExtracted()
         {
             CollapseColumns();
+        }
+
+        // ===== Record 模式 =====
+
+        /// <summary>开启记录：在指定目录（默认 persistentDataPath）新建带时间戳的序列文件。</summary>
+        private void BeginRecord()
+        {
+            string dir = string.IsNullOrEmpty(recordOutputDir)
+                ? Application.persistentDataPath
+                : recordOutputDir;
+
+            try
+            {
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                string name = "Record_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt";
+                _recordFilePath = Path.Combine(dir, name);
+                _recordWriter = new StreamWriter(_recordFilePath, false, System.Text.Encoding.UTF8);
+                Debug.Log("[GameController] Record 模式已开启，序列文件：" + _recordFilePath);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[GameController] 创建记录文件失败：" + e.Message);
+                _recordWriter = null;
+            }
+        }
+
+        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。由 ConveyorBeltZone 在记录模式下调用。</summary>
+        public void RecordBall(int colorId)
+        {
+            if (_recordWriter == null)
+                return;
+            _recordWriter.WriteLine(colorId);
+            _recordWriter.Flush();
+        }
+
+        private void CloseRecord()
+        {
+            if (_recordWriter == null)
+                return;
+            _recordWriter.Flush();
+            _recordWriter.Close();
+            _recordWriter = null;
+            Debug.Log("[GameController] 已关闭记录文件：" + _recordFilePath);
+        }
+
+        private void OnApplicationQuit()
+        {
+            CloseRecord();
+        }
+
+        private void OnDestroy()
+        {
+            CloseRecord();
         }
 
         private void Update()
@@ -241,7 +310,7 @@ namespace CrowdMatch
 
         private Vector3 RandomGatherTarget()
         {
-            Vector2 circle = Random.insideUnitCircle * gatherScatterRadius;
+            Vector2 circle = UnityEngine.Random.insideUnitCircle * gatherScatterRadius;
             return new Vector3(circle.x, 0f, circle.y);
         }
 

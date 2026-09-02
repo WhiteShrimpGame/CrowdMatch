@@ -81,25 +81,53 @@ namespace CrowdMatch
                 pixel.transform.localPosition = Vector3.zero;
         }
 
-        /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container。</summary>
+        /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container；记录模式下到达远侧即离开。</summary>
         private bool ShouldLeave(IConveyorItem item)
         {
             var pixel = item as PixelItem;
-            if (pixel == null || containerGroup == null)
+            if (pixel == null)
+                return false;
+
+            var gc = GameController.Instance;
+            if (gc != null && gc.recordMode)
+                return IsAtFarSide(pixel);
+
+            if (containerGroup == null)
                 return false;
             return containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ) != null;
         }
 
-        /// <summary>离开回调：把像素交给同色前排 Container 吸收。</summary>
+        /// <summary>离开回调：正常模式交给同色前排 Container 吸收；记录模式下直接消失并写入序列文件。</summary>
         private void OnLeave(IConveyorItem item)
         {
             var pixel = item as PixelItem;
-            if (pixel == null || containerGroup == null)
+            if (pixel == null)
+                return;
+
+            var gc = GameController.Instance;
+            if (gc != null && gc.recordMode)
+            {
+                gc.RecordBall(pixel.colorId);
+                Destroy(pixel.gameObject);
+                return;
+            }
+
+            if (containerGroup == null)
                 return;
 
             var container = containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ);
             if (container != null)
                 containerGroup.ConsumePixel(pixel, container);
+        }
+
+        /// <summary>像素是否到达传送带远侧（以 ContainerGroup 前排 Z 为基准，纵向落入 matchRangeZ）。</summary>
+        private bool IsAtFarSide(PixelItem pixel)
+        {
+            if (containerGroup == null)
+                return false;
+            // 前排 row 0 的本地 Z = 0，故世界 Z 即 containerGroup 原点 Z
+            float frontZ = containerGroup.transform.position.z;
+            return Mathf.Abs(pixel.transform.position.z - frontZ) <= matchRangeZ;
         }
     }
 }
