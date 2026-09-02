@@ -16,20 +16,31 @@ namespace CrowdMatch
                 Debug.LogError("[LevelLoader] TextAsset 为空，无法解析关卡。");
                 return null;
             }
+            return ParseJson(asset.text, asset.name);
+        }
+
+        /// <summary>解析关卡 JSON 字符串（供运行时 TextAsset 与编辑器文件导入共用）；失败返回 null。</summary>
+        public static LevelData ParseJson(string json, string sourceName = "JSON")
+        {
+            if (string.IsNullOrEmpty(json))
+            {
+                Debug.LogError("[LevelLoader] JSON 为空，无法解析关卡。");
+                return null;
+            }
 
             try
             {
-                var data = JsonUtility.FromJson<LevelData>(asset.text);
+                var data = JsonUtility.FromJson<LevelData>(json);
                 if (data == null)
                 {
-                    Debug.LogError("[LevelLoader] 关卡 JSON 解析失败：" + asset.name);
+                    Debug.LogError("[LevelLoader] 关卡 JSON 解析失败：" + sourceName);
                     return null;
                 }
                 return data;
             }
             catch (System.Exception e)
             {
-                Debug.LogError("[LevelLoader] 关卡 JSON 解析异常（" + asset.name + "）：" + e.Message);
+                Debug.LogError("[LevelLoader] 关卡 JSON 解析异常（" + sourceName + "）：" + e.Message);
                 return null;
             }
         }

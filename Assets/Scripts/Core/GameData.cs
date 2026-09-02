@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace CrowdMatch
 {
     /// <summary>
@@ -6,8 +8,25 @@ namespace CrowdMatch
     /// </summary>
     public static class GameData
     {
-        /// <summary>当前关卡编号（1 起）。胜利时 +1，失败重置当前关时不变。</summary>
-        public static int CurrentLevel { get; set; } = 1;
+        private static int _currentLevel = -1;
+
+        /// <summary>当前关卡编号（1 起）。读取时保护：&lt;= 0 一律按第 1 关处理。胜利时 +1，失败重置当前关时不变。</summary>
+        public static int CurrentLevel
+        {
+            get 
+            {
+                if (_currentLevel <= 0)
+                {
+                    _currentLevel = PlayerPrefs.GetInt("CurrentLevel", 1);
+                }
+                return _currentLevel <= 0 ? 1 : _currentLevel; }
+
+            set 
+            { 
+                _currentLevel = value <= 0 ? 1 : value;
+                PlayerPrefs.SetInt("CurrentLevel", value);
+            }
+        }
 
         /// <summary>当前关卡的连续失败次数。胜利时清零。</summary>
         public static int FailCount { get; set; } = 0;

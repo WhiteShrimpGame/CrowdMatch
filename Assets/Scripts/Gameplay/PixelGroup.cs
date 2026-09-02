@@ -120,7 +120,10 @@ namespace CrowdMatch
                 if (it == null)
                     continue;
                 it.transform.SetParent(null, true);
-                Destroy(it.gameObject);
+                if (Application.isPlaying)
+                    Destroy(it.gameObject);
+                else
+                    DestroyImmediate(it.gameObject);
             }
         }
 

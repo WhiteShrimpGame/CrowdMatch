@@ -17,6 +17,9 @@ namespace CrowdMatch
         /// <summary>导出关卡 JSON 共用的「上次路径」EditorPrefs 键。</summary>
         private const string ExportPathKey = "CrowdMatch.LevelDataExporter.LastExportPath";
 
+        /// <summary>导入关卡 JSON 共用的「上次路径」EditorPrefs 键。</summary>
+        private const string ImportPathKey = "CrowdMatch.LevelDataExporter.LastImportPath";
+
         [MenuItem("CrowdMatch/导出关卡 JSON")]
         public static void ExportCurrentLevel()
         {
@@ -53,6 +56,105 @@ namespace CrowdMatch
                 "已导出到：\n" + path +
                 "\n\n请确保该文件位于 Assets 目录下，并在 GameManager.levelJsons 中按关卡序号依次引用。",
                 "确定");
+        }
+
+        /// <summary>从 JSON 文件导入关卡配置到当前场景的 PixelGroup + ContainerGroup。</summary>
+        [MenuItem("CrowdMatch/从 JSON 导入配置到当前场景")]
+        public static void ImportLevelFromJson()
+        {
+            var pixelGroup = Object.FindObjectOfType<PixelGroup>();
+            var containerGroup = Object.FindObjectOfType<ContainerGroup>();
+
+            if (pixelGroup == null && containerGroup == null)
+            {
+                EditorUtility.DisplayDialog("导入关卡 JSON", "场景中找不到 PixelGroup 或 ContainerGroup。", "确定");
+                return;
+            }
+
+            string defaultDir = EditorPathMemory.LoadDir(ImportPathKey, "Assets/Levels");
+            string path = EditorUtility.OpenFilePanel("导入关卡 JSON", defaultDir, "json");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(ImportPathKey, path);
+
+            string json;
+            try
+            {
+                json = File.ReadAllText(path);
+            }
+            catch (System.Exception e)
+            {
+                EditorUtility.DisplayDialog("导入关卡 JSON", "读取文件失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            var data = LevelLoader.ParseJson(json, Path.GetFileName(path));
+            if (data == null)
+            {
+                EditorUtility.DisplayDialog("导入关卡 JSON", "JSON 解析失败，详见 Console。", "确定");
+                return;
+            }
+
+            var config = ColorConfigLocator.Find();
+            if (config == null)
+                Debug.LogWarning(Tag + " 未找到 ColorConfig，导入的物体将使用默认材质。");
+
+            // 注册整棵层级用于撤销，随后清空旧子物体并 spawn 新子物体
+            if (pixelGroup != null)
+                Undo.RegisterFullObjectHierarchyUndo(pixelGroup.gameObject, "导入关卡 JSON");
+            if (containerGroup != null)
+                Undo.RegisterFullObjectHierarchyUndo(containerGroup.gameObject, "导入关卡 JSON");
+
+            LevelLoader.Apply(pixelGroup, containerGroup, data, config);
+
+            if (pixelGroup != null)
+                EditorUtility.SetDirty(pixelGroup);
+            if (containerGroup != null)
+                EditorUtility.SetDirty(containerGroup);
+
+            Debug.Log(Tag + " 已从 " + path + " 导入关卡（像素 " + data.pixel.columns + "×" +
+                (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个）");
+
+            EditorUtility.DisplayDialog("导入关卡 JSON",
+                "已从：\n" + path + "\n导入到当前场景。", "确定");
+        }
+
+        /// <summary>清空当前场景中 PixelGroup 与 ContainerGroup 的全部子物体（不改变布局字段）。</summary>
+        [MenuItem("CrowdMatch/清空当前场景两个 Group 的子物体")]
+        public static void ClearBothGroups()
+        {
+            var pixelGroup = Object.FindObjectOfType<PixelGroup>();
+            var containerGroup = Object.FindObjectOfType<ContainerGroup>();
+
+            if (pixelGroup == null && containerGroup == null)
+            {
+                EditorUtility.DisplayDialog("清空 Group 子物体", "场景中找不到 PixelGroup 或 ContainerGroup。", "确定");
+                return;
+            }
+
+            if (!EditorUtility.DisplayDialog("清空 Group 子物体",
+                "将清空当前场景中 PixelGroup 与 ContainerGroup 的全部子物体。是否继续？",
+                "清空", "取消"))
+            {
+                return;
+            }
+
+            if (pixelGroup != null)
+            {
+                Undo.RegisterFullObjectHierarchyUndo(pixelGroup.gameObject, "清空 Group 子物体");
+                pixelGroup.ClearPixels();
+                pixelGroup.RebuildGrid();
+                EditorUtility.SetDirty(pixelGroup);
+            }
+            if (containerGroup != null)
+            {
+                Undo.RegisterFullObjectHierarchyUndo(containerGroup.gameObject, "清空 Group 子物体");
+                containerGroup.ClearContainers();
+                containerGroup.RebuildGrid();
+                EditorUtility.SetDirty(containerGroup);
+            }
+
+            Debug.Log(Tag + " 已清空当前场景两个 Group 的子物体。");
         }
 
         private static LevelData BuildLevelData(PixelGroup pg, ContainerGroup cg)

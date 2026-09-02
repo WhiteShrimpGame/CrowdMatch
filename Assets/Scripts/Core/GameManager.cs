@@ -18,8 +18,11 @@ namespace CrowdMatch
         public ColorConfig colorConfig;
 
         [Header("关卡")]
-        [Tooltip("关卡 JSON 列表（按关卡序号 1..N 依次对应），通过 TextAsset 访问关卡循环")]
+        [Tooltip("关卡 JSON 列表（调试用，优先级高于 levelDataConfig；非空时按序号循环取关）")]
         public List<TextAsset> levelJsons = new List<TextAsset>();
+
+        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用")]
+        public LevelDataConfig levelDataConfig;
 
         private void Awake()
         {
@@ -46,20 +49,31 @@ namespace CrowdMatch
             }
             else if (Input.GetKeyDown(KeyCode.B))
             {
-                GameData.CurrentLevel--;
+                GameData.CurrentLevel = Mathf.Max(1, GameData.CurrentLevel - 1);
                 GameData.FailCount = 0;
                 ReloadLevel();
             }
         }
 #endif
 
-        /// <summary>按关卡序号（1 起）取对应 JSON TextAsset；越界返回 null。</summary>
+        /// <summary>
+        /// 按关卡序号（1 起）解析对应 JSON TextAsset。解析顺序：
+        ///   1. levelJsons（调试列表）非空 → 按序号循环取关
+        ///   2. levelDataConfig（顺序关 + 循环关）
+        ///   3. 都未配置 → 报错并返回 null
+        /// </summary>
         public TextAsset GetLevelJson(int level)
         {
-            int idx = level - 1;
-            if (levelJsons == null || idx < 0 || idx >= levelJsons.Count)
-                return null;
-            return levelJsons[idx];
+            // 优先级 1：调试列表 levelJsons（非空时循环取关）
+            if (levelJsons != null && levelJsons.Count > 0)
+                return levelJsons[(level - 1) % levelJsons.Count];
+
+            // 优先级 2：ScriptableObject 关卡编排（含循环关）
+            if (levelDataConfig != null)
+                return levelDataConfig.GetLevel(level);
+
+            Debug.LogError("[GameManager] 未配置关卡来源：请分配 GameManager.levelJsons 或 GameManager.levelDataConfig。");
+            return null;
         }
 
         /// <summary>胜利：进入下一关（关卡序号 +1，连败清零，重载关卡）。</summary>
