@@ -41,6 +41,16 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
+                "「统计颜色总数」输出当前网格每种颜色的总数，并检查是否被 3 整除（不能整除则显示余数）。",
+                MessageType.Info);
+
+            if (GUILayout.Button("统计颜色总数 (Debug.Log)"))
+            {
+                LogColorCounts(group);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
                 "「导出颜色」把当前网格配色导出为 PNG（每格 " + CellSize + "px 色块）；\n" +
                 "「导入颜色」从 PNG 读回配色——每格需为正方形色块，尺寸为 columns×rows 的整数倍。",
                 MessageType.Info);
@@ -203,6 +213,53 @@ namespace CrowdMatch
                     EditorUtility.SetDirty(item);
                 }
             }
+        }
+
+        /// <summary>统计当前网格每种颜色的总数，并输出是否被 3 整除（不能整除则显示余数）。</summary>
+        private void LogColorCounts(PixelGroup group)
+        {
+            var items = group.GetComponentsInChildren<PixelItem>();
+            var counts = new Dictionary<int, int>();
+            foreach (var it in items)
+            {
+                if (it == null) continue;
+                counts.TryGetValue(it.colorId, out int c);
+                counts[it.colorId] = c + 1;
+            }
+
+            if (counts.Count == 0)
+            {
+                Debug.Log("[PixelGroup] 没有找到任何 PixelItem，请先「生成网格」。");
+                return;
+            }
+
+            var config = ColorConfigLocator.Find();
+
+            var ids = new List<int>(counts.Keys);
+            ids.Sort();
+
+            int notDivisible = 0;
+            foreach (int id in ids)
+            {
+                int total = counts[id];
+                int rem = total % 3;
+
+                string label = "颜色 " + id;
+                if (config != null)
+                {
+                    var mat = config.GetMaterial(id);
+                    if (mat != null && !string.IsNullOrEmpty(mat.name))
+                        label += "（" + mat.name + "）";
+                }
+
+                string verdict = rem == 0 ? "✓ 被 3 整除" : "✗ 余 " + rem;
+                if (rem != 0) notDivisible++;
+
+                Debug.Log("[PixelGroup] " + label + "：总数 " + total + "，" + verdict);
+            }
+
+            Debug.Log("[PixelGroup] 统计完成：共 " + ids.Count + " 种颜色，" +
+                (notDivisible == 0 ? "全部能被 3 整除。" : notDivisible + " 种不能被 3 整除。"));
         }
 
         // ===== 颜色导入 / 导出 =====
