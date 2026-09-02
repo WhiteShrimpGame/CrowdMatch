@@ -1,0 +1,104 @@
+using UnityEngine;
+
+namespace CrowdMatch
+{
+    /// <summary>
+    /// 关卡加载器（运行时）：把 JSON TextAsset 解析为 LevelData，并应用到场景里的
+    /// PixelGroup / ContainerGroup（设置布局字段 + 清空旧子物体 + spawn 新子物体）。
+    /// </summary>
+    public static class LevelLoader
+    {
+        /// <summary>解析关卡 JSON TextAsset；失败返回 null。</summary>
+        public static LevelData Parse(TextAsset asset)
+        {
+            if (asset == null || string.IsNullOrEmpty(asset.text))
+            {
+                Debug.LogError("[LevelLoader] TextAsset 为空，无法解析关卡。");
+                return null;
+            }
+
+            try
+            {
+                var data = JsonUtility.FromJson<LevelData>(asset.text);
+                if (data == null)
+                {
+                    Debug.LogError("[LevelLoader] 关卡 JSON 解析失败：" + asset.name);
+                    return null;
+                }
+                return data;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[LevelLoader] 关卡 JSON 解析异常（" + asset.name + "）：" + e.Message);
+                return null;
+            }
+        }
+
+        /// <summary>把关卡数据应用到两个网格（空的 group 参数会被跳过）。</summary>
+        public static void Apply(PixelGroup pixelGroup, ContainerGroup containerGroup, LevelData data, ColorConfig colorConfig)
+        {
+            if (data == null)
+                return;
+            if (pixelGroup != null)
+                ApplyPixel(pixelGroup, data.pixel, colorConfig);
+            if (containerGroup != null)
+                ApplyContainer(containerGroup, data.container, colorConfig);
+        }
+
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, ColorConfig config)
+        {
+            int columns = Mathf.Max(1, d.columns);
+            int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
+            int expected = columns * totalRows;
+            if (d.cells == null || d.cells.Length < expected)
+            {
+                Debug.LogError("[LevelLoader] 像素 cells 数量不足（需要 " + expected +
+                    "，实际 " + (d.cells != null ? d.cells.Length : 0) + "），跳过 PixelGroup 加载。");
+                return;
+            }
+
+            pg.columns = columns;
+            pg.rows = Mathf.Max(0, d.rows);
+            pg.tailRows = Mathf.Max(0, d.tailRows);
+            pg.unitSize = d.unitSize > 0.0001f ? d.unitSize : 1f;
+            pg.spacingX = d.spacingX;
+            pg.spacingZ = d.spacingZ;
+
+            pg.ClearPixels();
+
+            for (int r = 0; r < totalRows; r++)
+                for (int c = 0; c < columns; c++)
+                {
+                    int colorId = d.cells[r * columns + c];
+                    pg.SpawnPixel(c, r, colorId, config);
+                }
+
+            pg.RebuildGrid();
+        }
+
+        private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)
+        {
+            cg.columns = Mathf.Max(1, d.columns);
+            cg.rows = Mathf.Max(1, d.rows);
+            cg.xSpacing = d.xSpacing;
+            cg.zSpacing = d.zSpacing;
+
+            cg.ClearContainers();
+
+            if (d.items != null)
+            {
+                foreach (var it in d.items)
+                {
+                    if (!cg.IsInRange(it.x, it.y))
+                    {
+                        Debug.LogWarning("[LevelLoader] 容器越界被忽略：x=" + it.x + " y=" + it.y);
+                        continue;
+                    }
+                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config);
+                }
+            }
+
+            cg.RebuildGrid();
+        }
+    }
+}

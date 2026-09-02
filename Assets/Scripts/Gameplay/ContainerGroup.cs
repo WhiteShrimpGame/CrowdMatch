@@ -188,6 +188,7 @@ namespace CrowdMatch
             }
             pixel.transform.position = target;
 
+            GameData.ClearedPixelCount++;
             Destroy(pixel.gameObject);
 
             if (isLast)
@@ -230,6 +231,55 @@ namespace CrowdMatch
                 yield return null;
             }
             item.transform.localPosition = target;
+        }
+
+        /// <summary>清空所有 ContainerItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
+        public void ClearContainers()
+        {
+            var items = GetComponentsInChildren<ContainerItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var it = items[i];
+                if (it == null)
+                    continue;
+                it.transform.SetParent(null, true);
+                Destroy(it.gameObject);
+            }
+        }
+
+        /// <summary>在指定格子生成一个 ContainerItem 并应用颜色/容量（供运行时关卡加载使用）。</summary>
+        public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config)
+        {
+            GameObject go = containerPrefab != null
+                ? Instantiate(containerPrefab).gameObject
+                : GameObject.CreatePrimitive(PrimitiveType.Cube);
+
+            go.name = "Container_" + col + "_" + row;
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = GetLocalPosition(col, row);
+
+            var item = go.GetComponent<ContainerItem>();
+            if (item == null)
+                item = go.AddComponent<ContainerItem>();
+
+            item.gridX = col;
+            item.gridZ = row;
+            item.colorId = colorId;
+            item.SetCapacity(capacity);
+            item.ApplyMaterial(config);
+            return item;
+        }
+
+        /// <summary>是否存在同色且非空的最前排（row 0）容器。用于失败判定。</summary>
+        public bool HasFrontContainerOfColor(int colorId)
+        {
+            for (int col = 0; col < columns; col++)
+            {
+                var front = GetItem(col, 0);
+                if (front != null && !front.IsEmpty && front.colorId == colorId)
+                    return true;
+            }
+            return false;
         }
     }
 }

@@ -138,7 +138,7 @@ namespace CrowdMatch
                 return;
 
             _extractGroup = group;
-            _matchedOccupied = new bool[group.columns, group.rows];
+            _matchedOccupied = new bool[group.columns, group.TotalRows];
             _extractTickInterval = group.CellSizeZ / Mathf.Max(0.0001f, extractSpeed);
             _extractTickTimer = 0f;
 
@@ -167,6 +167,28 @@ namespace CrowdMatch
             // 空批（全部越界 / 为 null）：直接通知补位
             if (_extracting.Count == 0)
                 OnBatchExtracted?.Invoke();
+        }
+
+        /// <summary>清空缓冲区状态并销毁提取中 / 物理阶段的像素（供重载关卡时清理，不触发 OnBatchExtracted）。</summary>
+        public void ResetAll()
+        {
+            foreach (var st in _extracting)
+            {
+                if (st != null && st.item != null)
+                    Destroy(st.item.gameObject);
+            }
+            _extracting.Clear();
+
+            foreach (var p in _physical)
+            {
+                if (p != null)
+                    Destroy(p.gameObject);
+            }
+            _physical.Clear();
+
+            _extractGroup = null;
+            _matchedOccupied = null;
+            _lastReleaseTime = float.NegativeInfinity;
         }
 
         private void Update()
@@ -289,7 +311,7 @@ namespace CrowdMatch
         private void SweepOnce()
         {
             int cols = _extractGroup.columns;
-            int rows = _extractGroup.rows;
+            int rows = _extractGroup.TotalRows;
 
             // 重置本 tick 决策
             foreach (var st in _extracting)
@@ -427,7 +449,7 @@ namespace CrowdMatch
         private Vector2Int FindNextCell(int startCol, int startRow, bool[,] vacated)
         {
             int cols = _extractGroup.columns;
-            int rows = _extractGroup.rows;
+            int rows = _extractGroup.TotalRows;
 
             var prev = new Vector2Int[cols, rows];
             for (int c = 0; c < cols; c++)

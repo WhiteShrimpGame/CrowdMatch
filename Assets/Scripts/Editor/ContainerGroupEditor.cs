@@ -71,7 +71,7 @@ namespace CrowdMatch
                     return;
                 }
                 Debug.Log(Tag + " 使用 PixelGroup：" + pixelGroup.name +
-                          "（columns=" + pixelGroup.columns + " rows=" + pixelGroup.rows + "）");
+                          "（columns=" + pixelGroup.columns + " rows=" + pixelGroup.TotalRows + "）");
 
                 if (group.containerPrefab == null)
                 {
@@ -126,7 +126,7 @@ namespace CrowdMatch
                 int maxCap = Mathf.Max(minCap, group.maxCapacity);
 
                 var planner = new ContainerGenerationPlanner();
-                planner.Rebuild(pixels, pixelGroup.rows, colorCount, group.maxSpanLayers);
+                planner.Rebuild(pixels, pixelGroup.TotalRows, colorCount, group.maxSpanLayers);
 
                 var containers = new List<ContainerPlan>();
                 while (planner.HasPixels)

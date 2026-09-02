@@ -9,7 +9,11 @@
       "WebSearch",
       "WebFetch(domain:docs.unity3d.com)",
       "Read(//c/Users/hougo/.claude/skills/**)",
-      "Bash(ls -la \"C:/Users/hougo/.claude/skills/unity-conveyorbelt/\")"
+      "Bash(ls -la \"C:/Users/hougo/.claude/skills/unity-conveyorbelt/\")",
+      "Bash(find \"C:/Users/hougo/.claude/skills/unity-gameflow-framework\" -type f | head -100)",
+      "WebFetch(domain:wmedia.es)",
+      "WebFetch(domain:claude-codex.fr)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

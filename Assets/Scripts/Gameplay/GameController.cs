@@ -27,6 +27,9 @@ namespace CrowdMatch
         [Tooltip("管理的 PixelGroup，留空会自动查找")]
         public PixelGroup pixelGroup;
 
+        [Tooltip("管理的 ContainerGroup，留空会自动查找")]
+        public ContainerGroup containerGroup;
+
         [Header("速度")]
         [Tooltip("单位向聚集点移动的速度（世界单位/秒）")]
         public float gatherSpeed = 12f;
@@ -59,6 +62,7 @@ namespace CrowdMatch
         private int _refillMovingCount;
         private StreamWriter _recordWriter;
         private string _recordFilePath;
+        private bool _transitioning;
 
         private void Awake()
         {
@@ -74,17 +78,162 @@ namespace CrowdMatch
         {
             if (pixelGroup == null)
                 pixelGroup = FindObjectOfType<PixelGroup>();
+            if (containerGroup == null)
+                containerGroup = FindObjectOfType<ContainerGroup>();
             if (crowdBuffer != null)
                 crowdBuffer.OnBatchExtracted += HandleBatchExtracted;
 
             if (recordMode)
                 BeginRecord();
+
+            Init();
         }
 
         /// <summary>一批像素全部离开网格后补位（由 CrowdBufferZone 在提取完成时回调）</summary>
         private void HandleBatchExtracted()
         {
             CollapseColumns();
+        }
+
+        // ===== 关卡流程（初始化 / 胜负检测 / 重载） =====
+
+        /// <summary>进入游玩模式并加载当前关卡。</summary>
+        private void Init()
+        {
+            GameState.GameStart();
+            InitLevel(GameData.CurrentLevel);
+        }
+
+        /// <summary>按关卡序号加载并应用关卡：清理上一关残留 → 解析 JSON → 应用到两个网格 → 统计像素总数。</summary>
+        private void InitLevel(int level)
+        {
+            CleanupLevel();
+
+            var gm = GameManager.Instance;
+            TextAsset json = gm != null ? gm.GetLevelJson(level) : null;
+            if (json == null)
+            {
+                Debug.LogError("[GameController] 找不到第 " + level + " 关的关卡 JSON，无法初始化。");
+                return;
+            }
+
+            LevelData data = LevelLoader.Parse(json);
+            if (data == null)
+                return;
+
+            LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
+
+            GameData.Init(true);
+            GameData.TotalPixelCount = CountPixels();
+            GameData.ClearedPixelCount = 0;
+        }
+
+        /// <summary>原地重载当前关卡（由 GameManager 在胜负过渡后调用）。</summary>
+        public void ReloadLevel()
+        {
+            _transitioning = false;
+            GameState.GameStart();
+            InitLevel(GameData.CurrentLevel);
+        }
+
+        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem）。</summary>
+        private int CountPixels()
+        {
+            if (pixelGroup == null)
+                return 0;
+            int n = 0;
+            foreach (var it in pixelGroup.GetComponentsInChildren<PixelItem>())
+            {
+                if (it != null && pixelGroup.IsInRange(it.gridX, it.gridZ))
+                    n++;
+            }
+            return n;
+        }
+
+        /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
+        private void CheckWin()
+        {
+            if (_transitioning)
+                return;
+            if (GameData.TotalPixelCount <= 0)
+                return;
+            if (GameData.ClearedPixelCount >= GameData.TotalPixelCount)
+            {
+                _transitioning = true;
+                GameState.GameWin();
+                Invoke(nameof(DoGameWin), 1.5f);
+            }
+        }
+
+        /// <summary>失败检测：传送带满，且带上所有像素都无法与前排容器匹配。触发后等待 1.5s 重置当前关。</summary>
+        private void CheckFail()
+        {
+            if (_transitioning)
+                return;
+            if (IsFail())
+            {
+                _transitioning = true;
+                GameState.GameFail();
+                Invoke(nameof(DoGameFail), 1.5f);
+            }
+        }
+
+        /// <summary>失败判定：传送带占满且每个槽位像素都没有同色非空前排容器。</summary>
+        private bool IsFail()
+        {
+            if (conveyorZone == null || conveyorZone.belt == null)
+                return false;
+            if (conveyorZone.TotalSlots <= 0)
+                return false;
+            if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
+                return false;
+            if (containerGroup == null)
+                return false;
+
+            var belt = conveyorZone.belt;
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                var pixel = belt.GetItem(i) as PixelItem;
+                if (pixel == null)
+                    continue;
+                if (containerGroup.HasFrontContainerOfColor(pixel.colorId))
+                    return false;   // 至少一个可匹配 → 未失败
+            }
+            return true;
+        }
+
+        private void DoGameWin()
+        {
+            var gm = GameManager.Instance;
+            if (gm != null)
+                gm.GameWin();
+        }
+
+        private void DoGameFail()
+        {
+            var gm = GameManager.Instance;
+            if (gm != null)
+                gm.GameFail();
+        }
+
+        /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
+        private void CleanupLevel()
+        {
+            StopAllCoroutines();
+            _refillMovingCount = 0;
+
+            foreach (var item in gatheredItems)
+            {
+                if (item != null)
+                    Destroy(item.gameObject);
+            }
+            gatheredItems.Clear();
+
+            if (conveyorZone != null)
+                conveyorZone.ClearBelt();
+
+            if (crowdBuffer != null)
+                crowdBuffer.ResetAll();
         }
 
         // ===== Record 模式 =====
@@ -146,7 +295,13 @@ namespace CrowdMatch
         {
             UpdateCountText();
 
-            if (Input.GetMouseButtonDown(0))
+            if (GameState.IsGameStart)
+            {
+                CheckWin();
+                CheckFail();
+            }
+
+            if (Input.GetMouseButtonDown(0) && GameState.IsGameStart)
                 HandleClick();
         }
 
@@ -319,7 +474,7 @@ namespace CrowdMatch
             for (int col = 0; col < pixelGroup.columns; col++)
             {
                 var remaining = new List<PixelItem>();
-                for (int r = 0; r < pixelGroup.rows; r++)
+                for (int r = 0; r < pixelGroup.TotalRows; r++)
                 {
                     var it = pixelGroup.grid[col, r];
                     if (it != null)

@@ -129,5 +129,20 @@ namespace CrowdMatch
             float frontZ = containerGroup.transform.position.z;
             return Mathf.Abs(pixel.transform.position.z - frontZ) <= matchRangeZ;
         }
+
+        /// <summary>清空传送带上所有像素（供重载关卡时清理）。</summary>
+        public void ClearBelt()
+        {
+            if (belt == null)
+                return;
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                var pixel = belt.GetItem(i) as PixelItem;
+                if (pixel == null)
+                    continue;
+                belt.ClearSlot(i);
+                Destroy(pixel.gameObject);
+            }
+        }
     }
 }
