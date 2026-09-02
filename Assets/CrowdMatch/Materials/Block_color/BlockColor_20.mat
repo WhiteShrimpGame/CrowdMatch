@@ -15,6 +15,7 @@ Material:
   - TCP2_REFLECTIONS_FRESNEL
   - TCP2_RIM_LIGHTING_LIGHTMASK
   - TCP2_SHADOW_LIGHT_COLOR
+  - TCP2_SPECULAR
   m_InvalidKeywords:
   - TCP2_OUTLINE_CONST_SIZE
   - TCP2_UV_NORMALS_FULL
@@ -129,7 +130,7 @@ Material:
     - _RampOffset: 0
     - _RampScale: 1
     - _RampSmoothing: 1
-    - _RampThreshold: 0.85
+    - _RampThreshold: 0.9
     - _RampType: 0
     - _ReceiveShadowsOff: 1
     - _ReflectionMapType: 0
@@ -142,7 +143,7 @@ Material:
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SpecularMapType: 0
-    - _SpecularRoughness: 0.1
+    - _SpecularRoughness: 0.08
     - _SpecularToonSize: 0.033
     - _SpecularToonSmoothness: 0.747
     - _SpecularType: 0
@@ -161,7 +162,7 @@ Material:
     - _UseRim: 0
     - _UseRimLightMask: 1
     - _UseShadowTexture: 0
-    - _UseSpecular: 0
+    - _UseSpecular: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 0.8018868, g: 0.8018868, b: 0.8018868, a: 1}
@@ -172,6 +173,6 @@ Material:
     - _OutlineColor: {r: 0.2830189, g: 0.2830189, b: 0.2830189, a: 1}
     - _ReflectionColor: {r: 1, g: 1, b: 1, a: 1}
     - _RimColor: {r: 0.509434, g: 0.509434, b: 0.509434, a: 0.5}
-    - _SColor: {r: 0, g: 0, b: 0, a: 1}
-    - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SColor: {r: 0.13207549, g: 0.13207549, b: 0.13207549, a: 1}
+    - _SpecularColor: {r: 1, g: 0.85929656, b: 0, a: 1}
   m_BuildTextureStacks: []
