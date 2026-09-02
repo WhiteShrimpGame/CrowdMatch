@@ -23,6 +23,9 @@ namespace CrowdMatch
                 return;
             }
             Instance = this;
+
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
         }
     }
 }
