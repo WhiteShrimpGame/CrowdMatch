@@ -307,11 +307,14 @@ namespace CrowdMatch
                 RotateToward(st.item, st.animTo - st.animFrom);
             }
 
-            // 3. tick 累积 + 并行 sweep（每次 sweep 让所有可移动像素同时推进一格）
+            // 3. 整体步进：仅当上一波所有网格内移动动画都已结束（无 moving 像素）时才执行下一次并行 sweep。
+            //    保证状态上"完成上一步所有移动 → 才检查/执行下一步"，画面追平逻辑，避免视觉重合。
             _extractTickTimer += dt;
-            if (_extractTickTimer >= _extractTickInterval)
+            if (_extractTickTimer >= _extractTickInterval && !HasMovingPixel())
             {
-                _extractTickTimer -= _extractTickInterval;
+                // 动画与计时器同步归零：动画才是真正的节拍器（每段恰 interval 秒），
+                // 用减法会把手门槛阻塞期间累积的超时带进下一周期，导致余量逐 tick 翻倍、推进变慢。
+                _extractTickTimer = 0f;
                 SweepOnce();
             }
 
@@ -323,10 +326,24 @@ namespace CrowdMatch
             }
         }
 
+        /// <summary>网格内是否仍有像素在播放格子到格子的移动动画（用于在动画结束后才触发下一次 sweep）。</summary>
+        private bool HasMovingPixel()
+        {
+            for (int i = 0; i < _extracting.Count; i++)
+            {
+                var st = _extracting[i];
+                if (st != null && !st.exiting && st.moving)
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>
-        /// 一次并行 sweep：基于本 tick 开始前的占用快照，算出所有可移动像素的下一格。
-        /// 关键语义——"本 tick 即将腾出的格"可被同时移入（vacated），从而整列/整批能一波一波连续推进；
-        /// 唯一会等待的是多个球争用同一个单格（窄缝），此时按"等待次数多者优先"依次通过。
+        /// 一次并行 sweep：基于本 tick 开始前的占用快照，算出所有可移动像素的下一格（每个像素最多移动一格）。
+        /// 空格驱动（cell-first）：不再让像素逐个扫自己的邻格抢空位，而是让每个"当前可被填"的空格
+        /// 从相邻像素里挑 wait 最高者填入——格子一变得可用，就把它的所有相邻像素一起拿出来比 wait，
+        /// 高 wait 者必胜，从根上避免"高 wait 像素因排在前、被后腾出的空格旁的低 wait 像素挤掉"的饿死问题。
+        /// 一格只被填一次（claimed 栅栏）、一像素只动一次（resolved 栅栏），结构性保证"一个空格只被一个占用"。
         /// </summary>
         private void SweepOnce()
         {
@@ -341,71 +358,89 @@ namespace CrowdMatch
                 st.resolved = false;
             }
 
-            // 参与决策的球（在网格内、未退出）
-            var order = new List<ExtractState>();
+            // 静态距离场：dist[c,r] = 到前排出口的最短步数（只把未匹配球当墙，忽略本批匹配球）。
+            // 它只表达"该往哪走"的方向信息，不受本 tick 腾出/抢占影响，故每个 sweep 算一次即可。
+            int[,] dist = ComputeExitDistance(cols, rows);
+
+            // 网格内像素：位置查找表（快照，逐 sweep 重建，与 _matchedOccupied 一致）+ 参与决策列表
+            var stateAt = new ExtractState[cols, rows];
+            var seeds = new List<ExtractState>();
             foreach (var st in _extracting)
-                if (st.item != null && !st.exiting)
-                    order.Add(st);
-
-            // 公平性排序：等待次数多者优先；同等待按"前到后、同排靠中心"
-            order.Sort((a, b) =>
             {
-                int w = b.waitCount.CompareTo(a.waitCount);
-                if (w != 0)
-                    return w;
-                int z = a.row.CompareTo(b.row);
-                if (z != 0)
-                    return z;
-                float center = (cols - 1) * 0.5f;
-                float da = Mathf.Abs(a.col - center);
-                float db = Mathf.Abs(b.col - center);
-                int dc = da.CompareTo(db);
-                if (dc != 0)
-                    return dc;
-                return a.col.CompareTo(b.col);
-            });
+                if (st.item == null || st.exiting)
+                    continue;
+                stateAt[st.col, st.row] = st;
+                seeds.Add(st);
+            }
 
-            // vacated：本 tick 被腾出的格（"即将腾出"）；claimed：本 tick 被移入的格（防两球同格）
+            // vacated：本 tick 被腾出的格；claimed：本 tick 被移入的格（一格只填一次）
             var vacated = new bool[cols, rows];
             var claimed = new bool[cols, rows];
 
             var exits = new List<ExtractState>();
             var movers = new List<ExtractState>();
 
-            // 迭代到不动点：链式"即将腾出"需要多轮（后排依赖前排腾出后才看得到）
-            bool changed = true;
-            while (changed)
+            // 步骤 0：退出者（CanExit）无条件离开，腾出各自格子（不参与 wait 竞争）。
+            // 按"前到后"排序，保证同一列前方退出后，后方也能在同一次 pass 里连锁退出。
+            seeds.Sort((a, b) =>
             {
-                changed = false;
-                foreach (var st in order)
+                int z = a.row.CompareTo(b.row);
+                if (z != 0)
+                    return z;
+                return a.col.CompareTo(b.col);
+            });
+            foreach (var st in seeds)
+            {
+                if (CanExit(st.col, st.row, vacated, claimed))
                 {
-                    if (st.item == null || st.exiting || st.resolved)
-                        continue;
-
-                    // 能直接沿 +Z 退出吗（前方无障碍或前方"即将腾出"）
-                    if (CanExit(st.col, st.row, vacated))
-                    {
-                        exits.Add(st);
-                        st.resolved = true;
-                        st.pendingExit = true;
-                        vacated[st.col, st.row] = true;
-                        changed = true;
-                        continue;
-                    }
-
-                    Vector2Int next = FindNextCell(st.col, st.row, vacated);
-                    if (next.x < 0)
-                        continue;          // 无路：等下一轮（可能因 vacated 扩展而出现新路）
-                    if (claimed[next.x, next.y])
-                        continue;          // 目标格已被本 tick 的其他球抢占
-
-                    movers.Add(st);
+                    exits.Add(st);
                     st.resolved = true;
-                    st.pendingNext = next;
-                    claimed[next.x, next.y] = true;
+                    st.pendingExit = true;
                     vacated[st.col, st.row] = true;
-                    changed = true;
                 }
+            }
+
+            // 种子：所有"当前可被填"的格（起始空位 + 退出者刚腾出的格）。IsObstacle 取反 = 可填。
+            var frontier = new List<Vector2Int>();
+            for (int c = 0; c < cols; c++)
+                for (int r = 0; r < rows; r++)
+                    if (!IsObstacle(c, r, vacated, claimed))
+                        frontier.Add(new Vector2Int(c, r));
+
+            // 步骤 1..N：逐层传播 —— 每个可用格从相邻像素里挑 wait 最高者填入（空格找像素）。
+            // 每层按"离出口更近（dist 更小）"优先处理，保证像素优先朝前而非横向绕行；
+            // 填入后，像素腾出的旧格进入下一层，形成波前连续推进。
+            while (frontier.Count > 0)
+            {
+                frontier.Sort((a, b) =>
+                {
+                    int d = dist[a.x, a.y].CompareTo(dist[b.x, b.y]);
+                    if (d != 0)
+                        return d;
+                    int z = a.y.CompareTo(b.y);
+                    if (z != 0)
+                        return z;
+                    return a.x.CompareTo(b.x);
+                });
+
+                var next = new List<Vector2Int>();
+                foreach (var cell in frontier)
+                {
+                    if (claimed[cell.x, cell.y])
+                        continue;
+
+                    ExtractState winner = PickBestPixel(cell.x, cell.y, dist, stateAt);
+                    if (winner == null)
+                        continue;   // 没人想进 / 进不了，格保持空
+
+                    movers.Add(winner);
+                    winner.resolved = true;
+                    winner.pendingNext = cell;
+                    claimed[cell.x, cell.y] = true;
+                    vacated[winner.col, winner.row] = true;
+                    next.Add(new Vector2Int(winner.col, winner.row));
+                }
+                frontier = next;
             }
 
             // 未解决的球：等待计数 +1（公平性：被挡得越久，下次越优先）
@@ -444,47 +479,56 @@ namespace CrowdMatch
             st.moving = true;
         }
 
-        /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍或前方"即将腾出"）</summary>
-        private bool CanExit(int col, int row, bool[,] vacated)
+        /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
+        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed)
         {
             for (int r = 0; r < row; r++)
             {
-                if (IsObstacle(col, r, vacated))
+                if (IsObstacle(col, r, vacated, claimed))
                     return false;
             }
             return true;
         }
 
-        /// <summary>某格是否为障碍：未匹配球、尚未离开且本 tick 未腾出的匹配球</summary>
-        private bool IsObstacle(int col, int row, bool[,] vacated)
+        /// <summary>某格是否为障碍：未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
             if (_extractGroup.grid[col, row] != null)
+                return true;
+            if (claimed[col, row])
                 return true;
             if (_matchedOccupied[col, row] && !vacated[col, row])
                 return true;
             return false;
         }
 
-        /// <summary>BFS 从 (startCol,startRow) 找到可达的出口格，返回"第一步"的格子坐标；无路返回 (-1,-1)</summary>
-        private Vector2Int FindNextCell(int startCol, int startRow, bool[,] vacated)
+        /// <summary>
+        /// 计算静态距离场：dist[c,r] = 从 (c,r) 走到「前排出口格」的最短步数（BFS）。
+        /// 只把未匹配球（_extractGroup.grid != null）当墙；本批匹配球正在离开，不作为墙。
+        /// 前排 row 0 上非静态的格子即出口（dist=0）；被静态障碍围死的格子 dist 保持不可达。
+        /// 这是"移动方向"的唯一依据——像素每 tick 只朝 dist 更小的邻格走一步，从而在拐角处
+        /// 紧跟前面刚腾出的格子，而不是等整条走廊都清空才动。
+        /// </summary>
+        private int[,] ComputeExitDistance(int cols, int rows)
         {
-            int cols = _extractGroup.columns;
-            int rows = _extractGroup.TotalRows;
-
-            var prev = new Vector2Int[cols, rows];
+            const int INF = 1000000;
+            var dist = new int[cols, rows];
             for (int c = 0; c < cols; c++)
                 for (int r = 0; r < rows; r++)
-                    prev[c, r] = new Vector2Int(-1, -1);
+                    dist[c, r] = INF;
 
-            var start = new Vector2Int(startCol, startRow);
             var queue = new Queue<Vector2Int>();
-            queue.Enqueue(start);
-            prev[startCol, startRow] = start;
+            for (int c = 0; c < cols; c++)
+            {
+                if (_extractGroup.grid[c, 0] == null)
+                {
+                    dist[c, 0] = 0;
+                    queue.Enqueue(new Vector2Int(c, 0));
+                }
+            }
 
             int[] dx = { 0, 0, 1, -1 };
             int[] dz = { 1, -1, 0, 0 };
-
-            Vector2Int goal = new Vector2Int(-1, -1);
             while (queue.Count > 0)
             {
                 var cur = queue.Dequeue();
@@ -494,39 +538,65 @@ namespace CrowdMatch
                     int nz = cur.y + dz[d];
                     if (!_extractGroup.IsInRange(nx, nz))
                         continue;
-                    if (prev[nx, nz].x >= 0)
+                    if (dist[nx, nz] != INF)
                         continue;
-                    if (IsObstacle(nx, nz, vacated))
+                    if (_extractGroup.grid[nx, nz] != null)
                         continue;
-
-                    prev[nx, nz] = cur;
-                    if (CanExit(nx, nz, vacated))
-                    {
-                        goal = new Vector2Int(nx, nz);
-                        queue.Clear();
-                        break;
-                    }
+                    dist[nx, nz] = dist[cur.x, cur.y] + 1;
                     queue.Enqueue(new Vector2Int(nx, nz));
                 }
             }
+            return dist;
+        }
 
-            if (goal.x < 0)
-                return new Vector2Int(-1, -1);
+        /// <summary>
+        /// 空格驱动的核心：给定一个可用格 (col,row)，从它的 4 邻接像素里挑"该填谁"。
+        /// 只考虑 dist 严格更大的相邻像素（即离出口更远、朝该格走一步是前进），按公平性取最高者。
+        /// 返回 null 表示没有相邻像素想进 / 能进，该格保持空。
+        /// </summary>
+        private ExtractState PickBestPixel(int col, int row, int[,] dist, ExtractState[,] stateAt)
+        {
+            ExtractState best = null;
+            int myDist = dist[col, row];
 
-            // 回溯到起点，取第一步
-            var path = new List<Vector2Int>();
-            var node = goal;
-            while (node != start)
+            int[] dx = { 0, 0, 1, -1 };
+            int[] dz = { 1, -1, 0, 0 };
+            for (int d = 0; d < 4; d++)
             {
-                path.Add(node);
-                node = prev[node.x, node.y];
-                if (node.x < 0)
-                    return new Vector2Int(-1, -1);
-            }
-            if (path.Count == 0)
-                return new Vector2Int(-1, -1);
+                int nx = col + dx[d];
+                int nz = row + dz[d];
+                if (!_extractGroup.IsInRange(nx, nz))
+                    continue;
 
-            return path[path.Count - 1];
+                var st = stateAt[nx, nz];
+                if (st == null || st.resolved)
+                    continue;   // 该格起始无像素，或该像素本 tick 已动过
+
+                if (dist[nx, nz] <= myDist)
+                    continue;   // 必须严格更接近出口（dist 更小）才前进，防原地打转
+
+                if (best == null || ComparePriority(st, best) < 0)
+                    best = st;
+            }
+            return best;
+        }
+
+        /// <summary>提取阶段公平性比较：返回 &lt;0 表示 a 应优先于 b（wait 高者先；同 wait 前到后、靠中心、col 小者先）。</summary>
+        private int ComparePriority(ExtractState a, ExtractState b)
+        {
+            int w = b.waitCount.CompareTo(a.waitCount);
+            if (w != 0)
+                return w;
+            int z = a.row.CompareTo(b.row);
+            if (z != 0)
+                return z;
+            float center = (_extractGroup.columns - 1) * 0.5f;
+            float da = Mathf.Abs(a.col - center);
+            float db = Mathf.Abs(b.col - center);
+            int dc = da.CompareTo(db);
+            if (dc != 0)
+                return dc;
+            return a.col.CompareTo(b.col);
         }
 
         /// <summary>计算入口边落位点：保持横向位置、按入口宽度 clamp（不瞬移）</summary>

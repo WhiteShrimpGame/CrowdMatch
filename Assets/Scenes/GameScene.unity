@@ -333,6 +333,8 @@ MonoBehaviour:
   wallThickness: 0.1
   wallHeight: 2
   extractSpeed: 5
+  extractRotateSpeed: 360
+  entryQueueSpacing: 0.5
   releaseRadius: 0.8
   minReleaseInterval: 0.3
   releaseSpeed: 8
@@ -916,7 +918,6 @@ MonoBehaviour:
   pixelGroup: {fileID: 882082744}
   containerGroup: {fileID: 0}
   gatherSpeed: 12
-  refillSpeed: 10
   gatherScatterRadius: 0.35
   crowdBuffer: {fileID: 424865907}
   conveyorZone: {fileID: 1582382721}

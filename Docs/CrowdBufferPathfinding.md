@@ -21,7 +21,7 @@ InGrid ──匹配──▶ Matched ──(EnterBatch)──▶ Extracting（�
 
 | 子阶段 | 状态标志 | 含义 | 驱动方式 |
 |---|---|---|---|
-| 网格内寻路 | `moving`（格子间动画）或等待中 | 仍在 `_extractGroup` 网格里，逐格 BFS 走向入口边 | 离散 tick + 连续插值 |
+| 网格内寻路 | `moving`（格子间动画）或等待中 | 仍在 `_extractGroup` 网格里，逐格朝更小 `dist`（距离场）走向入口边 | 离散 tick + 连续插值 |
 | 移向入口边 | `exiting = true` | 已离开网格，连续匀速移向入口边落位点 | 每帧连续移动 + 同列排队 |
 
 ---
@@ -114,69 +114,76 @@ for st in _extracting:
     pos = Lerp(animFrom, animTo, animT)
     RotateToward(item, animTo - animFrom)
 
-# 步骤 3：tick 累积 + 并行 sweep
+# 步骤 3：整体步进（仅当上一波动画全部走完才触发，保证状态原子）
 _extractTickTimer += dt
 if _extractTickTimer >= _extractTickInterval:
-    _extractTickTimer -= _extractTickInterval
-    SweepOnce()
+    if HasMovingPixel():
+        暂不 sweep（等动画走完，timer 继续累加）
+    else:
+        _extractTickTimer = 0   # 动画与计时器同步归零（动画才是真正的节拍器）
+        SweepOnce()
 
 # 步骤 4：全部离开 → 清理
 ```
 
-**时序要点**：逻辑步进（sweep）与格子动画共用同一个 `_extractTickInterval`——像素恰好在一格动画结束时，
-下一格决策（sweep）随之而来，逻辑与视觉同步。
+**时序要点**：逻辑步进（sweep）与格子动画共用同一个 `_extractTickInterval`，但 sweep 额外受 `HasMovingPixel()`
+门槛约束——只有上一波所有网格内移动动画都走完（无 `moving` 像素）才触发下一次 sweep，保证"完成上一步所有移动
+→ 才检查/执行下一步"，画面严格追平逻辑、不再出现视觉重合。sweep 触发时 `_extractTickTimer` 归零而非减
+`interval`：动画是真正的节拍器（每段恰 `interval` 秒），若用减法会把门槛阻塞期间累积的超时带进下一周期，
+导致余量逐 tick 翻倍、整体推进变慢。
 
 ---
 
-## 6. 并行 sweep：`SweepOnce`
+## 6. 并行 sweep：`SweepOnce`（空格驱动）
 
 核心语义：**基于本 tick 开始前的占用快照，一次性算出所有可移动像素的下一格**，实现"整列/整批一波一波
-连续推进"，而不是逐个串行。
+连续推进"，而不是逐个串行。方向是**空格找像素（cell-first）**——不再让像素逐个扫邻格抢空位，而是让每个
+"当前可被填"的空格，从相邻像素里挑 wait 最高者填入。
 
 ```
 # 0. 重置本 tick 决策
 for st in _extracting: pendingExit=false; pendingNext=(-1,-1); resolved=false
 
-# 1. 参与决策的球（网格内、未退出）
-order = [st for st in _extracting if st.item != null && !st.exiting]
+# 1. 网格内像素快照 + 位置查找表
+stateAt[cols,rows] = null
+seeds = [st for st in _extracting if st.item != null && !st.exiting]
+for st in seeds: stateAt[st.col, st.row] = st
 
-# 2. 公平性排序
-order.Sort:
-    waitCount 降序         # 被挡越久越优先
-    → row 升序             # 前到后
-    → 距中心列近者优先
-    → col 升序
+# 2. vacated / claimed（本 tick 瞬态表）
+vacated[cols,rows] = false   # 本 tick 被腾出的格
+claimed[cols,rows] = false   # 本 tick 已被填的格（一格只填一次）
 
-# 3. vacated / claimed（本 tick 瞬态表）
-vacated[cols,rows] = false   # 本 tick 被腾出的格（"即将腾出"，后排可跟进）
-claimed[cols,rows] = false   # 本 tick 已被移入的格（防两球同格）
+# 3. 静态距离场（每个 sweep 算一次，见第 8 节）
+dist[cols,rows] = ComputeExitDistance()
 
-# 4. 迭代到不动点（链式"即将腾出"需要多轮）
-changed = true
-while changed:
-    changed = false
-    for st in order:
-        if st.resolved or st.exiting or st.item==null: continue
-
-        if CanExit(st.col, st.row, vacated):
-            st.resolved = true; st.pendingExit = true
-            vacated[st.col, st.row] = true; changed = true
-            continue
-
-        next = FindNextCell(st.col, st.row, vacated)
-        if next.x < 0: continue                    # 无路，等下一轮
-        if claimed[next.x, next.y]: continue       # 目标已被抢占
-
-        st.resolved = true; st.pendingNext = next
-        claimed[next.x, next.y] = true
+# 4. 步骤 0：退出者（CanExit）无条件离开，腾出格子（不参与 wait 竞争）
+seeds.Sort(row 升序, col 升序)               # 保证同列前方退出后，后方在同一次 pass 连锁退出
+for st in seeds:
+    if CanExit(st.col, st.row, vacated, claimed):
+        st.resolved=true; st.pendingExit=true
         vacated[st.col, st.row] = true
-        changed = true
 
-# 5. 未解决的球等待计数 +1
+# 5. 种子：所有"当前可被填"的格（起始空位 + 退出者刚腾出的格）
+frontier = [(c,r) for 所有格 if !IsObstacle(c, r, vacated, claimed)]
+
+# 6. 逐层传播（空格找像素）—— 每个可用格从相邻像素挑 wait 最高者填入
+while frontier 非空:
+    frontier.Sort(dist 升序, row 升序, col 升序)   # 离出口近者先，保证优先朝前
+    next = []
+    for cell in frontier:
+        if claimed[cell]: continue
+        winner = PickBestPixel(cell, dist, stateAt)   # 4 邻格里 dist 更大、公平性最高者
+        if winner == null: continue                    # 没人想进，格保持空
+        winner.resolved=true; winner.pendingNext=cell
+        claimed[cell]=true
+        vacated[winner.old]=true; next.add(winner.old)  # 腾出的旧格进入下一层
+    frontier = next
+
+# 7. 未解决的球等待计数 +1
 for st in _extracting:
     if !st.resolved && !st.exiting && st.item != null: st.waitCount++
 
-# 6. 原子更新占用表 + 触发动画
+# 8. 原子更新占用表 + 触发动画
 for st in exits:                                   # pendingExit 的球
     _matchedOccupied[st.col, st.row] = false
     st.moving=false; st.exiting=true; st.waitCount=0
@@ -188,49 +195,75 @@ for st in movers:                                  # pendingNext 的球
     st.waitCount = 0
 ```
 
-**为什么"即将腾出"能让整列连续推进**：若前排球本 tick 判定要移动/退出（写入 `vacated`），后排球在同一轮
-迭代中就能看到它已"腾出"，于是也跟着移动——形成一波。若窄缝处多球争用同一单格（`claimed` 冲突），则只有
-排序靠前者抢到，其余 `waitCount++` 等待下一 tick，并按公平性排序下次优先。
+**为什么空格驱动能根治"饿死"与"重合"**：旧"像素驱动"里，像素按固定顺序（wait 降序）逐个扫自己的邻格，
+但格子被腾出的时机晚于高 wait 像素被扫到——高 wait 像素早早就被跳过，格子腾出后反而被排在后面的低 wait
+像素抢走，每 tick 都如此，高 wait 者永久饿死。空格驱动反转方向：**格子一变得可用，就把它的所有相邻像素
+同时拿出来比 wait，高 wait 者必胜**，不再受"谁先被扫到"影响。一格只被填一次（`claimed`）、一像素只动一次
+（`resolved`），结构性保证"一个空格只被一个占用"，与排序无关。移动方向由 `dist` 决定（朝更小 `dist` 走
+一步），不依赖"整条走廊是否已清空"，因此拐角处像素会紧跟前面刚腾出的格子，而非干等。
 
 ---
 
 ## 7. 可达性判定：`CanExit` / `IsObstacle`
 
 ```
-CanExit(col, row, vacated):
+CanExit(col, row, vacated, claimed):
     for r in [0, row):              # 前方所有格（更小 row）
-        if IsObstacle(col, r, vacated): return false
+        if IsObstacle(col, r, vacated, claimed): return false
     return true
 
-IsObstacle(col, row, vacated):
+IsObstacle(col, row, vacated, claimed):
     if _extractGroup.grid[col,row] != null:        return true   # 未匹配球（静态障碍）
+    if claimed[col,row]:                           return true   # 本 tick 已被抢占
     if _matchedOccupied[col,row] && !vacated[col,row]: return true  # 本批球且本 tick 未腾出
     return false
 ```
 
-> 判定只用**同列前方**（`CanExit`）——像素能"直着走"的前提是前方（row 0..row-1）无障。横向绕行交给
-> `FindNextCell` 的 BFS 处理。
+> 判定只用**同列前方**（`CanExit`）——像素能"直着走"的前提是前方（row 0..row-1）无障。横向绕行由静态
+> 距离场 `dist` 驱动（见第 8 节）。
 
 ---
 
-## 8. BFS 寻路：`FindNextCell`
+## 8. 静态距离场与单步移动：`ComputeExitDistance` / `PickBestPixel`
 
-目标：从 `(startCol, startRow)` 找一条可达"出口格"（`CanExit` 为 true 的格）的路径，返回**第一步**的格子
-坐标；无路返回 `(-1,-1)`。
+移动方向由**预计算的静态距离场**决定：
 
 ```
-4 邻接（dx/dz: 上/下/左/右，即 row±1 与 col±1）
-BFS 队列从起点出发，用 prev[cols,rows] 记录前驱
-遍历邻格：
-    - 越界跳过（IsInRange）
-    - 已访问（prev ≥ 0）跳过
-    - IsObstacle 跳过
-    - 否则 prev[nx,nz]=cur；若 CanExit(nx,nz) → 找到 goal，终止 BFS
-从 goal 沿 prev 回溯到 start，取 path 最后一项 = 第一步
+ComputeExitDistance(cols, rows):
+    dist[cols,rows] = INF
+    BFS 多源起点 = 前排 row 0 上所有非静态格（dist=0）
+    只把未匹配球（_extractGroup.grid != null）当墙；本批匹配球正在离开，不作为墙
+    返回 dist[c,r] = 从 (c,r) 走到前排出口的最短步数（被静态障碍围死则保持 INF）
 ```
 
-**语义**：`FindNextCell` 返回的是"朝某个出口格迈出的第一步"，而非完整路径。每 tick 只走一格，下一 tick
-重新基于最新占用快照再算，天然适应动态障碍（同批球也在动）。
+每个空格每层从 4 邻接里挑"该填谁"（**空格找像素**），只允许 `dist` **严格更大**（离出口更远）的相邻像素
+朝本格前进一步：
+
+```
+PickBestPixel(col, row, dist, stateAt):
+    myDist = dist[col, row]
+    best = null
+    for n in 4 邻接:
+        越界跳过
+        st = stateAt[n]                           # 该格起始的像素
+        if st == null or st.resolved: continue    # 无像素，或本 tick 已动过
+        if dist[n] <= myDist: continue            # 必须 dist 更大（更接近出口方向）才前进
+        if best == null or ComparePriority(st, best) < 0: best = st
+    return best   # null = 无人想进，格保持空
+
+ComparePriority(a, b):   # 返回 <0 表示 a 优先
+    waitCount 降序 → row 升序 → 距中心列近 → col 升序
+```
+
+**语义**：`dist` 是"方向"（该往哪走），`IsObstacle`/`claimed`/`resolved` 是"时机"（此刻谁走、格是否还空）。
+拐角处，前面像素一腾出格子，该空格就把它的相邻像素拿出来比 wait——后面像素立刻跟进，因为 `dist` 只看静态
+障碍，不受前面像素是否清空整条走廊影响；而 `claimed`（一格只填一次）+ `resolved`（一像素只动一次）保证
+"一个空格只被一个占用"。`dist` 严格递减保证无环、无死锁（每步都朝出口逼近一格）。
+
+**为什么旧的 `FindNextCell` 会"拐角不紧跟"**：旧 BFS 的目标是"找到一个 `CanExit` 为真的格子"（前方整列
+清空的出口格），并只在**完整路径**存在时才返回第一步。拐角处的中间格子（如被前排静态障碍堵死的侧列）永远
+不满足 `CanExit`，于是 BFS 一直返回"无路"，像素只能等整条走廊都被前面像素清空、出口格可达后才动，造成
+拐角处大片停顿。
 
 ---
 
