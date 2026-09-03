@@ -56,6 +56,12 @@ namespace CrowdMatch
         [Tooltip("匹配像素在网格内寻路离开（并行 sweep）时的移动速度（世界单位/秒），同时决定 sweep 时间片 = CellSizeZ / 该值")]
         public float extractSpeed = 5f;
 
+        [Tooltip("提取阶段（网格寻路 + 移向入口边）像素 z 正方向朝向移动方向时的旋转角速度（度/秒）")]
+        public float extractRotateSpeed = 360f;
+
+        [Tooltip("移向入口边阶段，同一列（同入口点）像素排队的前后间距（世界单位），前方未进物理前后方不追尾")]
+        public float entryQueueSpacing = 0.5f;
+
         [Header("释放")]
         [Tooltip("距缺口中心多近触发释放（缺口已封口，需 ≥ radius + wallThickness/2，否则贴墙像素够不到释放范围、卡死）")]
         public float releaseRadius = 0.6f;
@@ -249,7 +255,9 @@ namespace CrowdMatch
 
             RefreshGeometry(out Vector3 entrance, out _, out Vector3 axis, out Vector3 perp, out _);
 
-            // 1. 已离开网格的像素：连续匀速移向入口边落位点；一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
+            // 1. 已离开网格的像素：连续匀速移向入口边落位点；同一列排队（前不追尾），
+            //    一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
+            var exiting = new List<ExtractState>(_extracting.Count);
             for (int i = 0; i < _extracting.Count; i++)
             {
                 var st = _extracting[i];
@@ -262,17 +270,21 @@ namespace CrowdMatch
                     i--;
                     continue;
                 }
+                exiting.Add(st);
+            }
 
+            foreach (var st in exiting)
+            {
                 Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
-                MoveToward(st, target);
+                Vector3 moveTarget = ApplyEntryQueue(st, target, entrance, axis, perp, exiting);
+                MoveToward(st, moveTarget);
 
                 bool reachedTarget = XZDistance(st.item.transform.position, target) <= ArriveEpsilon;
                 bool enteredRange = physicalEntryDepth > 0f
                     && Vector3.Dot(st.item.transform.position - entrance, axis) >= -physicalEntryDepth;
                 if (reachedTarget || enteredRange)
                 {
-                    _extracting.RemoveAt(i);
-                    i--;
+                    _extracting.Remove(st);
                     EnterPhysical(st.item);
                 }
             }
@@ -297,6 +309,9 @@ namespace CrowdMatch
                     st.moving = false;
                 }
                 st.item.transform.position = Vector3.Lerp(st.animFrom, st.animTo, st.animT);
+
+                // 网格内移动：z 正方向匀速朝向移动方向（animFrom → animTo）
+                RotateToward(st.item, st.animTo - st.animFrom);
             }
 
             // 3. tick 累积 + 并行 sweep（每次 sweep 让所有可移动像素同时推进一格）
@@ -536,6 +551,45 @@ namespace CrowdMatch
             return entry;
         }
 
+        /// <summary>
+        /// 入口排队：若像素前方（更接近入口边）存在同列（横向接近）的退出像素且前后间距不足，
+        /// 则把移动目标退回到前方像素后 entryQueueSpacing 处（横向保持自身当前值），实现同列前不追尾。
+        /// 无阻挡时返回原目标。横向按 radius 判定同列，避免不同列的像素被误排。
+        /// </summary>
+        private Vector3 ApplyEntryQueue(ExtractState st, Vector3 target, Vector3 entrance, Vector3 axis, Vector3 perp, List<ExtractState> exiting)
+        {
+            Vector3 pos = st.item.transform.position;
+            float myProg = Vector3.Dot(pos - entrance, axis);
+            float latMe = Vector3.Dot(pos - entrance, perp);
+
+            foreach (var other in exiting)
+            {
+                if (other == st || other.item == null)
+                    continue;
+
+                Vector3 op = other.item.transform.position;
+                float oProg = Vector3.Dot(op - entrance, axis);
+                if (oProg <= myProg)
+                    continue;   // 不在前方
+
+                float latOther = Vector3.Dot(op - entrance, perp);
+                if (Mathf.Abs(latOther - latMe) > radius)
+                    continue;   // 不同列（横向不接近），互不阻塞
+
+                float gap = oProg - myProg;
+                if (gap < entryQueueSpacing)
+                {
+                    float stopProg = oProg - entryQueueSpacing;
+                    if (stopProg < myProg)
+                        stopProg = myProg;   // 不后退，保持原位等待
+                    Vector3 stop = entrance + perp * latMe + axis * stopProg;
+                    stop.y = pos.y;
+                    return stop;
+                }
+            }
+            return target;
+        }
+
         /// <summary>匀速移动像素到目标点（保持 Y 不变）</summary>
         private void MoveToward(ExtractState st, Vector3 target)
         {
@@ -550,6 +604,23 @@ namespace CrowdMatch
             pos += dir * Mathf.Min(extractSpeed * Time.deltaTime, dist);
             pos.y = st.item.transform.position.y;
             st.item.transform.position = pos;
+
+            // 移向入口边：z 正方向匀速朝向移动方向
+            RotateToward(st.item, dir);
+        }
+
+        /// <summary>匀速旋转像素使 z 正方向朝向指定世界方向（XZ 平面，角速度由 extractRotateSpeed 决定）。</summary>
+        private void RotateToward(PixelItem item, Vector3 dir)
+        {
+            if (item == null)
+                return;
+            dir.y = 0f;
+            if (dir.sqrMagnitude <= 0.0001f)
+                return;
+
+            Quaternion target = Quaternion.LookRotation(dir.normalized, Vector3.up);
+            item.transform.rotation = Quaternion.RotateTowards(
+                item.transform.rotation, target, extractRotateSpeed * Time.deltaTime);
         }
 
         /// <summary>XZ 平面距离（忽略 Y）</summary>
