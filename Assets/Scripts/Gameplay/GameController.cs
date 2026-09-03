@@ -8,9 +8,9 @@ using UnityEngine.UI;
 namespace CrowdMatch
 {
     /// <summary>
-    /// 全局单例，负责点击匹配、聚集与补位逻辑。
-    /// 点击最前排（Z 最大）的 PixelItem 后，连同相邻同色单位一起移动到聚集点；
-    /// 空位由后排单位依次匀速补位到前排。
+    /// 全局单例，负责点击匹配与聚集逻辑。
+    /// 点击一个 PixelItem 后，连同相邻同色单位一起离开：只要该同色组能通过空/组内格连通到首排（row 0）即可点击；
+    /// 像素离开后，后方像素不再补位（网格保持空位，空位随匹配逐步累积）。
     /// </summary>
     [DefaultExecutionOrder(-900)]
     public class GameController : MonoBehaviour
@@ -34,9 +34,6 @@ namespace CrowdMatch
         [Tooltip("单位向聚集点移动的速度（世界单位/秒）")]
         public float gatherSpeed = 12f;
 
-        [Tooltip("后排补位移动的速度（世界单位/秒）")]
-        public float refillSpeed = 10f;
-
         [Header("聚集表现")]
         [Tooltip("单位到达聚集点后的散布半径，避免完全重叠")]
         public float gatherScatterRadius = 0.35f;
@@ -59,7 +56,6 @@ namespace CrowdMatch
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
-        private int _refillMovingCount;
         private StreamWriter _recordWriter;
         private string _recordFilePath;
         private bool _transitioning;
@@ -80,19 +76,11 @@ namespace CrowdMatch
                 pixelGroup = FindObjectOfType<PixelGroup>();
             if (containerGroup == null)
                 containerGroup = FindObjectOfType<ContainerGroup>();
-            if (crowdBuffer != null)
-                crowdBuffer.OnBatchExtracted += HandleBatchExtracted;
 
             if (recordMode)
                 BeginRecord();
 
             Init();
-        }
-
-        /// <summary>一批像素全部离开网格后补位（由 CrowdBufferZone 在提取完成时回调）</summary>
-        private void HandleBatchExtracted()
-        {
-            CollapseColumns();
         }
 
         // ===== 关卡流程（初始化 / 胜负检测 / 重载） =====
@@ -220,7 +208,6 @@ namespace CrowdMatch
         private void CleanupLevel()
         {
             StopAllCoroutines();
-            _refillMovingCount = 0;
 
             foreach (var item in gatheredItems)
             {
@@ -318,9 +305,7 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
-            // 补位动画进行中或提取（寻路离开）进行中时暂不响应，保证网格状态一致
-            if (_refillMovingCount > 0)
-                return;
+            // 提取（寻路离开）进行中时暂不响应，保证网格状态一致
             if (crowdBuffer != null && crowdBuffer.IsExtracting)
                 return;
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
@@ -334,19 +319,61 @@ namespace CrowdMatch
             if (item == null)
                 return;
 
-            // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需连通到首排）
+            // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需能通过空/组内格连通到首排）
             if (pixelGroup.GetItem(item.gridX, item.gridZ) != item)
                 return;
 
             ResolveMatch(item);
         }
 
-        /// <summary>同色组是否连通到首排（任意成员 gridZ == 0）。连通到首排才可能被移出网格。</summary>
-        private bool ReachesFront(List<PixelItem> matched)
+        /// <summary>
+        /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。
+        /// 有路径即可点击离开（组能寻路到出口）；否则组被其他像素完全包围、无法离开。
+        /// </summary>
+        private bool CanReachFront(List<PixelItem> matched)
         {
-            foreach (var item in matched)
-                if (item.gridZ == 0)
-                    return true;
+            int cols = pixelGroup.columns;
+            int rows = pixelGroup.TotalRows;
+
+            var inGroup = new HashSet<PixelItem>(matched);
+            var visited = new bool[cols, rows];
+            var queue = new Queue<Vector2Int>();
+
+            foreach (var it in matched)
+            {
+                if (!pixelGroup.IsInRange(it.gridX, it.gridZ))
+                    continue;
+                queue.Enqueue(new Vector2Int(it.gridX, it.gridZ));
+                visited[it.gridX, it.gridZ] = true;
+            }
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (cur.y == 0)
+                    return true;   // 到达首排
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + dx[d];
+                    int nz = cur.y + dz[d];
+                    if (!pixelGroup.IsInRange(nx, nz))
+                        continue;
+                    if (visited[nx, nz])
+                        continue;
+
+                    var cell = pixelGroup.grid[nx, nz];
+                    if (cell != null && !inGroup.Contains(cell))
+                        continue;   // 非组内像素 = 障碍
+
+                    visited[nx, nz] = true;
+                    queue.Enqueue(new Vector2Int(nx, nz));
+                }
+            }
+
             return false;
         }
 
@@ -354,8 +381,8 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
-            // 只有能连通到首排（gridZ 0）的同色组才可移出；否则点击无效
-            if (!ReachesFront(matched))
+            // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
+            if (!CanReachFront(matched))
                 return;
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
@@ -377,8 +404,8 @@ namespace CrowdMatch
             foreach (var item in matched)
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
 
-            // 有缓冲区：进入提取阶段（网格寻路离开），补位推迟到提取完成（OnBatchExtracted 回调）
-            // 否则：回退到旧的直接散布聚集 + 立即补位
+            // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
+            // 否则：回退到旧的直接散布聚集
             if (crowdBuffer != null)
             {
                 crowdBuffer.EnterBatch(matched, pixelGroup);
@@ -387,7 +414,6 @@ namespace CrowdMatch
             {
                 foreach (var item in matched)
                     GatherItem(item);
-                CollapseColumns();
             }
         }
 
@@ -469,58 +495,5 @@ namespace CrowdMatch
             return new Vector3(circle.x, 0f, circle.y);
         }
 
-        private void CollapseColumns()
-        {
-            for (int col = 0; col < pixelGroup.columns; col++)
-            {
-                var remaining = new List<PixelItem>();
-                for (int r = 0; r < pixelGroup.TotalRows; r++)
-                {
-                    var it = pixelGroup.grid[col, r];
-                    if (it != null)
-                        remaining.Add(it);
-                    pixelGroup.grid[col, r] = null;
-                }
-
-                // 依次把剩余单位挤到最前排（从 row 0 往下填）
-                int targetRow = 0;
-                for (int i = 0; i < remaining.Count; i++)
-                {
-                    var it = remaining[i];
-                    int oldRow = it.gridZ;
-                    it.gridZ = targetRow;
-                    pixelGroup.grid[col, targetRow] = it;
-
-                    if (oldRow != targetRow)
-                        StartCoroutine(MoveToGridCell(it, col, targetRow));
-
-                    targetRow++;
-                }
-            }
-        }
-
-        private IEnumerator MoveToGridCell(PixelItem item, int col, int row)
-        {
-            _refillMovingCount++;
-
-            Vector3 start = item.transform.localPosition;
-            Vector3 target = pixelGroup.GetLocalPosition(col, row);
-
-            float duration = refillSpeed > 0.0001f
-                ? Vector3.Distance(start, target) / refillSpeed
-                : 0f;
-
-            float t = 0f;
-            while (t < duration)
-            {
-                t += Time.deltaTime;
-                float k = Mathf.Clamp01(duration > 0.0001f ? t / duration : 1f);
-                item.transform.localPosition = Vector3.Lerp(start, target, k);
-                yield return null;
-            }
-
-            item.transform.localPosition = target;
-            _refillMovingCount--;
-        }
     }
 }

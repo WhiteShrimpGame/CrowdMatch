@@ -327,11 +327,14 @@ MonoBehaviour:
   gapWidth: 1
   backWidth: 8.5
   backDepth: 25
+  physicalEntryDepth: 2.8
   radius: 0.25
   crowdSpeed: 5
   wallThickness: 0.1
   wallHeight: 2
   extractSpeed: 5
+  extractRotateSpeed: 360
+  entryQueueSpacing: 0.5
   releaseRadius: 0.8
   minReleaseInterval: 0.3
   releaseSpeed: 8
@@ -480,6 +483,8 @@ MonoBehaviour:
   speed: 1
   slotCount: 30
   entryGate: {fileID: 1467064619}
+  catchUpEnabled: 1
+  catchUpInterval: 0.2
 --- !u!4 &782126358
 Transform:
   m_ObjectHideFlags: 0
@@ -865,6 +870,7 @@ MonoBehaviour:
   crowdBuffer: {fileID: 424865907}
   matchRangeX: 0.6
   matchRangeZ: 2
+  settleRotateSpeed: 360
 --- !u!4 &1582382722
 Transform:
   m_ObjectHideFlags: 0
@@ -914,7 +920,6 @@ MonoBehaviour:
   pixelGroup: {fileID: 882082744}
   containerGroup: {fileID: 0}
   gatherSpeed: 12
-  refillSpeed: 10
   gatherScatterRadius: 0.35
   crowdBuffer: {fileID: 424865907}
   conveyorZone: {fileID: 1582382721}

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -67,6 +68,36 @@ namespace CrowdMatch
         /// </summary>
         public Action<IConveyorItem> OnLeave;
 
+        [Header("Catch-up / 追赶")]
+        [Tooltip("是否启用追赶：每周期把「队首直接相连占用块」之外的所有槽位整体向前平移一格，把空隙挤到队尾。/ Enable catch-up: each cycle shifts every slot outside the leader's contiguous occupied block one step forward, pushing gaps to the tail.")]
+        public bool catchUpEnabled = true;
+
+        [Tooltip("追赶周期秒数（= 平移一格的时长；默认对齐槽位节拍 cycleTime/slotCount）。/ Catch-up period in seconds (also the duration of one shift step; defaults to the slot beat cycleTime/slotCount).")]
+        public float catchUpInterval = 0.5f;
+
+        /// <summary>队首所在槽位（-1 = 无队首 / 空传送带）。队首不参与追赶，其余元素向其靠拢。</summary>
+        private int _leaderSlot = -1;
+
+        /// <summary>追赶周期计时器。</summary>
+        private float _catchUpTimer = 0f;
+
+        /// <summary>每个槽位的相位偏移（相对 offset，默认 i/N）。追赶时平滑平移相位，乘员始终 localPosition=0 就位。</summary>
+        private float[] _slotPhase;
+
+        /// <summary>追赶周期内被「瞬移」到队首、暂时不可用的空槽位（-1 = 无）。经过入口时跳过收集。</summary>
+        private int _unavailableSlot = -1;
+
+        /// <summary>本周期内正在平滑平移相位的槽位（相位从 startPhase 匀速到 targetPhase）。</summary>
+        private readonly List<PhaseShift> _phaseShifts = new List<PhaseShift>();
+
+        private class PhaseShift
+        {
+            public int slot;
+            public float startPhase;
+            public float targetPhase;
+            public float t;
+        }
+
         private bool _initialized;
 
         /// <summary>
@@ -81,6 +112,15 @@ namespace CrowdMatch
             {
                 path.InitializePaths();
             }
+            _slotPhase = new float[slotCount];
+            for (int i = 0; i < slotCount; i++)
+            {
+                _slotPhase[i] = (float)i / slotCount;
+            }
+            _leaderSlot = -1;
+            _catchUpTimer = 0f;
+            _unavailableSlot = -1;
+            _phaseShifts.Clear();
             _initialized = true;
         }
 
@@ -123,6 +163,7 @@ namespace CrowdMatch
 
             Advance();
             ApplyPositions();
+            AdvanceCatchUp();
             CheckLeave();
         }
 
@@ -158,20 +199,19 @@ namespace CrowdMatch
                     continue;
                 }
 
-                float slotOffset = offset + (float)i / slots.Length;
-                if (slotOffset > 1f)
-                {
-                    slotOffset -= 1f;
-                }
-
-                carriers[i].position = path.GetGlobalPosition(slotOffset * totalLength);
-                carriers[i].rotation = Quaternion.Euler(path.GetGlobalEulerAngles(slotOffset * totalLength));
+                float samplePhase = (offset + _slotPhase[i]) % 1f;
+                carriers[i].position = path.GetGlobalPosition(samplePhase * totalLength);
+                carriers[i].rotation = Quaternion.Euler(path.GetGlobalEulerAngles(samplePhase * totalLength));
 
                 // 过关口检测：世界 X 从 > gateX 跨到 <= gateX（即近侧沿 -X 方向运动）时触发一次收集
                 float currX = carriers[i].position.x;
                 if (!firstTrack && _prevSlotX[i] > gateX && currX <= gateX)
                 {
-                    SlotPassedEntry?.Invoke(i);
+                    // 追赶周期内被瞬移到队首的空槽位不可用，跳过收集
+                    if (i != _unavailableSlot)
+                    {
+                        SlotPassedEntry?.Invoke(i);
+                    }
                 }
                 _prevSlotX[i] = currX;
             }
@@ -199,14 +239,14 @@ namespace CrowdMatch
                 // 防御：乘员被异常销毁则清槽
                 if (item.Transform == null)
                 {
-                    slots[i] = null;
+                    VacateSlot(i);
                     continue;
                 }
 
                 if (ShouldLeave(item))
                 {
-                    slots[i] = null;
                     item.Transform.SetParent(null, true);   // 解绑 carrier（保持世界位置），交给宿主吸收
+                    VacateSlot(i);                          // 清槽 + 队首更替
                     OnLeave?.Invoke(item);
                 }
             }
@@ -233,6 +273,12 @@ namespace CrowdMatch
 
             slots[slotIndex] = item;
             item.Transform.SetParent(carriers[slotIndex], true);
+
+            // 空传送带时第一个进入的元素成为队首
+            if (_leaderSlot < 0)
+            {
+                _leaderSlot = slotIndex;
+            }
             return true;
         }
 
@@ -255,11 +301,11 @@ namespace CrowdMatch
             }
 
             var item = slots[slotIndex];
-            slots[slotIndex] = null;
             if (item != null && item.Transform != null)
             {
                 item.Transform.SetParent(null, true);
             }
+            VacateSlot(slotIndex);
         }
 
         /// <summary>已占用槽位数（供 UI）。/ Number of occupied slots.</summary>
@@ -295,12 +341,165 @@ namespace CrowdMatch
                 return transform.position;
             }
 
-            float slotOffset = offset + (float)slotIndex / slots.Length;
-            if (slotOffset > 1f)
+            float samplePhase = (offset + _slotPhase[slotIndex]) % 1f;
+            return path.GetGlobalPosition(samplePhase * path.GetTotalPathLength());
+        }
+
+        /// <summary>
+        /// 追赶调度：推进进行中的相位平移（匀速），并按周期触发一次追赶 sweep。
+        /// Drives in-progress phase shifts (uniform) and triggers one catch-up sweep per period.
+        /// </summary>
+        private void AdvanceCatchUp()
+        {
+            if (!catchUpEnabled)
             {
-                slotOffset -= 1f;
+                return;
             }
-            return path.GetGlobalPosition(slotOffset * path.GetTotalPathLength());
+
+            float dt = Time.deltaTime;
+            float interval = Mathf.Max(0.0001f, catchUpInterval);
+
+            // (1) 推进相位平移：把每个待平移槽位的相位从 startPhase 匀速拉到 targetPhase
+            for (int i = _phaseShifts.Count - 1; i >= 0; i--)
+            {
+                var s = _phaseShifts[i];
+                s.t += dt / interval;
+                if (s.t >= 1f)
+                {
+                    _slotPhase[s.slot] = s.targetPhase % 1f;
+                    _phaseShifts.RemoveAt(i);
+                }
+                else
+                {
+                    _slotPhase[s.slot] = Mathf.Lerp(s.startPhase, s.targetPhase, s.t);
+                }
+            }
+
+            // 本周期平移完成 → 恢复被瞬移的空槽位为可用
+            if (_phaseShifts.Count == 0 && _unavailableSlot >= 0)
+            {
+                _unavailableSlot = -1;
+            }
+
+            // (2) 周期开始 → 执行一次追赶 sweep
+            _catchUpTimer += dt;
+            if (_catchUpTimer >= interval && _phaseShifts.Count == 0)
+            {
+                _catchUpTimer = 0f;
+                DoCatchUpSweep();
+            }
+        }
+
+        /// <summary>
+        /// 追赶 sweep：从队首向旋转反向找「直接相连占用块」，把其后的第一个空槽位瞬移到队首（标记不可用），
+        /// 其余所有槽位本周期内整体向前平移一格（相位 +1/slotCount），把空隙挤到队尾。
+        /// Catch-up sweep: from the leader, find the contiguous occupied block (walking opposite rotation),
+        /// teleport the first empty slot after it onto the leader (marking it unavailable), and shift every
+        /// other slot one step forward this period, pushing the gap to the tail.
+        /// </summary>
+        private void DoCatchUpSweep()
+        {
+            if (_leaderSlot < 0)
+            {
+                return;   // 空传送带，无队首
+            }
+
+            int n = slots.Length;
+
+            // 相位会被追赶重排，索引顺序不再等于传送带上的顺序；以队首相位为锚，
+            // 用「落后于队首的距离」（wrap 感知）对槽位排序，得到真实的前→后顺序。
+            float leaderPhase = _slotPhase[_leaderSlot];
+            var order = new int[n];
+            var dist = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                order[i] = i;
+                dist[i] = (leaderPhase - _slotPhase[i] + 1f) % 1f;
+            }
+            Array.Sort(order, (a, b) => dist[a].CompareTo(dist[b]));
+
+            // 从队首向队尾（落后距离递增）找「直接相连」的已占用块，直到第一个空槽位
+            var connected = new HashSet<int>();
+            int gap = -1;
+            for (int k = 0; k < n; k++)
+            {
+                int idx = order[k];
+                if (slots[idx] == null)
+                {
+                    gap = idx;
+                    break;
+                }
+                connected.Add(idx);
+            }
+
+            // 占用块本身已连续（含全占满）→ 无内部空隙，无需追赶
+            int occupiedCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (slots[i] != null)
+                {
+                    occupiedCount++;
+                }
+            }
+            if (connected.Count == occupiedCount)
+            {
+                return;
+            }
+
+            // 1. 把该空槽位瞬移到队首位置，并标记不可用（经过入口时不被选中）
+            _slotPhase[gap] = leaderPhase;
+            _unavailableSlot = gap;
+
+            // 2. 除队首与直接相连占用块外，其余槽位本周期内整体向前平移一格（相位 +1/n）
+            float step = 1f / n;
+            for (int i = 0; i < n; i++)
+            {
+                if (connected.Contains(i))
+                {
+                    continue;
+                }
+                _phaseShifts.Add(new PhaseShift
+                {
+                    slot = i,
+                    startPhase = _slotPhase[i],
+                    targetPhase = _slotPhase[i] + step,
+                    t = 0f
+                });
+            }
+        }
+
+        /// <summary>清空某槽位并做队首更替。不解除 parent、不触发 OnLeave。</summary>
+        private void VacateSlot(int slotIndex)
+        {
+            slots[slotIndex] = null;
+
+            if (slotIndex == _leaderSlot)
+            {
+                _leaderSlot = FindNextLeader(slotIndex);
+            }
+        }
+
+        /// <summary>以刚离开的队首相位为锚，找「落后距离」最小的占用槽作为新队首；全空则返回 -1。</summary>
+        private int FindNextLeader(int fromSlot)
+        {
+            int n = slots.Length;
+            float anchor = _slotPhase[fromSlot];
+            int best = -1;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < n; i++)
+            {
+                if (slots[i] == null)
+                {
+                    continue;
+                }
+                float d = (anchor - _slotPhase[i] + 1f) % 1f;
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = i;
+                }
+            }
+            return best;
         }
     }
 }

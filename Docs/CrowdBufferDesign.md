@@ -253,7 +253,7 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 
 `EnterBatch` 只做：关闭球碰撞体（像素已离开网格，停止点击检测，进入阶段不参与物理；进入物理阶段时复用同一碰撞体）+ 建立网格占用表 `_matchedOccupied` + 加入提取阶段，并按 `CellSize / extractSpeed` 设定 sweep 时间片。像素**保持当前网格位置出发**，
 由 `Update` 的 `StepExtracting` 驱动：每到一个 tick，`SweepOnce` **并行**算出所有可移动像素的下一格——BFS 可穿过"本 tick 即将腾出的格"（`vacated`），绕过未匹配球与不会本 tick 离开的同批球，从而整列/整批一波一波同时推进，而非逐个串行；
-只有当多个像素争用同一个单格（窄缝）时才依次通过，且按 `waitCount`（等待次数）降序给更久等待者优先权。格子间移动用平滑动画（时长 = tick 间隔），抵达入口边后由 `EnterPhysical` 附加刚体。整批提取完成后触发 `OnBatchExtracted` 回调（`GameController` 借此推迟补位）。
+只有当多个像素争用同一个单格（窄缝）时才依次通过，且按 `waitCount`（等待次数）降序给更久等待者优先权。格子间移动用平滑动画（时长 = tick 间隔），抵达入口边后由 `EnterPhysical` 附加刚体。像素离开后网格不再补位（保持空位）。
 
 > 视觉：像素在生成时即为 Sphere（`PixelGroupEditor`「生成网格」用 `PrimitiveType.Sphere`，球 primitive 直径 = 1 与 Cube 边长一致，
 > scale 直接用 `unitSize`），运行时无需任何网格替换；自带 `SphereCollider` 同时充当点击碰撞体与物理碰撞体。
@@ -265,7 +265,7 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 | 位置 | 现状 | 改动 |
 |---|---|---|
 | `GameController` | 新增字段 `crowdBuffer`（`CrowdBufferZone`，可选） | 引用缓冲区组件 |
-| `GameController.ResolveMatch` | 对每个匹配像素调 `GatherItem(item)` | 改为：`crowdBuffer != null ? crowdBuffer.EnterBatch(matched, pixelGroup) : GatherItem(...)`（保留旧散布作 fallback）；补位推迟到提取完成回调 |
+| `GameController.ResolveMatch` | 对每个匹配像素调 `GatherItem(item)` | 改为：`crowdBuffer != null ? crowdBuffer.EnterBatch(matched, pixelGroup) : GatherItem(...)`（保留旧散布作 fallback；像素离开后不再补位） |
 | `GameController.GatherItem` | 关碰撞体 + parent + 加入列表 + 散布协程 | 保留（作为 fallback） |
 | `ContainerGroup` | 消费 `gatheredItems` | **不改**（契约不变） |
 | `PixelItem.Awake` | 初始化 renderer + 材质 | **不改**（像素生成时已是 Sphere，无需运行时替换网格） |
@@ -280,7 +280,7 @@ dir = normalize(collectPoint - p); 每帧 p += dir * releaseSpeed * dt；到点:
 
 ```
 GameController.ResolveMatch
-    │  crowdBuffer.EnterBatch(matched)   ← 替换原 GatherItem（补位推迟到提取完成）
+    │  crowdBuffer.EnterBatch(matched)   ← 替换原 GatherItem（像素离开后不再补位）
     ▼
 CrowdBufferZone._extracting（网格寻路提取，并行 sweep）
     │  Update：SweepOnce 并行推进（BFS 可穿过"即将腾出"的格）→ 抵达入口边 → EnterPhysical
@@ -298,7 +298,7 @@ GameController.gatheredItems
 ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 ```
 
-> 提取完成（`_extracting` 清空）后触发 `OnBatchExtracted`，`GameController` 才执行 `CollapseColumns` 补位，避免补位与提取并发冲突。
+> 像素离开网格后不再补位（网格保持空位）；提取期间 `crowdBuffer.IsExtracting` 屏蔽点击，保证网格状态一致。
 
 ---
 
@@ -317,7 +317,8 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 | 缓冲区与 PixelGroup 距离较远 | 像素在网格内寻路到入口边（BFS 逐格），再进入物理（正常表现） |
 | 提取中前路被同批球挡住 | 若前排球本 tick 会腾出（`vacated`），后排同一 tick 跟进，整列连续推进；若前排球也被挡（窄缝争用），后排按 `waitCount` 排队依次通过 |
 | 提取中某列前方被未匹配球挡住 | BFS 绕行到相邻已腾出（或即将腾出）的格子（横向邻接），不会穿过 |
-| 提取进行中 | `GameController` 屏蔽点击（`crowdBuffer.IsExtracting`），补位推迟，保证网格状态一致 |
+| 点击被其他像素完全包围的同色组 | 无效：`CanReachFront` BFS 检查组能否通过「空 / 组内」格连通到首排（row 0），不能则不响应 |
+| 提取进行中 | `GameController` 屏蔽点击（`crowdBuffer.IsExtracting`），保证网格状态一致 |
 
 ---
 
@@ -364,7 +365,7 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 7. **提取寻路**（本次新增）：
    - 把"匀速进入"替换为**网格寻路提取**：匹配批次按前到后顺序，每球用 BFS 只走"已腾出或本 tick 即将腾出的格子"（这一批匹配像素腾出的空间），绕过未匹配球与不会本 tick 离开的同批球，逐格移向入口边；
    - **并行 sweep**：每个 tick 一次性算出所有可移动像素的下一格，整列/整批同时推进（非逐个串行）；仅当多球争用同一单格时依次通过，按 `waitCount`（等待次数）降序给更久等待者优先；
-   - 提取完成触发 `OnBatchExtracted`，`GameController` 推迟 `CollapseColumns` 补位，提取期间屏蔽点击。
+   - 像素离开后不再补位（保持空位）；提取期间屏蔽点击。
 
 ---
 
@@ -375,7 +376,7 @@ ContainerGroup.ProcessConsumption → Consume → 容器消失/补位
 3. 像素改为生成时即 Sphere：`PixelGroupEditor.GenerateGrid` 改用 `PrimitiveType.Sphere`（球 primitive 直径 = 1，scale 仍为 `unitSize`），移除 `PixelItem.Awake` 的运行时换网格逻辑；**在场景里选中 `PixelGroup` 点「生成网格」重新生成一次**。
 4. 把缓冲区 + 游戏区改成封闭区间：`BuildWalls` 创建六条墙——漏斗斜边（入口 → 缺口，保持不变）+ 游戏区侧边（入口两端 → 后墙，向 -Z 延伸）+ 后墙（上底封口）+ 缺口封口墙，恢复 `entranceWidth` 字段、新增 `backWidth` / `backDepth`。
 5. 释放改为两段匀速：`MoveToCollect` 先 `MoveUniform` 到 `gapPoint`（出口位置），再 `MoveUniform` 到 `collectPoint`。
-6. **提取阶段改网格寻路（并行 sweep）**：`CrowdBufferZone.Enter` → `EnterBatch(matched, group)`，新增 `StepExtracting` + `SweepOnce`（并行推进 + "即将腾出" + `waitCount` 公平性）、`extractSpeed` 字段、`IsExtracting` / `OnBatchExtracted`；`GameController.ResolveMatch` 调用 `EnterBatch`，补位推迟到 `OnBatchExtracted` 回调，提取期间屏蔽点击。
+6. **提取阶段改网格寻路（并行 sweep）**：`CrowdBufferZone.Enter` → `EnterBatch(matched, group)`，新增 `StepExtracting` + `SweepOnce`（并行推进 + "即将腾出" + `waitCount` 公平性）、`extractSpeed` 字段、`IsExtracting`；`GameController.ResolveMatch` 调用 `EnterBatch`，像素离开后不再补位，提取期间屏蔽点击。
 7. 场景里配置 `CrowdBufferZone` 组件：`gapPoint`（可用 `gatherPoint` 同物体或独立点）、`collectPoint`（= `gatherPoint`）、`entranceWidth` / `backWidth` / `backDepth` 及其它几何/物理/释放/提取参数（确保后墙盖住整个 PixelGroup）。
-8. 自测：点击匹配 → 观察像素前到后寻路出网格（不穿球、绕开未匹配球）、物理挤向缺口、依次过闸、先到出口位置再抵达集结位置、被容器消费、随后补位；确认球不漏出封闭区间。
+8. 自测：点击匹配 → 观察像素前到后寻路出网格（不穿球、绕开未匹配球）、物理挤向缺口、依次过闸、先到出口位置再抵达集结位置、被容器消费（像素离开后不补位，空位保留）；确认球不漏出封闭区间。
 9. 按第 12 节调参，达到"挤地铁"的拥挤与节奏感。
