@@ -121,9 +121,6 @@ namespace CrowdMatch
         /// <summary>是否正在提取（还有匹配像素在网格内寻路离开）</summary>
         public bool IsExtracting => _extracting.Count > 0;
 
-        /// <summary>一批像素全部离开网格、进入缓冲区后触发（供 GameController 补位）</summary>
-        public event System.Action OnBatchExtracted;
-
         // 封闭区间的墙（运行时创建，static 碰撞体）：漏斗两条斜边 + 游戏区两条侧边 + 后墙 + 缺口封口墙
         private GameObject _funnelLeftWall;
         private GameObject _funnelRightWall;
@@ -139,7 +136,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 一批匹配像素离开网格时调用：按前到后顺序在网格内寻路（BFS）离开，
-        /// 只走已腾出或"本 tick 即将腾出"的格子，抵达入口边后进入物理阶段。补位由 OnBatchExtracted 回调触发。
+        /// 只走已腾出或"本 tick 即将腾出"的格子，抵达入口边后进入物理阶段。
         /// </summary>
         public void EnterBatch(List<PixelItem> matched, PixelGroup group)
         {
@@ -172,13 +169,9 @@ namespace CrowdMatch
                     row = item.gridZ,
                 });
             }
-
-            // 空批（全部越界 / 为 null）：直接通知补位
-            if (_extracting.Count == 0)
-                OnBatchExtracted?.Invoke();
         }
 
-        /// <summary>清空缓冲区状态并销毁提取中 / 物理阶段的像素（供重载关卡时清理，不触发 OnBatchExtracted）。</summary>
+        /// <summary>清空缓冲区状态并销毁提取中 / 物理阶段的像素（供重载关卡时清理）。</summary>
         public void ResetAll()
         {
             foreach (var st in _extracting)
@@ -322,12 +315,11 @@ namespace CrowdMatch
                 SweepOnce();
             }
 
-            // 4. 全部离开 → 清理并通知补位
+            // 4. 全部离开 → 清理
             if (_extracting.Count == 0)
             {
                 _extractGroup = null;
                 _matchedOccupied = null;
-                OnBatchExtracted?.Invoke();
             }
         }
 

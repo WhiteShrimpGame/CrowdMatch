@@ -78,7 +78,7 @@ InGrid ──匹配──▶ Matched ──(EnterBatch)──▶ Extracting（�
 2. 对每个匹配像素：关闭 `SphereCollider`（停止点击检测，进入物理阶段时复用同一碰撞体）。
 3. 若 `IsInRange(gridX, gridZ)`：`_matchedOccupied[gridX, gridZ] = true`，加入 `_extracting`
    （`col/gridX`、`row/gridZ`）。
-4. 空批（全越界/null）直接触发 `OnBatchExtracted`。
+4. 空批（全越界/null）直接返回（像素离开后不再补位，无需通知）。
 
 ### 4.2 主循环 `StepExtracting`（每帧，`Update` 调用）
 
@@ -120,7 +120,7 @@ if _extractTickTimer >= _extractTickInterval:
     _extractTickTimer -= _extractTickInterval
     SweepOnce()
 
-# 步骤 4：全部离开 → 清理 + OnBatchExtracted（GameController 借此补位）
+# 步骤 4：全部离开 → 清理
 ```
 
 **时序要点**：逻辑步进（sweep）与格子动画共用同一个 `_extractTickInterval`——像素恰好在一格动画结束时，
@@ -287,8 +287,9 @@ return target                             # 无阻挡，走原目标
 
 - **占用表一致性**：`_matchedOccupied` 只在 `EnterBatch`（置 true）与 `SweepOnce`（腾出/转移）两处修改，
   且每次 sweep 原子更新，保证逻辑格与实际占用同步。
-- **补位时机**：提取完成（`_extracting` 清空）才触发 `OnBatchExtracted` → `GameController.HandleBatchExtracted`
-  → `CollapseColumns`，避免补位与提取并发冲突。
+- **点击门（GameController）**：点击一个像素后，`FloodFill` 得到同色组，`CanReachFront` 做 BFS 连通性检查——
+  把组内格视为即将腾空，检查是否存在只经过「空 / 组内」格、从组连通到首排（row 0）的路径；有路径才进入提取，
+  否则点击无效（组被其他像素完全包围）。像素离开后网格不再补位（保持空位）。
 - **点击屏蔽**：提取进行中（`IsExtracting`）`GameController` 不响应点击，保证网格状态一致。
 - **旋转只写 rotation**：`RotateToward` 只改朝向，不参与位置与碰撞，与重合问题无关。
 
