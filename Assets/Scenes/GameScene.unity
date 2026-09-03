@@ -483,6 +483,8 @@ MonoBehaviour:
   speed: 1
   slotCount: 30
   entryGate: {fileID: 1467064619}
+  catchUpEnabled: 1
+  catchUpInterval: 0.2
 --- !u!4 &782126358
 Transform:
   m_ObjectHideFlags: 0
