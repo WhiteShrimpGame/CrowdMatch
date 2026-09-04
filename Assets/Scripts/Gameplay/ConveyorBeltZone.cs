@@ -132,7 +132,7 @@ namespace CrowdMatch
 
             if (containerGroup == null)
                 return false;
-            return containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ) != null;
+            return containerGroup.FindMatchableContainer(pixel, matchRangeX, matchRangeZ) != null;
         }
 
         /// <summary>离开回调：正常模式交给同色前排 Container 吸收；记录模式下直接消失并写入序列文件。</summary>
@@ -153,7 +153,7 @@ namespace CrowdMatch
             if (containerGroup == null)
                 return;
 
-            var container = containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ);
+            var container = containerGroup.FindMatchableContainer(pixel, matchRangeX, matchRangeZ);
             if (container != null)
                 containerGroup.ConsumePixel(pixel, container);
         }

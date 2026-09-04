@@ -41,6 +41,15 @@ namespace CrowdMatch
         [Tooltip("弹性缩放轴（空子物体，侧翻归 0 后单独应用的 XZ 放大/Y 缩小弹性缩放 pivot，可选）")]
         public Transform elasticScaleAxle;
 
+        [Tooltip("盖子（可选，前排打开时直接隐藏；后排在前方全部找全匹配对象时播放 DisappearWithPop 消失动画）")]
+        public Transform lidTransform;
+
+        /// <summary>盖子是否已打开（隐藏）。运行时赋值，不序列化。</summary>
+        [System.NonSerialized] public bool lidOpened;
+
+        /// <summary>是否正在补位移动（Row 间 lerp）中。移动中禁止匹配与出库，避免与补位动画冲突。</summary>
+        [System.NonSerialized] public bool isRefilling;
+
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
 
@@ -98,6 +107,29 @@ namespace CrowdMatch
                 capacityText = GetComponentInChildren<Text>();
             if (capacityText != null)
                 capacityText.text = _remaining.ToString();
+        }
+
+        /// <summary>直接隐藏盖子（初始就在第一排的小车使用）。</summary>
+        public void HideLid()
+        {
+            lidOpened = true;
+            if (lidTransform != null)
+                lidTransform.gameObject.SetActive(false);
+        }
+
+        /// <summary>播放开盖动画（后排小车满足「前方全部找全匹配对象」时使用），幂等：只播放一次。</summary>
+        public void OpenLid()
+        {
+            if (lidOpened)
+                return;
+            lidOpened = true;
+            if (lidTransform == null || !lidTransform.gameObject.activeSelf)
+                return;
+            lidTransform.DisappearWithPop(() =>
+            {
+                if (lidTransform != null)
+                    lidTransform.gameObject.SetActive(false);
+            });
         }
 
         /// <summary>按 colorId 应用材质，config 为空时从 GameManager 获取；随后按 materialReplacements 替换指定 Renderer 的指定材质槽位（颜色仍用 colorId）。</summary>

@@ -521,6 +521,7 @@ MonoBehaviour:
   reverseScaleAxle: {fileID: 2994442980820408748}
   rollAxle: {fileID: 6380109393100094303}
   elasticScaleAxle: {fileID: 8166711600158440386}
+  lidTransform: {fileID: 7478661911827386971}
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1

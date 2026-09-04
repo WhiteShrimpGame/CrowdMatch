@@ -41,6 +41,9 @@ namespace CrowdMatch
         [Tooltip("生成时每个容器最多跨多少像素深度层抽取同色（0 = 仅最前排像素层）")]
         public int maxSpanLayers = 4;
 
+        [Tooltip("最多开启匹配的前排数（前 N 排可同时匹配，默认 4 = 最前排 + 后三排）")]
+        public int maxOpenRows = 4;
+
         [Header("速度")]
         [Tooltip("PixelItem 移向容器的速度")]
         public float consumeSpeed = 10f;
@@ -65,6 +68,8 @@ namespace CrowdMatch
                 {
                     grid[item.gridX, item.gridZ] = item;
                     item.group = this;
+                    if (item.gridZ == 0)
+                        item.HideLid();   // 初始就在第一排：盖子直接隐藏
                 }
             }
         }
@@ -81,6 +86,22 @@ namespace CrowdMatch
             if (!IsInRange(col, row))
                 return null;
             return grid[col, row];
+        }
+
+        /// <summary>
+        /// 某格小车是否已「开启匹配」：处于前 maxOpenRows 排，且前方（row 更小）没有车、或前方所有车都已找全匹配对象（容量耗尽）。
+        /// </summary>
+        public bool IsOpen(int col, int row)
+        {
+            if (row >= maxOpenRows)
+                return false;
+            for (int r = 0; r < row; r++)
+            {
+                var f = GetItem(col, r);
+                if (f != null && !f.IsEmpty)
+                    return false;   // 前方还有未找全匹配对象的车
+            }
+            return true;
         }
 
         /// <summary>某格子的本地坐标：X 居中，前排（row 0）Z = 0，后排向 +Z 延展</summary>
@@ -104,17 +125,27 @@ namespace CrowdMatch
 
             for (int col = 0; col < columns; col++)
             {
-                var front = GetItem(col, 0);
-                if (front == null || front.IsEmpty)
-                    continue;
+                for (int row = 0; row < rows; row++)
+                {
+                    var item = GetItem(col, row);
+                    if (item == null || item.IsEmpty || item.isRefilling)
+                        continue;
 
-                var pixel = FindMatchingPixel(gc.gatheredItems, front.colorId);
-                if (pixel == null)
-                    continue;
+                    // 只有满足「处于前 maxOpenRows 排」且「前方没有车 / 前方全部找全匹配对象」才开启匹配
+                    if (!IsOpen(col, row))
+                        continue;
 
-                gc.gatheredItems.Remove(pixel);
-                bool isLast = front.Consume(); // 预留一格容量
-                StartCoroutine(MovePixelToContainer(pixel, front, col, isLast));
+                    // 首次满足条件时播放开盖动画（幂等）
+                    item.OpenLid();
+
+                    var pixel = FindMatchingPixel(gc.gatheredItems, item.colorId);
+                    if (pixel == null)
+                        continue;
+
+                    gc.gatheredItems.Remove(pixel);
+                    bool isLast = item.Consume();
+                    StartCoroutine(MovePixelToContainer(pixel, item, col, isLast));
+                }
             }
         }
 
@@ -130,10 +161,12 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 传送带推送模式：找某像素正前方（远侧）的同色非空前排容器；无则 null。
-        /// 遍历每列 front（row 0），要求同色且非空，且 2D 距离（X/Z）落在 matchRange 内，返回横向（X）最近者。
+        /// 传送带推送模式：找某像素正前方（远侧）的同色「可匹配」容器；无则 null。
+        /// 每列从最前排（row 0）向后逐排找第一个「可匹配（IsOpen）且非空且同色」的容器（最多 maxOpenRows 排）；
+        /// 横向 / 纵向距离统一以前排（row 0）槽位位置判定——像素始终被送到前排，后排只是接力匹配，
+        /// 用后排自身位置会因 Z 距离太远匹配不上。
         /// </summary>
-        public ContainerItem FindFrontContainerInFrontOf(PixelItem pixel, float matchRangeX, float matchRangeZ)
+        public ContainerItem FindMatchableContainer(PixelItem pixel, float matchRangeX, float matchRangeZ)
         {
             if (pixel == null || grid == null)
                 return null;
@@ -142,19 +175,36 @@ namespace CrowdMatch
             float bestDx = float.MaxValue;
             for (int col = 0; col < columns; col++)
             {
-                var front = GetItem(col, 0);
-                if (front == null || front.IsEmpty || front.colorId != pixel.colorId)
+                var item = FindMatchableInColumn(col, pixel.colorId);
+                if (item == null)
                     continue;
 
-                float dx = Mathf.Abs(front.transform.position.x - pixel.transform.position.x);
-                float dz = Mathf.Abs(front.transform.position.z - pixel.transform.position.z);
+                Vector3 frontWorld = transform.TransformPoint(GetLocalPosition(col, 0));
+                float dx = Mathf.Abs(frontWorld.x - pixel.transform.position.x);
+                float dz = Mathf.Abs(frontWorld.z - pixel.transform.position.z);
                 if (dx <= matchRangeX && dz <= matchRangeZ && dx < bestDx)
                 {
                     bestDx = dx;
-                    best = front;
+                    best = item;
                 }
             }
             return best;
+        }
+
+        /// <summary>某列从最前排向后，找第一个「可匹配（IsOpen）且非空且同色且非补位中」的容器（最多 maxOpenRows 排）；无则 null。</summary>
+        private ContainerItem FindMatchableInColumn(int col, int colorId)
+        {
+            int limit = Mathf.Min(rows, maxOpenRows);
+            for (int row = 0; row < limit; row++)
+            {
+                var item = GetItem(col, row);
+                if (item == null || item.IsEmpty || item.isRefilling || item.colorId != colorId)
+                    continue;
+                if (!IsOpen(col, row))
+                    continue;
+                return item;
+            }
+            return null;
         }
 
         /// <summary>
@@ -167,6 +217,8 @@ namespace CrowdMatch
                 return;
 
             bool isLast = container.Consume();
+            if (isLast)
+                OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
             StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
         }
 
@@ -192,7 +244,7 @@ namespace CrowdMatch
             Destroy(pixel.gameObject);
 
             if (isLast)
-                StartContainerExit(container, col);
+                TryExitIfAtFront(container, col);   // 前排且耗尽才出库；后排先等补位到前排
         }
 
         /// <summary>
@@ -207,6 +259,34 @@ namespace CrowdMatch
             if (driver == null)
                 driver = gone.gameObject.AddComponent<ContainerExitDriver>();
             driver.Play(() => RefillColumn(col));
+        }
+
+        /// <summary>
+        /// 小车在前排且容量耗尽时启动出库。幂等：grid[col,0] 已非本车（或已开始出库）时跳过，
+        /// 避免「后排满但未补位」或「补位完成 / 像素到达」同帧竞态下重复触发。
+        /// </summary>
+        private void TryExitIfAtFront(ContainerItem item, int col)
+        {
+            if (item == null || !item.IsEmpty)
+                return;
+            if (item.isRefilling)
+                return;   // 补位移动中，等 MoveContainer 完成后由它触发
+            if (grid == null || grid[col, 0] != item)
+                return;   // 不在前排（或已开始出库）
+            StartContainerExit(item, col);
+        }
+
+        /// <summary>
+        /// 传送带吸收模式：某容器耗尽时打开其正后方（gridZ + 1）容器的盖子，让它随后可接收像素。
+        /// 前排 / 已开放的后排容器共用此逻辑——耗尽谁的容量就开谁后面的盖子。
+        /// </summary>
+        private void OpenRearLid(ContainerItem container)
+        {
+            if (container == null)
+                return;
+            var rear = GetItem(container.gridX, container.gridZ + 1);
+            if (rear != null)
+                rear.OpenLid();
         }
 
         /// <summary>某列后排容器依次前移一格（补位）。</summary>
@@ -228,6 +308,7 @@ namespace CrowdMatch
 
         private IEnumerator MoveContainer(ContainerItem item, int col, int row)
         {
+            item.isRefilling = true;
             Vector3 start = item.transform.localPosition;
             Vector3 target = GetLocalPosition(col, row);
 
@@ -243,6 +324,10 @@ namespace CrowdMatch
                 yield return null;
             }
             item.transform.localPosition = target;
+            item.isRefilling = false;
+
+            // 补位到前排后，若该车已在后方等满（容量耗尽），立即启动出库
+            TryExitIfAtFront(item, col);
         }
 
         /// <summary>清空所有 ContainerItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
@@ -282,16 +367,17 @@ namespace CrowdMatch
             item.colorId = colorId;
             item.SetCapacity(capacity);
             item.ApplyMaterial(config);
+            if (row == 0)
+                item.HideLid();   // 初始就在第一排：盖子直接隐藏
             return item;
         }
 
-        /// <summary>是否存在同色且非空的最前排（row 0）容器。用于失败判定。</summary>
-        public bool HasFrontContainerOfColor(int colorId)
+        /// <summary>是否存在同色且可匹配的容器（前排或已开放的后排，最多 maxOpenRows 排）。用于失败判定。</summary>
+        public bool HasMatchableContainerOfColor(int colorId)
         {
             for (int col = 0; col < columns; col++)
             {
-                var front = GetItem(col, 0);
-                if (front != null && !front.IsEmpty && front.colorId == colorId)
+                if (FindMatchableInColumn(col, colorId) != null)
                     return true;
             }
             return false;

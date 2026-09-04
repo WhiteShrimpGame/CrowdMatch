@@ -184,7 +184,7 @@ namespace CrowdMatch
                 var pixel = belt.GetItem(i) as PixelItem;
                 if (pixel == null)
                     continue;
-                if (containerGroup.HasFrontContainerOfColor(pixel.colorId))
+                if (containerGroup.HasMatchableContainerOfColor(pixel.colorId))
                     return false;   // 至少一个可匹配 → 未失败
             }
             return true;
