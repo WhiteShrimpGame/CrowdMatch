@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.4372902, g: 0.4850139, b: 0.56588876, a: 1}
+  m_IndirectSpecularColor: {r: 0.4372907, g: 0.4850142, b: 0.5658892, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -701,13 +701,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   containerPrefab: {fileID: 4074727829767371378, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
   columns: 4
-  rows: 30
+  rows: 20
   xSpacing: 2
   zSpacing: 1.2
   pixelGroup: {fileID: 882082744}
   minCapacity: 3
   maxCapacity: 3
   maxSpanLayers: 20
+  maxOpenRows: 4
   consumeSpeed: 10
   refillSpeed: 10
 --- !u!4 &1428373512

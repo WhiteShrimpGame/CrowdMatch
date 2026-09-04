@@ -157,7 +157,7 @@ namespace CrowdMatch
             Debug.Log(Tag + " 已清空当前场景两个 Group 的子物体。");
         }
 
-        private static LevelData BuildLevelData(PixelGroup pg, ContainerGroup cg)
+        public static LevelData BuildLevelData(PixelGroup pg, ContainerGroup cg)
         {
             pg.RebuildGrid();
             cg.RebuildGrid();
