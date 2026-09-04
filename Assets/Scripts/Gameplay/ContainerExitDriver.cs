@@ -36,7 +36,7 @@ namespace CrowdMatch
         public float exitScaleRecoverDuration = 0.3f;
 
         [Header("出车 / Exit")]
-        [Tooltip("出车线性加速度（米/秒²）")]
+        [Tooltip("出车转正段（角度回正前）线性加速度（米/秒²）")]
         public float exitAcceleration = 8f;
 
         [Tooltip("出车角度加速度（度/秒²，先甩头到 -exitMaxAngle 再加速归 0）")]
@@ -50,6 +50,9 @@ namespace CrowdMatch
 
         [Tooltip("转正后整车直行时长（秒），到点销毁")]
         public float exitDriveDuration = 0.8f;
+
+        [Tooltip("转正后整车直行段（角度回正后）线性加速度（米/秒²），可与转正前加速度分别配置")]
+        public float exitDriveAcceleration = 8f;
 
         [Header("侧翻 / Roll")]
         [Tooltip("侧翻最大角度（度，正值为绕前进轴的一侧；出车开始即先匀加速后匀减速侧翻到该角度）")]
@@ -70,6 +73,10 @@ namespace CrowdMatch
 
         [Tooltip("弹性缩放复原时长（秒，到达最大值后立即匀加速回到 1 的时长）")]
         public float elasticRecoverDuration = 0.2f;
+
+        [Header("调试 / Debug")]
+        [Tooltip("出车角度回正后（整车直行段）每帧输出小车世界 X 坐标与当前速度，用于核对加速趋势")]
+        public bool logExitDriveX = true;
 
         private bool _playing;
 
@@ -238,9 +245,14 @@ namespace CrowdMatch
             while (hold < exitDriveDuration)
             {
                 float dt = Time.deltaTime;
-                v = Mathf.Min(v + exitAcceleration * dt, exitMaxSpeed);
+                v = Mathf.Min(v + exitDriveAcceleration * dt, exitMaxSpeed);
                 transform.position += -transform.right * (v * dt);
                 hold += dt;
+
+                // 回正后每帧输出世界 X 坐标与速度，核对加速趋势（期望：v 线性上升至 exitMaxSpeed 后恒定，X 先抛物线后线性）
+                if (logExitDriveX)
+                    Debug.Log("[ContainerExitDriver] 直行 t=" + hold.ToString("F3") + "s  worldX=" +
+                        transform.position.x.ToString("F4") + "  v=" + v.ToString("F3") + "m/s");
 
                 // 侧翻匀加速归 0（ease-in quad），归 0 后自转轴还给小车
                 if (!rollRestored)

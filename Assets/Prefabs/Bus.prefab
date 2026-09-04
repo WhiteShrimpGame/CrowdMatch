@@ -661,14 +661,16 @@ MonoBehaviour:
   exitAcceleration: 10
   exitAngularAcceleration: 600
   exitMaxAngle: 40
-  exitMaxSpeed: 15
+  exitMaxSpeed: 18
   exitDriveDuration: 1.2
+  exitDriveAcceleration: 70
   rollMaxAngle: -20
   rollOutDuration: 0.4
   rollRecoverDuration: 0.2
   elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
   elasticScaleDuration: 0.15
   elasticRecoverDuration: 0.2
+  logExitDriveX: 1
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0
