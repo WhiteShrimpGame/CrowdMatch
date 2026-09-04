@@ -539,10 +539,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   reverseDuration: 0.2
-  reverseDistance: 0.1
+  reverseDistance: 0.05
   reverseAngle: 25
   reverseWait: 0.15
-  reverseSquashScale: 0.9
+  reverseSquashScale: 0.93
   reverseSquashDelay: 0.15
   exitScaleRecoverDuration: 0.2
   exitAcceleration: 10
