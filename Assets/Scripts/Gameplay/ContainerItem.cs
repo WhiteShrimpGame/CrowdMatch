@@ -32,6 +32,9 @@ namespace CrowdMatch
         [Tooltip("后轴（空子物体，倒车时的驱动轴）")]
         public Transform rearAxle;
 
+        [Tooltip("倒车缩放轴（空子物体，倒车/出车时置于轴与车体之间，X 缩放用于惯性夸张）")]
+        public Transform reverseScaleAxle;
+
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
 
