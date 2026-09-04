@@ -6,9 +6,9 @@ namespace CrowdMatch
 {
     /// <summary>
     /// 小车出库动画：容器耗尽后，用「前轴 / 后轴 + 父物体切换」驱动小车先倒车、再出车转正、最后整车直行开出场景。
-    /// 轴引用取自同物体上的 ContainerItem.frontAxle / rearAxle / reverseScaleAxle；未配置轴时回退为「直接补位 + 销毁」。
-    /// 倒车缩放轴（reverseScaleAxle）夹在驱动轴与车体之间，倒车时 X 缩放先匀加速后匀减速缩小、出车时匀加速回到 1，做惯性夸张。
-    /// 所有 SetParent 都用 worldPositionStays:true 保持世界位姿，零瞬移；角度一律写世界 rotation（eulerY 世界角）。
+    /// 轴引用取自同物体上的 ContainerItem.frontAxle / rearAxle / reverseScaleAxle / rollAxle；未配置轴时回退为「直接补位 + 销毁」。
+    /// 倒车缩放轴（reverseScaleAxle）夹在驱动轴与车体之间做惯性夸张；侧翻自转轴（rollAxle）是最深层节点，出车转正时侧翻、转正后归 0。
+    /// 所有 SetParent 都用 worldPositionStays:true 保持世界位姿，零瞬移；偏航（eulerY）写世界 rotation，侧翻（eulerX）写自转轴 localRotation。
     /// </summary>
     public class ContainerExitDriver : MonoBehaviour
     {
@@ -51,6 +51,16 @@ namespace CrowdMatch
         [Tooltip("转正后整车直行时长（秒），到点销毁")]
         public float exitDriveDuration = 0.8f;
 
+        [Header("侧翻 / Roll")]
+        [Tooltip("侧翻最大角度（度，正值为绕前进轴的一侧；出车开始即先匀加速后匀减速侧翻到该角度）")]
+        public float rollMaxAngle = 12f;
+
+        [Tooltip("侧翻到位时长（秒，自出车开始计时，先匀加速后匀减速侧翻到 rollMaxAngle 的时长）")]
+        public float rollOutDuration = 0.4f;
+
+        [Tooltip("侧翻归零时长（秒，位移角度归 0 后匀加速回到 0）")]
+        public float rollRecoverDuration = 0.4f;
+
         private bool _playing;
 
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
@@ -68,6 +78,7 @@ namespace CrowdMatch
             Transform front = container != null ? container.frontAxle : null;
             Transform rear = container != null ? container.rearAxle : null;
             Transform scale = container != null ? container.reverseScaleAxle : null;
+            Transform roll = container != null ? container.rollAxle : null;
 
             // 轴未配置：回退到旧「直接补位 + 销毁」
             if (front == null || rear == null)
@@ -82,9 +93,10 @@ namespace CrowdMatch
             // ===== 倒车：后轴驱动（缩放轴若存在则夹在后轴与车体之间） =====
             rear.SetParent(cartParent, true);   // 后轴脱离小车 → 挂到原始父物体
             rear.localScale = Vector3.one;      // 轴始终是纯 pivot，重置 scale，避免继承小车的缩放
-            if (scale != null)
-                scale.SetParent(rear, true);    // 缩放轴脱离小车 → 挂到后轴
-            transform.SetParent(scale != null ? scale : rear, true);   // 小车挂到缩放轴（或后轴）
+            Transform chainRoot = rear;
+            if (scale != null) { scale.SetParent(chainRoot, true); chainRoot = scale; }   // 缩放轴 → 后轴下
+            if (roll != null)  { roll.SetParent(chainRoot, true);  chainRoot = roll; }    // 自转轴 → 缩放轴下（最深层）
+            transform.SetParent(chainRoot, true);   // 小车挂到自转轴（或缩放轴、后轴）
 
             float t = 0f;
             float prevS = 0f;
@@ -118,29 +130,23 @@ namespace CrowdMatch
                 yield return null;
             }
 
-            // ===== 出车转正：前轴驱动（缩放轴若存在则继续夹在前轴与车体之间） =====
-            // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再让缩放轴带着小车整体移到新轴下，
-            // 最后把旧轴还给小车。小车全程不脱离缩放轴，自身缩放不被烘、也不重置（避免缩放 pivot 与车体 pivot 不一致导致瞬移）。
+            // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
+            // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
+            // （缩放轴，或无缩放轴时的自转轴，或都无时的小车）整体移到新轴下，最后把旧轴还给小车。小车全程不脱离
+            // 缩放轴/自转轴，自身缩放不被烘、也不重置（避免缩放 pivot 与车体 pivot 不一致导致瞬移）。
             front.SetParent(cartParent, true);   // 前轴脱离小车 → 挂到与旧位移轴（后轴）同父级
             front.localScale = Vector3.one;      // 此刻前轴与系统无牵连，重置 scale 干净
-            if (scale != null)
-            {
-                scale.SetParent(front, true);    // 缩放轴带着小车整体移到前轴下
-                rear.SetParent(transform, true); // 旧轴（后轴）还给小车
-                rear.localScale = Vector3.one;   // 后轴归位后重置 scale（空轴，重置不引起瞬移）
-            }
-            else
-            {
-                transform.SetParent(front, true); // 无缩放轴：小车直接挂到前轴
-                rear.SetParent(transform, true);  // 旧轴（后轴）还给小车
-                rear.localScale = Vector3.one;    // 后轴归位后重置 scale
-            }
+            Transform chainChild = scale != null ? scale : (roll != null ? roll : transform);
+            chainChild.SetParent(front, true);   // 把链条最上层节点（缩放轴/自转轴/小车）移到前轴下
+            rear.SetParent(transform, true);     // 旧轴（后轴）还给小车
+            rear.localScale = Vector3.one;       // 后轴归位后重置 scale（空轴，重置不引起瞬移）
 
             float v = 0f;
             float angle = -reverseAngle;
             float angularVel = 0f;
             bool swung = exitMaxAngle <= reverseAngle;   // 目标角不超过起点角时，跳过甩头直接归 0
             float recoverT = 0f;
+            float rollT = 0f;   // 侧翻出车时钟（自出车开始计时）
             while (true)
             {
                 float dt = Time.deltaTime;
@@ -153,6 +159,13 @@ namespace CrowdMatch
                     recoverT += dt;
                     float rp = Mathf.Clamp01(recoverT / exitScaleRecoverDuration);
                     SetScaleX(scale, Mathf.Lerp(reverseSquashScale, 1f, rp * rp));
+                }
+
+                // 出车开始：侧翻先匀加速后匀减速到 rollMaxAngle（时间驱动，覆盖整个出车段）
+                if (roll != null)
+                {
+                    rollT += dt;
+                    roll.localRotation = Quaternion.Euler(rollMaxAngle * EaseInOutQuad(Mathf.Clamp01(rollT / rollOutDuration)), 0f, 0f);
                 }
 
                 if (!swung)
@@ -176,10 +189,18 @@ namespace CrowdMatch
                     {
                         front.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
 
-                        // 恢复轴子父级，改由整车驱动
+                        // 恢复位移轴 + 缩放轴，但保留自转轴作为小车父物体（侧翻持续到归 0）
                         if (scale != null)
                             SetScaleX(scale, 1f);           // 先让缩放轴归 1（小车仍在其下，围绕正确 pivot 解除挤压）
-                        transform.SetParent(cartParent, true);   // 小车脱离缩放轴 → 回到原始父物体（世界缩放已 1，不烘）
+                        if (roll != null)
+                        {
+                            roll.localRotation = Quaternion.Euler(rollMaxAngle, 0f, 0f);   // 侧翻到位
+                            roll.SetParent(cartParent, true);   // 自转轴（带小车）提到原始父物体
+                        }
+                        else
+                        {
+                            transform.SetParent(cartParent, true);   // 无自转轴：小车回原始父物体
+                        }
                         front.SetParent(transform, true);        // 前轴归位为小车子物体
                         if (scale != null)
                         {
@@ -195,14 +216,35 @@ namespace CrowdMatch
                 yield return null;
             }
 
-            // ===== 整车直行：加速到最大后匀速，到点销毁 =====
+            // ===== 整车直行：加速到最大后匀速，同时侧翻匀加速归 0，到点销毁 =====
             float hold = 0f;
+            float rollRecoverT = 0f;
+            bool rollRestored = roll == null;
             while (hold < exitDriveDuration)
             {
                 float dt = Time.deltaTime;
                 v = Mathf.Min(v + exitAcceleration * dt, exitMaxSpeed);
                 transform.position += -transform.right * (v * dt);
                 hold += dt;
+
+                // 侧翻匀加速归 0（ease-in quad），归 0 后自转轴还给小车
+                if (!rollRestored)
+                {
+                    rollRecoverT += dt;
+                    if (rollRecoverT >= rollRecoverDuration)
+                    {
+                        roll.localRotation = Quaternion.identity;   // 侧翻归 0
+                        transform.SetParent(cartParent, true);      // 小车先脱离自转轴（自转轴已归 0，不烘）
+                        roll.SetParent(transform, true);            // 自转轴还给小车
+                        rollRestored = true;
+                    }
+                    else
+                    {
+                        float rp = Mathf.Clamp01(rollRecoverT / rollRecoverDuration);
+                        roll.localRotation = Quaternion.Euler(rollMaxAngle * (1f - rp * rp), 0f, 0f);
+                    }
+                }
+
                 yield return null;
             }
 
@@ -214,6 +256,13 @@ namespace CrowdMatch
         {
             p = Mathf.Clamp01(p);
             return 1f - (1f - p) * (1f - p);
+        }
+
+        /// <summary>先匀加速后匀减速（ease-in-out quad，p∈[0,1] → [0,1]，中点为 0.5，两端速度归零）。</summary>
+        private static float EaseInOutQuad(float p)
+        {
+            p = Mathf.Clamp01(p);
+            return p < 0.5f ? 2f * p * p : 1f - 2f * (1f - p) * (1f - p);
         }
 
         /// <summary>只改 Transform 的 localScale.x（保留 y/z）。</summary>
@@ -236,6 +285,8 @@ namespace CrowdMatch
                 Destroy(container.rearAxle.gameObject);
             if (container.reverseScaleAxle != null && container.reverseScaleAxle.parent != transform)
                 Destroy(container.reverseScaleAxle.gameObject);
+            if (container.rollAxle != null && container.rollAxle.parent != transform)
+                Destroy(container.rollAxle.gameObject);
         }
     }
 }

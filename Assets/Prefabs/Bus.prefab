@@ -268,6 +268,37 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &752024918137977985
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6380109393100094303}
+  m_Layer: 0
+  m_Name: RollAxle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6380109393100094303
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 752024918137977985}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.3, z: -0.375}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 7
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2645389575694712044
 GameObject:
   m_ObjectHideFlags: 0
@@ -432,6 +463,7 @@ Transform:
   - {fileID: 5733411419755414242}
   - {fileID: 5069035725881052468}
   - {fileID: 2994442980820408748}
+  - {fileID: 6380109393100094303}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -455,6 +487,7 @@ MonoBehaviour:
   frontAxle: {fileID: 5733411419755414242}
   rearAxle: {fileID: 5069035725881052468}
   reverseScaleAxle: {fileID: 2994442980820408748}
+  rollAxle: {fileID: 6380109393100094303}
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1
@@ -484,6 +517,8 @@ MonoBehaviour:
   exitMaxAngle: 30
   exitMaxSpeed: 20
   exitDriveDuration: 0.8
+  rollMaxAngle: -20
+  rollRecoverDuration: 0.2
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0
