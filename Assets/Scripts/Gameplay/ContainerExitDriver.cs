@@ -61,6 +61,16 @@ namespace CrowdMatch
         [Tooltip("侧翻归零时长（秒，位移角度归 0 后匀加速回到 0）")]
         public float rollRecoverDuration = 0.4f;
 
+        [Header("弹性缩放 / Elastic Scale")]
+        [Tooltip("弹性缩放最终缩放值（Vector3，侧翻归 0 后从 (1,1,1) 匀减速缩放到该值；1=不变）")]
+        public Vector3 elasticTargetScale = new Vector3(1.2f, 0.83f, 1.2f);
+
+        [Tooltip("弹性缩放到位时长（秒，匀减速缩放到 elasticTargetScale 的时长）")]
+        public float elasticScaleDuration = 0.15f;
+
+        [Tooltip("弹性缩放复原时长（秒，到达最大值后立即匀加速回到 1 的时长）")]
+        public float elasticRecoverDuration = 0.2f;
+
         private bool _playing;
 
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
@@ -79,6 +89,7 @@ namespace CrowdMatch
             Transform rear = container != null ? container.rearAxle : null;
             Transform scale = container != null ? container.reverseScaleAxle : null;
             Transform roll = container != null ? container.rollAxle : null;
+            Transform elastic = container != null ? container.elasticScaleAxle : null;
 
             // 轴未配置：回退到旧「直接补位 + 销毁」
             if (front == null || rear == null)
@@ -216,10 +227,14 @@ namespace CrowdMatch
                 yield return null;
             }
 
-            // ===== 整车直行：加速到最大后匀速，同时侧翻匀加速归 0，到点销毁 =====
+            // ===== 整车直行：加速到最大后匀速，侧翻匀加速归 0，归 0 后换弹性缩放轴做 XZ 放大/Y 缩小的弹性，到点销毁 =====
             float hold = 0f;
             float rollRecoverT = 0f;
             bool rollRestored = roll == null;
+            float elasticOutT = 0f;
+            float elasticRecoverT = 0f;
+            bool elasticStarted = false;
+            bool elasticRestored = elastic == null;   // 弹性轴未配置则跳过
             while (hold < exitDriveDuration)
             {
                 float dt = Time.deltaTime;
@@ -242,6 +257,40 @@ namespace CrowdMatch
                     {
                         float rp = Mathf.Clamp01(rollRecoverT / rollRecoverDuration);
                         roll.localRotation = Quaternion.Euler(rollMaxAngle * (1f - rp * rp), 0f, 0f);
+                    }
+                }
+
+                // 侧翻归 0 后，单独应用弹性缩放轴（与其他轴不共存）：XZ 匀减速放大、Y 匀减速缩小，到位后立即匀加速复原
+                if (rollRestored && !elasticRestored)
+                {
+                    if (!elasticStarted)
+                    {
+                        elastic.SetParent(cartParent, true);   // 弹性轴脱离小车 → 原始父物体
+                        elastic.localScale = Vector3.one;      // 纯 pivot，重置 scale
+                        transform.SetParent(elastic, true);    // 小车挂到弹性轴下
+                        elasticStarted = true;
+                    }
+                    if (elasticOutT < elasticScaleDuration)
+                    {
+                        elasticOutT += dt;
+                        float p = Mathf.Clamp01(elasticOutT / elasticScaleDuration);
+                        float e = EaseOutQuad(p);   // 匀减速
+                        elastic.localScale = Vector3.Lerp(Vector3.one, elasticTargetScale, e);
+                    }
+                    else
+                    {
+                        elasticRecoverT += dt;
+                        float p = Mathf.Clamp01(elasticRecoverT / elasticRecoverDuration);
+                        float e = p * p;   // 匀加速 ease-in
+                        elastic.localScale = Vector3.Lerp(elasticTargetScale, Vector3.one, e);
+                        if (elasticRecoverT >= elasticRecoverDuration)
+                        {
+                            elastic.localScale = Vector3.one;      // 复原
+                            transform.SetParent(cartParent, true); // 小车脱离弹性轴
+                            elastic.SetParent(transform, true);    // 弹性轴还给小车
+                            elastic.localScale = Vector3.one;
+                            elasticRestored = true;
+                        }
                     }
                 }
 
@@ -287,6 +336,8 @@ namespace CrowdMatch
                 Destroy(container.reverseScaleAxle.gameObject);
             if (container.rollAxle != null && container.rollAxle.parent != transform)
                 Destroy(container.rollAxle.gameObject);
+            if (container.elasticScaleAxle != null && container.elasticScaleAxle.parent != transform)
+                Destroy(container.elasticScaleAxle.gameObject);
         }
     }
 }

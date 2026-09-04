@@ -330,6 +330,37 @@ Transform:
   m_Father: {fileID: 6649613836873739741}
   m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &4183084718532272777
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8166711600158440386}
+  m_Layer: 0
+  m_Name: ElasticAxle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8166711600158440386
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4183084718532272777}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 8
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &5317974690723970201
 GameObject:
   m_ObjectHideFlags: 0
@@ -464,6 +495,7 @@ Transform:
   - {fileID: 5069035725881052468}
   - {fileID: 2994442980820408748}
   - {fileID: 6380109393100094303}
+  - {fileID: 8166711600158440386}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -488,6 +520,7 @@ MonoBehaviour:
   rearAxle: {fileID: 5069035725881052468}
   reverseScaleAxle: {fileID: 2994442980820408748}
   rollAxle: {fileID: 6380109393100094303}
+  elasticScaleAxle: {fileID: 8166711600158440386}
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1
@@ -507,18 +540,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   reverseDuration: 0.2
   reverseDistance: 0.1
-  reverseAngle: 15
+  reverseAngle: 25
   reverseWait: 0.15
   reverseSquashScale: 0.9
-  reverseSquashDelay: 0.1
+  reverseSquashDelay: 0.15
   exitScaleRecoverDuration: 0.2
-  exitAcceleration: 15
+  exitAcceleration: 10
   exitAngularAcceleration: 600
-  exitMaxAngle: 30
-  exitMaxSpeed: 20
-  exitDriveDuration: 0.8
+  exitMaxAngle: 40
+  exitMaxSpeed: 15
+  exitDriveDuration: 1.2
   rollMaxAngle: -20
+  rollOutDuration: 0.4
   rollRecoverDuration: 0.2
+  elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
+  elasticScaleDuration: 0.15
+  elasticRecoverDuration: 0.2
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0

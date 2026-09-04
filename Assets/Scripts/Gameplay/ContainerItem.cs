@@ -38,6 +38,9 @@ namespace CrowdMatch
         [Tooltip("侧翻自转轴（空子物体，最深层节点，位于缩放轴与车体之间，绕前进轴旋转做惯性侧翻）")]
         public Transform rollAxle;
 
+        [Tooltip("弹性缩放轴（空子物体，侧翻归 0 后单独应用的 XZ 放大/Y 缩小弹性缩放 pivot，可选）")]
+        public Transform elasticScaleAxle;
+
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
 

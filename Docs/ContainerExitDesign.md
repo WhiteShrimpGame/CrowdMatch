@@ -20,7 +20,7 @@
    角度 `exitMaxAngle`，再立即反向角速度、加速转正到水平——角度变化全程与前进（线性位移）同步；车体 X 缩放也在
    出车开始时**匀加速回到 1**；小车自出车开始即沿前进轴**先匀加速后匀减速侧翻**到 `rollMaxAngle`。
 3. 转正瞬间，小车切换到「整车直行」，后排容器开始**补位**；小车仍挂在**侧翻自转轴**下，侧翻角**匀加速归 0**。
-4. 侧翻归 0 后自转轴归位，小车继续加速至最大速度后匀速，再持续给定时间后**销毁**（开出场景）。
+4. 侧翻归 0 后自转轴归位，小车换到**弹性缩放轴**下做 XZ 放大 / Y 缩小的弹性（先匀减速到最大、再立即匀加速复原），复原后继续加速至最大速度后匀速，再持续给定时间后**销毁**（开出场景）。
 
 驱动方式复用「前轴 / 后轴」挂载：倒车时把小车挂到**后轴**上，由后轴带动；出车时把小车挂到**前轴**上，
 由前轴带动；转正后恢复位移轴与缩放轴的子父级，由整车驱动。倒车 / 出车期间，另有一个**倒车缩放轴**夹在驱动轴
@@ -35,7 +35,7 @@
 - 用「前轴 / 后轴 + 父物体切换」的挂载模型，实现真实的后轴倒车、前轴出车，而非对整车整体做位移/旋转。
 - 倒车段：匀加速（二次曲线）位移 + 负角度；出车段：匀加速到最大速度 + 角度先进一步甩大到 `exitMaxAngle` 再反向加速转正（角度变化全程与前进同步）。
 - 出车开始即沿前进轴做轻微惯性侧翻（先匀加速后匀减速到 `rollMaxAngle`），转正后侧翻角匀加速归 0。
-- 转正后触发后排补位，随后整车直行出场景并销毁。
+- 转正后触发后排补位；侧翻归 0 后再做一次 XZ 放大 / Y 缩小的弹性缩放（匀减速到最大、匀加速复原），随后整车直行出场景并销毁。
 - 与现有 `ContainerGroup.ConsumePixel` / `DisappearAndRefill` 契约平滑替换，轴未配置时回退到旧的「直接销毁 + 补位」。
 
 ### 非目标（本期不做）
@@ -73,7 +73,7 @@ ReverseWait（倒车等待 reverseWait）
 ExitTurn（出车转正：前轴驱动，线性加速 + 角度 -reverseAngle → -exitMaxAngle → 0；出车开始即自转轴侧翻 0 → rollMaxAngle）
    │  eulerY 达到 0 → 转正，恢复位移轴/缩放轴，保留自转轴作父物体
    ▼
-ExitStraight（整车直行：侧翻 rollMaxAngle → 0 匀加速归 0，然后加速至最大速度后匀速，exitDriveDuration 到点）
+ExitStraight（整车直行：侧翻 rollMaxAngle → 0 匀加速归 0，再换弹性缩放轴 XZ 放大/Y 缩小并复原，然后加速至最大速度后匀速，exitDriveDuration 到点）
    ▼
 Destroyed（销毁）
 ```
@@ -86,6 +86,9 @@ Destroyed（销毁）
 
 > 侧翻（roll）自 `ExitTurn` 出车开始即用时间时钟驱动，在 `rollOutDuration` 内先匀加速后匀减速侧翻到 `rollMaxAngle`
 > （到点后保持）；转正后进入 `ExitStraight`，侧翻角在 `rollRecoverDuration` 内匀加速归 0（见 §6.6）。
+>
+> 弹性缩放（elastic）在侧翻归 0 后**单独应用**（弹性轴与其他轴不共存）：XZ 在 `elasticScaleDuration` 内匀减速放大到
+> `elasticTargetScale`、到位后立即在 `elasticRecoverDuration` 内匀加速复原（见 §6.7）。
 
 ---
 
@@ -172,6 +175,28 @@ ContainerGroup
 2. `rollAxle.SetParent(cart, worldPositionStays: true)` —— 自转轴改回小车子物体。
 
 恢复初始层级后，直接移动 / 旋转小车本体（此时 `eulerY = 0`、`eulerX = 0`，`transform.left = -X`）。
+
+### 5.5 弹性缩放挂载（弹性轴单独应用）
+
+侧翻归 0、自转轴归位后，各轴（前/后/缩放/自转）都已回到小车子物体，此刻仅**弹性缩放轴**单独接管小车（与其他轴不共存）：
+
+1. `elasticScaleAxle.SetParent(cartParent, worldPositionStays: true)` —— 弹性轴脱离小车，挂到原始父物体下。
+2. `elasticScaleAxle.localScale = Vector3.one` —— 纯 pivot，重置 scale。
+3. `cart.SetParent(elasticScaleAxle, worldPositionStays: true)` —— 小车挂到弹性轴下。
+
+```
+ContainerGroup
+└── ElasticScaleAxle
+    └── Cart（+ 前轴/后轴/缩放轴/自转轴/视觉模型）
+```
+
+此后缩放 `elasticScaleAxle` 的 XZ/Y 即做弹性夸张（见 §6.7）。复原后：
+
+1. `elasticScaleAxle.localScale = Vector3.one` —— XZ/Y 归 1。
+2. `cart.SetParent(cartParent, worldPositionStays: true)` —— 小车脱离弹性轴。
+3. `elasticScaleAxle.SetParent(cart, worldPositionStays: true)` —— 弹性轴改回小车子物体，`localScale` 归 1。
+
+> 弹性轴位置即「弹性缩放 pivot」——放在车体中心则对称放大/压扁，由场景摆放决定。
 
 > 全部 `SetParent` 都用 `worldPositionStays: true`，确保切换父物体时世界位姿不变、零瞬移。
 
@@ -309,11 +334,36 @@ rollAxle.localRotation = Euler(roll, 0, 0)
 
 归 0 后 `rollAxle.localRotation = identity`，按 §5.4 把自转轴还给小车。
 
+### 6.7 弹性缩放（Elastic Scale，侧翻归 0 后的弹性夸张）
+
+参数：`elasticTargetScale`（最终缩放值 `Vector3`，直接定义到位目标）、`elasticScaleDuration`（匀减速缩放到该值的时长 T_e）、
+`elasticRecoverDuration`（复原到 1 的时长 T_r）。弹性轴 `elasticScaleAxle` 若未配置则跳过（不影响其它动画）。
+
+侧翻归 0 后，按 §5.5 把小车挂到弹性轴下（此时其他轴都已归位，弹性轴**单独**驱动），只改弹性轴的 `localScale`：
+
+**放大 / 缩小（匀减速 ease-out）**：从 `(1,1,1)` **匀减速**缩放到 `elasticTargetScale`（三个分量各自插值，可同时放大 XZ、缩小 Y）：
+
+```
+t ∈ [0, T_e]；p = clamp01(t / T_e)
+e = 1 - (1-p)²                          // 匀减速
+elasticScaleAxle.localScale = Lerp(Vector3.one, elasticTargetScale, e)
+```
+
+**复原（匀加速 ease-in）**：到达 `elasticTargetScale` 后**立即**在 `elasticRecoverDuration` 内匀加速回到 `(1,1,1)`：
+
+```
+t ∈ [0, T_r]；p = clamp01(t / T_r)
+e = p²                                  // 匀加速
+elasticScaleAxle.localScale = Lerp(elasticTargetScale, Vector3.one, e)
+```
+
+归 1 后按 §5.5 把弹性轴还给小车，继续整车直行到 `exitDriveDuration` 后销毁。
+
 ---
 
 ## 7. 组件与 API
 
-### 7.1 `ContainerItem`（加四个轴引用）
+### 7.1 `ContainerItem`（加五个轴引用）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -321,6 +371,7 @@ rollAxle.localRotation = Euler(roll, 0, 0)
 | `rearAxle` | `Transform` | 后轴（空子物体，倒车驱动轴） |
 | `reverseScaleAxle` | `Transform` | 倒车缩放轴（空子物体，夹在轴与车体之间，X 缩放做惯性夸张，可选） |
 | `rollAxle` | `Transform` | 侧翻自转轴（空子物体，最深层节点，位于缩放轴与车体之间，绕前进轴侧翻，可选） |
+| `elasticScaleAxle` | `Transform` | 弹性缩放轴（空子物体，侧翻归 0 后单独应用的 XZ 放大/Y 缩小弹性缩放 pivot，可选） |
 
 ### 7.2 新增 `ContainerExitDriver`（`Gameplay/ContainerExitDriver.cs`，挂在小车 prefab 上）
 
@@ -341,6 +392,9 @@ rollAxle.localRotation = Euler(roll, 0, 0)
 | 侧翻 | `rollMaxAngle` | 12f | 侧翻最大角度（deg，正值为绕前进轴的一侧；出车开始即先匀加速后匀减速侧翻到该角度） |
 | 侧翻 | `rollOutDuration` | 0.4f | 侧翻到位时长（s，自出车开始计时，先匀加速后匀减速侧翻到 rollMaxAngle） |
 | 侧翻 | `rollRecoverDuration` | 0.4f | 侧翻归零时长（s，转正后匀加速回到 0） |
+| 弹性缩放 | `elasticTargetScale` | `(1.2, 0.83, 1.2)` | 最终缩放值（Vector3，侧翻归 0 后从 (1,1,1) 匀减速缩放到该值） |
+| 弹性缩放 | `elasticScaleDuration` | 0.15f | 弹性缩放到位时长（s，XZ 匀减速放大、Y 匀减速缩小到最大值） |
+| 弹性缩放 | `elasticRecoverDuration` | 0.2f | 弹性缩放复原时长（s，到达最大值后立即匀加速回到 1） |
 | 方法 | `void Play(Action onRefill)` | — | 启动出库动画；转正瞬间调 `onRefill` |
 
 `Play` 内部：
@@ -375,7 +429,7 @@ ContainerExitDriver.Run（协程）
     │  ReverseWait（X 匀减速缩放继续，到结束缩至 reverseSquashScale）
     │  ExitTurn（前轴驱动，线性加速 + 角度先甩大到 -exitMaxAngle 再归 0 + X 缩放回 1 + 侧翻先匀加后匀减到 rollMaxAngle）
     │      └─ 转正 → 恢复位移轴/缩放轴，保留自转轴 → onRefill() → RefillColumn(col)（后排前移）
-    │  ExitStraight（整车直行：侧翻匀加速归 0 → 自转轴归位 → 加速→匀速）
+    │  ExitStraight（整车直行：侧翻匀加速归 0 → 自转轴归位 → 弹性缩放 XZ 放大/Y 缩小并复原 → 加速→匀速）
     ▼
 Destroy(gameObject)
 ```
@@ -387,11 +441,11 @@ Destroy(gameObject)
 
 ## 9. 实现清单
 
-1. `ContainerItem` 加 `frontAxle` / `rearAxle` / `reverseScaleAxle` / `rollAxle` 四个 `Transform` 字段。
+1. `ContainerItem` 加 `frontAxle` / `rearAxle` / `reverseScaleAxle` / `rollAxle` / `elasticScaleAxle` 五个 `Transform` 字段。
 2. 新增 `ContainerExitDriver.cs`（§7.2，含 §5 reparenting + §6 运动模型 + 回退/清理）。
 3. `ContainerGroup` 拆分 `DisappearAndRefill` → `StartContainerExit` + `RefillColumn`，改 `MovePixelToContainer` 调用点。
-4. 场景配置：在小车 prefab 上挂 `ContainerExitDriver`，并在 `ContainerItem` 上关联前轴/后轴/倒车缩放轴/侧翻自转轴空物体（车头朝 -X；缩放轴位置即挤压 pivot；自转轴为最深层节点、绕前进轴侧翻）。
-5. 自测：耗尽容器 → 后轴倒车（向右后方 + 负角，自 reverseSquashDelay 起 X 匀减速缩放）→ 等待（缩放继续，到结束缩至 reverseSquashScale）→ 前轴出车（向左前方，边前进边先甩大到 -exitMaxAngle 再转正，X 匀加速回 1，出车开始即侧翻先匀加后匀减到 rollMaxAngle）→ 转正瞬间后排补位、侧翻匀加速归 0 → 自转轴归位 → 整车直行 → 销毁；
+4. 场景配置：在小车 prefab 上挂 `ContainerExitDriver`，并在 `ContainerItem` 上关联前轴/后轴/倒车缩放轴/侧翻自转轴/弹性缩放轴空物体（车头朝 -X；缩放轴位置即挤压 pivot；自转轴为最深层节点、绕前进轴侧翻；弹性轴为侧翻归 0 后单独应用的缩放 pivot）。
+5. 自测：耗尽容器 → 后轴倒车（向右后方 + 负角，自 reverseSquashDelay 起 X 匀减速缩放）→ 等待（缩放继续，到结束缩至 reverseSquashScale）→ 前轴出车（向左前方，边前进边先甩大到 -exitMaxAngle 再转正，X 匀加速回 1，出车开始即侧翻先匀加后匀减到 rollMaxAngle）→ 转正瞬间后排补位、侧翻匀加速归 0 → 自转轴归位 → 弹性缩放（XZ 放大/Y 缩小并复原）→ 整车直行 → 销毁；
    轴未配置时回退为旧「直接销毁 + 补位」。
 
 ---
@@ -408,6 +462,8 @@ Destroy(gameObject)
 | `exitDriveDuration` 过短，未到最大速度就销毁 | 允许：仍按速度积分直行，到点销毁（加速到最大速度是上限，不是硬性到达） |
 | `rollRecoverDuration ≥ exitDriveDuration` | 允许：侧翻未归 0 就被销毁，自转轴随本体一并销毁（OnDestroy 兜底） |
 | `rollOutDuration = 0` | `clamp01(τ / 0)` 返回 1，侧翻瞬间到位（退化为无过渡的瞬时侧翻，建议设 > 0） |
+| 弹性轴未配置（`elasticScaleAxle` 为 null） | 跳过弹性缩放，侧翻归 0 后直接整车直行（等价无弹性轴） |
+| `elasticTargetScale = (1,1,1)` | 无弹性，动画退化为纯直行；`elasticScaleDuration = 0` 时 `clamp01` 返回 1，瞬间到位后复原 |
 | `exitAngularAcceleration` 过大导致角度瞬间越 0 | `θ = min(…, 0)` 封顶，转正只发生一次 |
 | `exitMaxAngle ≤ reverseAngle` | 甩头第一阶段不进入，直接加速归 0（等价旧行为） |
 | 同列多容器同时耗尽 | 每列独立出库；补位只在本列内，互不干扰 |
@@ -434,6 +490,9 @@ Destroy(gameObject)
 | `rollMaxAngle` | 侧翻幅度（出车时的惯性侧翻角） | 侧翻更明显 | 几乎不侧翻 |
 | `rollOutDuration` | 侧翻到位快慢（出车开始多久侧翻到最大） | 到位更慢 | 到位更快 |
 | `rollRecoverDuration` | 侧翻归零快慢（转正后多久摆正） | 摆正更慢 | 摆正更快 |
+| `elasticTargetScale` | 弹性最终缩放值（三个分量各自定义，如 XZ 放大、Y 缩小） | 各分量偏离 1 越大越夸张 | 各分量越接近 1 越收敛 |
+| `elasticScaleDuration` | 弹性到位快慢（多久放大/压扁到最大） | 更慢、更绵软 | 更快、更干脆 |
+| `elasticRecoverDuration` | 弹性复原快慢（到最大后多久回弹到 1） | 回弹更慢 | 回弹更快 |
 
 ---
 
@@ -449,3 +508,4 @@ Destroy(gameObject)
 8. **倒车缩放轴**：新增 `reverseScaleAxle` 夹在驱动轴与车体之间（倒车在后轴下、出车在前轴下）；从倒车开始后 `reverseSquashDelay` 起 X 匀减速缩到 `reverseSquashScale`（覆盖剩余倒车+等待），出车开始匀加速回 1，做惯性夸张。
 9. **scale 重置**：只重置「空轴」（换轴时刚取出的新轴、归位的旧轴）的 `localScale` 为 1；小车自身缩放**不重置**（pivot 与缩放轴不一致会瞬移），而是让小车全程留在缩放轴下、避免被烘。
 10. **侧翻自转轴**：新增 `rollAxle` 作为最深层节点（缩放轴之下、车体之上）。侧翻自出车开始即用时间时钟驱动（`p = clamp01(τ / rollOutDuration)`，先匀加速后匀减速到 `rollMaxAngle`，到点后保持）；转正后保留自转轴作父物体，侧翻角匀加速归 0 后自转轴才归位。
+11. **弹性缩放轴**：新增 `elasticScaleAxle`，在侧翻归 0 后**单独应用**（其他轴均已归位为小车子物体，不共存）。用 `Vector3` 直接定义最终缩放 `elasticTargetScale`，在 `elasticScaleDuration` 内匀减速从 `(1,1,1)` 缩放到该值，到位后立即在 `elasticRecoverDuration` 内匀加速复原，复原后弹性轴归位、继续整车直行。
