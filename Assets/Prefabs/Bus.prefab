@@ -268,6 +268,37 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &2645389575694712044
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5069035725881052468}
+  m_Layer: 0
+  m_Name: BackAxle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5069035725881052468
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2645389575694712044}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.5, y: 0, z: 0.3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 5
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &5317974690723970201
 GameObject:
   m_ObjectHideFlags: 0
@@ -374,6 +405,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6649613836873739741}
   - component: {fileID: 4074727829767371378}
+  - component: {fileID: 2477889425775059489}
   m_Layer: 0
   m_Name: Bus
   m_TagString: Untagged
@@ -397,6 +429,8 @@ Transform:
   - {fileID: 7478661911827386971}
   - {fileID: 616969079983411815}
   - {fileID: 8116897745096912535}
+  - {fileID: 5733411419755414242}
+  - {fileID: 5069035725881052468}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -417,11 +451,34 @@ MonoBehaviour:
   capacityText: {fileID: 6284143163391647774}
   gridX: 0
   gridZ: 0
+  frontAxle: {fileID: 5733411419755414242}
+  rearAxle: {fileID: 5069035725881052468}
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1
   - renderer: {fileID: 3610771775886669064}
     materialSlotIndex: 0
+--- !u!114 &2477889425775059489
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6270132325612386151}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5c85d2042b1b6e4fa4bfbc8d20f06b1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  reverseDuration: 0.2
+  reverseDistance: 0.2
+  reverseAngle: 15
+  reverseWait: 0
+  exitAcceleration: 15
+  exitAngularAcceleration: 600
+  exitMaxAngle: 30
+  exitMaxSpeed: 20
+  exitDriveDuration: 0.8
 --- !u!1 &8010514467694969693
 GameObject:
   m_ObjectHideFlags: 0
@@ -506,3 +563,34 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &8986039854410672198
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5733411419755414242}
+  m_Layer: 0
+  m_Name: FrontAxle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5733411419755414242
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8986039854410672198}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.45, y: 0, z: 0.3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 4
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

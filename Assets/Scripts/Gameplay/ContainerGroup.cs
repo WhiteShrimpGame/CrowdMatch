@@ -192,14 +192,26 @@ namespace CrowdMatch
             Destroy(pixel.gameObject);
 
             if (isLast)
-                DisappearAndRefill(container, col);
+                StartContainerExit(container, col);
         }
 
-        private void DisappearAndRefill(ContainerItem gone, int col)
+        /// <summary>
+        /// 前排容器耗尽：立即清空该格，启动小车出库动画；转正瞬间触发补位。
+        /// 轴未配置时（ContainerExitDriver.Play 回退）等价旧的「直接销毁 + 补位」。
+        /// </summary>
+        private void StartContainerExit(ContainerItem gone, int col)
         {
             grid[col, 0] = null;
-            Destroy(gone.gameObject);
 
+            var driver = gone.GetComponent<ContainerExitDriver>();
+            if (driver == null)
+                driver = gone.gameObject.AddComponent<ContainerExitDriver>();
+            driver.Play(() => RefillColumn(col));
+        }
+
+        /// <summary>某列后排容器依次前移一格（补位）。</summary>
+        private void RefillColumn(int col)
+        {
             for (int row = 1; row < rows; row++)
             {
                 var it = grid[col, row];

@@ -25,6 +25,13 @@ namespace CrowdMatch
         [Tooltip("网格行坐标（纵，Z 方向），0 为最前排，越大越靠后")]
         public int gridZ;
 
+        [Header("小车出库轴（可选）")]
+        [Tooltip("前轴（空子物体，出车时的驱动轴）")]
+        public Transform frontAxle;
+
+        [Tooltip("后轴（空子物体，倒车时的驱动轴）")]
+        public Transform rearAxle;
+
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
 
