@@ -82,6 +82,13 @@ namespace CrowdMatch
         [Tooltip("按配置替换容器上指定 Renderer 的材质；留空则回退到现有逻辑（用 colorId 给首个 Renderer 上色）")]
         public List<MaterialReplacement> materialReplacements = new List<MaterialReplacement>();
 
+        /// <summary>车材质类型：标识替换时使用车体材质还是车内部材质。</summary>
+        public enum ContainerMaterialType
+        {
+            Car,      // 车材质
+            Interior  // 车内部材质
+        }
+
         [System.Serializable]
         public class MaterialReplacement
         {
@@ -90,6 +97,9 @@ namespace CrowdMatch
 
             [Tooltip("要替换的材质槽位下标（Renderer.materials 数组的 index），颜色仍按 colorId 取")]
             public int materialSlotIndex;
+
+            [Tooltip("使用哪组材质替换：车材质 或 车内部材质")]
+            public ContainerMaterialType materialType = ContainerMaterialType.Car;
         }
 
         private Renderer _renderer;
@@ -161,7 +171,11 @@ namespace CrowdMatch
             });
         }
 
-        /// <summary>按 colorId 应用材质，config 为空时从 GameManager 获取；随后按 materialReplacements 替换指定 Renderer 的指定材质槽位（颜色仍用 colorId）。</summary>
+        /// <summary>
+        /// 按 colorId 应用材质，config 为空时从 GameManager 获取。
+        /// 正常路径：按 materialReplacements 逐项替换（materialType 决定取车材质还是车内部材质）；
+        /// 无任何替换项时回退旧逻辑：用基础材质给首个 Renderer 整车上色。
+        /// </summary>
         public void ApplyMaterial(ColorConfig config = null)
         {
             if (config == null)
@@ -172,24 +186,28 @@ namespace CrowdMatch
             if (config == null)
                 return;
 
-            // 现有逻辑：colorId → 首个 Renderer 的材质
-            var mat = config.GetMaterial(colorId);
-            if (mat == null)
+            // 回退：未配置任何替换项时，用基础材质给首个 Renderer 整车上色（旧逻辑）
+            if (materialReplacements == null || materialReplacements.Count == 0)
+            {
+                var mat = config.GetMaterial(colorId);
+                if (_renderer == null)
+                    _renderer = GetComponent<Renderer>();
+                if (_renderer != null && mat != null)
+                    _renderer.sharedMaterial = mat;
                 return;
+            }
 
-            if (_renderer == null)
-                _renderer = GetComponent<Renderer>();
-            if (_renderer != null)
-                _renderer.sharedMaterial = mat;
-
-            // 按配置替换指定 Renderer 的指定材质槽位（颜色仍用 colorId）
-            if (materialReplacements == null)
-                return;
+            // 正常路径：按配置替换指定 Renderer 的指定材质槽位（颜色仍用 colorId；materialType 决定取车材质还是车内部材质）
             foreach (var rep in materialReplacements)
             {
                 if (rep == null || rep.renderer == null)
                     continue;
-                ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, mat);
+                var repMat = rep.materialType == ContainerMaterialType.Interior
+                    ? config.GetInteriorMaterial(colorId)
+                    : config.GetCarMaterial(colorId);
+                if (repMat == null)
+                    continue;   // 该组未配置此颜色，跳过
+                ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, repMat);
             }
         }
 

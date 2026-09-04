@@ -632,8 +632,13 @@ MonoBehaviour:
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1
+    materialType: 0
+  - renderer: {fileID: 9032713773489488543}
+    materialSlotIndex: 2
+    materialType: 1
   - renderer: {fileID: 3610771775886669064}
     materialSlotIndex: 0
+    materialType: 0
 --- !u!114 &2477889425775059489
 MonoBehaviour:
   m_ObjectHideFlags: 0
