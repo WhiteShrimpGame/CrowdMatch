@@ -208,7 +208,7 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 传送带推送模式：吸收一个像素——扣容量 → 像素 Lerp 进容器 → 销毁 → 若耗尽则补位。
+        /// 传送带推送模式：吸收一个像素——扣容量 → 像素上车（有空闲落点则 LocalJump + 弹性缩放并保留为乘客，否则回退 Lerp 后销毁）→ 若耗尽则补位。
         /// 开头用 IsEmpty 兜底（见 review H1/M1），避免同帧竞态下重复消费。
         /// </summary>
         public void ConsumePixel(PixelItem pixel, ContainerItem container)
@@ -224,6 +224,11 @@ namespace CrowdMatch
 
         private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast)
         {
+            // 新上车表现：有空闲落点时由 ContainerItem 接管（挂落点 → DOLocalJump 到 0 → 弹性缩放），
+            // 最后一个上车像素弹回完成后触发出库；无空闲落点则回退到下面的旧 Lerp。
+            if (container != null && container.TryBoardPixel(pixel, isLast ? () => TryExitIfAtFront(container, col) : null))
+                yield break;
+
             Vector3 start = pixel.transform.position;
             Vector3 target = container.transform.position;
 
