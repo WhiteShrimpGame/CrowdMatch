@@ -314,9 +314,18 @@ namespace CrowdMatch
         private IEnumerator MoveContainer(ContainerItem item, int col, int row)
         {
             item.isRefilling = true;
-            Vector3 start = item.transform.localPosition;
             Vector3 target = GetLocalPosition(col, row);
 
+            // 有 roll 轴：交给 ContainerItem 驱动「补位移动 + 侧倾 + 上车像素锁定」，完成回调里复位并尝试出库
+            if (item.TryStartRefillRoll(target, refillSpeed, () =>
+            {
+                item.isRefilling = false;
+                TryExitIfAtFront(item, col);
+            }))
+                yield break;
+
+            // 回退：无 roll 轴时旧的纯 Lerp 补位
+            Vector3 start = item.transform.localPosition;
             float dist = Vector3.Distance(start, target);
             float duration = refillSpeed > 0.0001f ? dist / refillSpeed : 0f;
 

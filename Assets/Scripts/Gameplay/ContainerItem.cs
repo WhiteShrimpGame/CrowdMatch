@@ -41,7 +41,7 @@ namespace CrowdMatch
         [Tooltip("侧翻自转轴（空子物体，最深层节点，位于缩放轴与车体之间，绕前进轴旋转做惯性侧翻）")]
         public Transform rollAxle;
 
-        [Tooltip("弹性缩放轴（空子物体，侧翻归 0 后单独应用的 XZ 放大/Y 缩小弹性缩放 pivot，可选）")]
+        [Tooltip("弹性缩放轴（空子物体，上车弹性缩放与出车侧翻归 0 后弹性缩放共用的 pivot；不配置则直接缩放车身）")]
         public Transform elasticScaleAxle;
 
         [Tooltip("盖子（可选，前排打开时直接隐藏；后排在前方全部找全匹配对象时播放 DisappearWithPop 消失动画）")]
@@ -78,6 +78,16 @@ namespace CrowdMatch
         [Tooltip("上车弹性缩放复原时长（秒，匀加速回到 1）")]
         public float boardElasticRecoverDuration = 0.15f;
 
+        [Header("补位侧倾 / Refill Roll")]
+        [Tooltip("补位侧倾最大角度（度，绕 roll 轴前进轴侧倾的固定最大角）")]
+        public float refillRollMaxAngle = 10f;
+
+        [Tooltip("补位侧倾到位时长（秒，匀减速 0→最大角）")]
+        public float refillRollOutDuration = 0.3f;
+
+        [Tooltip("补位侧倾回正时长（秒，匀加速 最大角→0）")]
+        public float refillRollRecoverDuration = 0.4f;
+
         [Header("材质替换")]
         [Tooltip("按配置替换容器上指定 Renderer 的材质；留空则回退到现有逻辑（用 colorId 给首个 Renderer 上色）")]
         public List<MaterialReplacement> materialReplacements = new List<MaterialReplacement>();
@@ -108,6 +118,28 @@ namespace CrowdMatch
         private readonly HashSet<Transform> _occupiedPos = new HashSet<Transform>();
         private int _elasticPhase;                 // 0=空闲，1=放大中（未到最大值），2=复原中（最大值→1）
         private Coroutine _elasticRoutine;
+        private Transform _elasticAxleParent;      // 换轴时记录车身原始父物体
+        private bool _elasticAxleSwapped;          // 车身是否已挂到弹性轴下
+
+        private readonly HashSet<PixelItem> _boardingPixels = new HashSet<PixelItem>();   // 上车跳跃中（未落定）的像素
+
+        private int _rollPhase;                   // 0=空闲，1=侧倾中（0→最大角），2=回正中（最大角→0）
+        private float _rollAngle;                 // 当前侧倾角（度）
+        private float _rollOutDur;                // 当前侧倾到位时长（重扩时缩短）
+        private float _rollTimer;                 // 当前阶段已过时间
+        private bool _rollMoveDone;               // 当前补位移动是否已完成
+        private bool _rollMoving;                 // 补位移动进行中
+        private bool _rollMovePending;            // 起点/时长待换轴后按实际位置计算
+        private float _rollMoveSpeed;             // 补位移动速度（ContainerGroup 传入）
+        private Vector3 _rollMoveStart;           // roll 轴在 ContainerGroup 空间的移动起点
+        private Vector3 _rollMoveTarget;          // roll 轴在 ContainerGroup 空间的移动终点
+        private float _rollMoveDuration;
+        private float _rollMoveTimer;
+        private Coroutine _rollRoutine;
+        private Action _rollOnComplete;
+        private Transform _rollAxleParent;        // 换轴时记录车身原始父物体
+        private Vector3 _rollAxleLocalOffset;     // roll 轴在车身局部空间的偏移（换轴前记录）
+        private bool _rollAxleSwapped;            // 车身是否已挂到 roll 轴下
 
         /// <summary>剩余容量</summary>
         public int Remaining => _remaining;
@@ -234,6 +266,7 @@ namespace CrowdMatch
             var pos = AcquireFreePos();
             if (pos == null)
                 return false;   // 无空闲落点，回退旧处理
+            _boardingPixels.Add(pixel);   // 上车中：侧倾时锁定其世界角度
             StartCoroutine(BoardRoutine(pixel, pos, onLastComplete));
             return true;
         }
@@ -265,6 +298,7 @@ namespace CrowdMatch
             {
                 GameData.ClearedPixelCount++;
                 pixel.transform.localPosition = Vector3.zero;   // 落定在落点上：不销毁，保留为乘客
+                _boardingPixels.Remove(pixel);   // 已落定，成为乘客，随车侧倾
             }
             // 落点不释放：该座位被该像素永久占用，直到整辆车出库销毁时一并带走
 
@@ -272,6 +306,54 @@ namespace CrowdMatch
             yield return WaitForElasticIdle();  // 等弹性归位
 
             onLastComplete?.Invoke();
+        }
+
+        /// <summary>弹性缩放实际作用的 scale（有弹性轴读/写弹性轴，否则退回车身 localScale）。</summary>
+        private Vector3 ElasticScale
+        {
+            get => elasticScaleAxle != null ? elasticScaleAxle.localScale : transform.localScale;
+            set
+            {
+                if (elasticScaleAxle != null)
+                    elasticScaleAxle.localScale = value;
+                else
+                    transform.localScale = value;
+            }
+        }
+
+        /// <summary>换轴（幂等）：弹性轴脱离车身挂到原始父物体并重置 scale，车身挂到弹性轴下（世界位姿保持，无瞬移）。</summary>
+        private void SwapElasticAxle()
+        {
+            if (_elasticAxleSwapped)
+                return;
+            var elastic = elasticScaleAxle;
+            if (elastic == null)
+                return;
+
+            _elasticAxleParent = transform.parent;
+            elastic.SetParent(_elasticAxleParent, true);   // 弹性轴脱离车身 → 原始父物体
+            elastic.localScale = Vector3.one;              // 纯 pivot，重置 scale
+            transform.SetParent(elastic, true);            // 车身挂到弹性轴下
+            _elasticAxleSwapped = true;
+        }
+
+        /// <summary>收起轴（幂等）：车身脱离弹性轴回原始父物体，弹性轴还给车身并重置 scale。</summary>
+        private void RestoreElasticAxle()
+        {
+            if (!_elasticAxleSwapped)
+                return;
+            var elastic = elasticScaleAxle;
+            if (elastic == null)
+            {
+                _elasticAxleSwapped = false;
+                return;
+            }
+
+            elastic.localScale = Vector3.one;              // 复原
+            transform.SetParent(_elasticAxleParent, true); // 车身脱离弹性轴回原始父物体
+            elastic.SetParent(transform, true);            // 弹性轴还给车身
+            elastic.localScale = Vector3.one;
+            _elasticAxleSwapped = false;
         }
 
         /// <summary>
@@ -287,9 +369,10 @@ namespace CrowdMatch
             {
                 if (_elasticRoutine != null)
                     StopCoroutine(_elasticRoutine);
-                _elasticRoutine = StartCoroutine(ElasticRoutine(transform.localScale, ReexpandDuration()));
+                _elasticRoutine = StartCoroutine(ElasticRoutine(ElasticScale, ReexpandDuration()));
                 return;
             }
+            SwapElasticAxle();   // 先换轴再缩放
             _elasticRoutine = StartCoroutine(ElasticRoutine(Vector3.one, boardElasticScaleDuration));
         }
 
@@ -301,7 +384,7 @@ namespace CrowdMatch
         private float ReexpandDuration()
         {
             Vector3 target = boardElasticTargetScale;
-            Vector3 cur = transform.localScale;
+            Vector3 cur = ElasticScale;
             float remainRatio = 0f;   // p_r² = |M-S|/|M-1|（剩余距离比）
             for (int i = 0; i < 3; i++)
             {
@@ -324,10 +407,10 @@ namespace CrowdMatch
                 t += Time.deltaTime;
                 float p = Mathf.Clamp01(t / dur);
                 float e = 1f - (1f - p) * (1f - p);   // 匀减速 ease-out
-                transform.localScale = Vector3.Lerp(fromScale, boardElasticTargetScale, e);
+                ElasticScale = Vector3.Lerp(fromScale, boardElasticTargetScale, e);
                 yield return null;
             }
-            transform.localScale = boardElasticTargetScale;
+            ElasticScale = boardElasticTargetScale;
 
             _elasticPhase = 2;
             t = 0f;
@@ -336,10 +419,12 @@ namespace CrowdMatch
                 t += Time.deltaTime;
                 float p = Mathf.Clamp01(t / boardElasticRecoverDuration);
                 float e = p * p;   // 匀加速 ease-in
-                transform.localScale = Vector3.Lerp(boardElasticTargetScale, Vector3.one, e);
+                ElasticScale = Vector3.Lerp(boardElasticTargetScale, Vector3.one, e);
                 yield return null;
             }
-            transform.localScale = Vector3.one;
+            ElasticScale = Vector3.one;
+
+            RestoreElasticAxle();   // 完成缩放后收起轴
 
             _elasticPhase = 0;
             _elasticRoutine = null;
@@ -349,6 +434,190 @@ namespace CrowdMatch
         {
             while (_elasticPhase != 0)
                 yield return null;
+        }
+
+        // ===== 补位侧倾 / Refill Roll =====
+
+        /// <summary>
+        /// 尝试启动补位侧倾：复用 roll 轴，先换轴，再把「移动 + 侧倾 + 上车像素锁定」交给内部协程。
+        /// 侧倾 0→最大角匀减速；侧倾到最大角且完成补位移动后才匀加速归 0；
+        /// 移动先完成则等侧倾到最大角再回正，侧倾先到最大角则保持最大角到移动完成再回正。
+        /// 叠加规则（同上车弹性）：未到最大角忽略新移动；已过最大角（回正中）则自当前角重扩，保持与原加速度/最大幅度一致。
+        /// 无 roll 轴时返回 false，调用方回退旧 Lerp。
+        /// </summary>
+        public bool TryStartRefillRoll(Vector3 targetLocalPos, float refillSpeed, Action onComplete)
+        {
+            if (rollAxle == null)
+                return false;
+
+            _rollOnComplete = onComplete;
+            bool active = _rollRoutine != null && _rollPhase != 0;
+
+            if (!active)
+            {
+                _rollAxleLocalOffset = rollAxle.localPosition;   // 换轴前记录偏移（车身旋转恒为 identity，与 ContainerGroup 空间同向）
+                _rollPhase = 1;
+                _rollAngle = 0f;
+                _rollOutDur = Mathf.Max(refillRollOutDuration, 0.0001f);
+                _rollTimer = 0f;
+                _rollMoveDone = false;
+                _rollRoutine = StartCoroutine(RefillRollRoutine());
+            }
+            else if (_rollPhase == 2)
+            {
+                // 回正中又发生新移动：自当前角重扩，时长按剩余距离比缩短，保持加速度与最大幅度一致
+                _rollOutDur = Mathf.Max(ReexpandRollOutDuration(), 0.0001f);
+                _rollPhase = 1;
+                _rollTimer = 0f;
+                _rollMoveDone = false;
+            }
+            else
+            {
+                // 侧倾中（未到最大角）或已在最大角保持：忽略新侧倾，只标记移动未完成
+                _rollMoveDone = false;
+            }
+
+            // 移动目标在 ContainerGroup 空间（车身目标 + 轴偏移）；起点/时长延迟到换轴后按实际位置计算
+            _rollMoveSpeed = refillSpeed;
+            _rollMoveTarget = targetLocalPos + _rollAxleLocalOffset;
+            _rollMoveTimer = 0f;
+            _rollMovePending = true;
+            _rollMoving = true;
+            return true;
+        }
+
+        private IEnumerator RefillRollRoutine()
+        {
+            // 等上车弹性完成并收起轴，避免弹性轴与侧倾轴同时换轴冲突
+            while (_elasticPhase != 0 || _elasticAxleSwapped)
+                yield return null;
+
+            SwapRollAxle();
+
+            while (true)
+            {
+                float dt = Time.deltaTime;
+
+                // 1. 补位移动：roll 轴在 ContainerGroup 空间匀速 Lerp
+                if (_rollMoving)
+                {
+                    if (_rollMovePending)
+                    {
+                        _rollMoveStart = rollAxle.localPosition;   // 此刻已换轴，localPosition 即 ContainerGroup 空间
+                        float dist = Vector3.Distance(_rollMoveStart, _rollMoveTarget);
+                        _rollMoveDuration = _rollMoveSpeed > 0.0001f ? dist / _rollMoveSpeed : 0f;
+                        _rollMovePending = false;
+                    }
+                    _rollMoveTimer += dt;
+                    float k = Mathf.Clamp01(_rollMoveDuration > 0.0001f ? _rollMoveTimer / _rollMoveDuration : 1f);
+                    rollAxle.localPosition = Vector3.Lerp(_rollMoveStart, _rollMoveTarget, k);
+                    if (k >= 1f)
+                    {
+                        _rollMoving = false;
+                        _rollMoveDone = true;
+                    }
+                }
+
+                // 2. 侧倾角度推进
+                if (_rollPhase == 1)
+                {
+                    _rollTimer += dt;
+                    float p = Mathf.Clamp01(_rollTimer / _rollOutDur);
+                    _rollAngle = refillRollMaxAngle * (1f - (1f - p) * (1f - p));   // 匀减速 ease-out
+                    if (p >= 1f)
+                    {
+                        _rollAngle = refillRollMaxAngle;
+                        if (_rollMoveDone)
+                        {
+                            _rollPhase = 2;
+                            _rollTimer = 0f;
+                        }
+                        // 移动未完成：保持最大角（p 恒 1，角度恒最大）
+                    }
+                }
+                else if (_rollPhase == 2)
+                {
+                    _rollTimer += dt;
+                    float p = Mathf.Clamp01(_rollTimer / refillRollRecoverDuration);
+                    _rollAngle = refillRollMaxAngle * (1f - p * p);   // 匀加速 ease-in
+                    if (p >= 1f)
+                    {
+                        _rollAngle = 0f;
+                        rollAxle.localRotation = Quaternion.identity;
+                        RestoreRollAxle();
+                        _rollPhase = 0;
+                        var cb = _rollOnComplete;
+                        _rollOnComplete = null;
+                        _rollRoutine = null;
+                        cb?.Invoke();
+                        yield break;
+                    }
+                }
+
+                // 3. 应用侧倾角度 + 锁定上车中像素的世界角度
+                if (_rollPhase != 0 && rollAxle != null)
+                    rollAxle.localRotation = Quaternion.Euler(_rollAngle, 0f, 0f);
+                LockBoardingPixelsWorldRotation();
+
+                yield return null;
+            }
+        }
+
+        /// <summary>换轴（幂等）：roll 轴脱离车身挂到原始父物体并重置 scale，车身挂到 roll 轴下（世界位姿保持，无瞬移）。</summary>
+        private void SwapRollAxle()
+        {
+            if (_rollAxleSwapped)
+                return;
+            if (rollAxle == null)
+                return;
+
+            _rollAxleParent = transform.parent;
+            rollAxle.SetParent(_rollAxleParent, true);   // roll 轴脱离车身 → 原始父物体
+            rollAxle.localScale = Vector3.one;           // 纯 pivot，重置 scale
+            transform.SetParent(rollAxle, true);         // 车身挂到 roll 轴下
+            _rollAxleSwapped = true;
+        }
+
+        /// <summary>收起轴（幂等）：车身脱离 roll 轴回原始父物体，roll 轴还给车身并重置 scale / rotation。</summary>
+        private void RestoreRollAxle()
+        {
+            if (!_rollAxleSwapped)
+                return;
+            if (rollAxle == null)
+            {
+                _rollAxleSwapped = false;
+                return;
+            }
+
+            rollAxle.localRotation = Quaternion.identity;
+            transform.SetParent(_rollAxleParent, true);   // 车身脱离 roll 轴回原始父物体
+            rollAxle.SetParent(transform, true);          // roll 轴还给车身
+            rollAxle.localScale = Vector3.one;
+            _rollAxleSwapped = false;
+        }
+
+        /// <summary>
+        /// 回正中重扩的到位时长：使重扩加速度与初始态直接 ease-out 一致（自中间逐帧还原直接态动画）。
+        /// 剩余距离比 p_r² = |M-θ| / |M-0|，直接态动画在角度 θ 处剩余时长为 T·p_r，故 T' = T·√(p_r²) = T·p_r。
+        /// </summary>
+        private float ReexpandRollOutDuration()
+        {
+            float max = Mathf.Abs(refillRollMaxAngle);
+            if (max < 1e-4f)
+                return refillRollOutDuration;
+            float remain = Mathf.Abs(refillRollMaxAngle - _rollAngle);
+            float remainRatio = Mathf.Clamp01(remain / max);
+            return Mathf.Sqrt(remainRatio) * refillRollOutDuration;
+        }
+
+        /// <summary>侧倾时锁定上车中像素（父物体为 Pos，父物体旋转会偏移其位置）的世界角度为 0，保证跳跃上车表现不受侧倾影响。</summary>
+        private void LockBoardingPixelsWorldRotation()
+        {
+            foreach (var pixel in _boardingPixels)
+            {
+                if (pixel != null)
+                    pixel.transform.rotation = Quaternion.identity;
+            }
         }
     }
 }
