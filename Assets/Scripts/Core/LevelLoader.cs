@@ -107,5 +107,38 @@ namespace CrowdMatch
 
             cg.RebuildGrid();
         }
+
+        /// <summary>
+        /// 洗牌容器：随机打乱各容器在网格上的摆放位置（每个容器的 colorId / capacity 保持不变），
+        /// 使关卡每次初始化时容器排列不同，同时不影响各颜色总容量与可解性。
+        /// </summary>
+        public static void ShuffleContainers(LevelData.ContainerData d)
+        {
+            if (d == null || d.items == null || d.items.Length < 2)
+                return;
+
+            var xs = new int[d.items.Length];
+            var ys = new int[d.items.Length];
+            for (int i = 0; i < d.items.Length; i++)
+            {
+                xs[i] = d.items[i].x;
+                ys[i] = d.items[i].y;
+            }
+
+            // Fisher-Yates 洗牌位置
+            for (int i = d.items.Length - 1; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                int tx = xs[i]; xs[i] = xs[j]; xs[j] = tx;
+                int ty = ys[i]; ys[i] = ys[j]; ys[j] = ty;
+            }
+
+            // 洗牌后的位置重新分配回各容器（colorId / capacity 不变）
+            for (int i = 0; i < d.items.Length; i++)
+            {
+                d.items[i].x = xs[i];
+                d.items[i].y = ys[i];
+            }
+        }
     }
 }

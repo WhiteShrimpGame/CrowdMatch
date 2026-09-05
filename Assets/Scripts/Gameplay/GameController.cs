@@ -114,6 +114,9 @@ namespace CrowdMatch
             if (data == null)
                 return;
 
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同
+            LevelLoader.ShuffleContainers(data.container);
+
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
             pixelGroup.RefreshExposed();
 

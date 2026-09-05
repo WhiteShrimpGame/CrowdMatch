@@ -113,7 +113,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 刷新所有像素的「暴露（可点击）」状态：
-        /// 先标记「直接暴露」的格子（第 0 行，或前方紧邻格同列 row-1 为空），
+        /// 先标记「直接暴露」的格子（第 0 行，或四周前/后/左/右任一紧邻格为空），
         /// 再把每个同色连通块整体激活——只要该连通块包含至少一个直接暴露格，块内所有像素同时激活。
         /// 已离开网格的像素由调用方显式关闭，不在此处理。
         /// </summary>
@@ -133,7 +133,12 @@ namespace CrowdMatch
                 {
                     if (grid[c, r] == null)
                         continue;
-                    directlyExposed[c, r] = r == 0 || grid[c, r - 1] == null;
+                    directlyExposed[c, r] =
+                        r == 0 ||                                            // 前方：出口（第一排）或空
+                        grid[c, r - 1] == null ||                            // 前方空
+                        (r + 1 < totalRows && grid[c, r + 1] == null) ||     // 后方空（后面暴露）
+                        (c - 1 >= 0 && grid[c - 1, r] == null) ||            // 左方空（侧面暴露）
+                        (c + 1 < cols && grid[c + 1, r] == null);            // 右方空（侧面暴露）
                 }
             }
 
