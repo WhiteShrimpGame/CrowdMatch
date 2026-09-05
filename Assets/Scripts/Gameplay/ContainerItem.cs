@@ -121,7 +121,7 @@ namespace CrowdMatch
         private Transform _elasticAxleParent;      // 换轴时记录车身原始父物体
         private bool _elasticAxleSwapped;          // 车身是否已挂到弹性轴下
 
-        private readonly HashSet<PixelItem> _boardingPixels = new HashSet<PixelItem>();   // 上车跳跃中（未落定）的像素
+        private readonly HashSet<PixelItem> _boardingPixels = new HashSet<PixelItem>();   // 上车跳跃中（未落定）的像素；侧倾时逐帧锁定其世界角度
 
         private int _rollPhase;                   // 0=空闲，1=侧倾中（0→最大角），2=回正中（最大角→0）
         private float _rollAngle;                 // 当前侧倾角（度）
@@ -140,6 +140,7 @@ namespace CrowdMatch
         private Transform _rollAxleParent;        // 换轴时记录车身原始父物体
         private Vector3 _rollAxleLocalOffset;     // roll 轴在车身局部空间的偏移（换轴前记录）
         private bool _rollAxleSwapped;            // 车身是否已挂到 roll 轴下
+        private bool _rollSkipTilt;               // 侧倾请求时上车弹性仍在进行：忽略侧倾，仅补位移动
 
         /// <summary>剩余容量</summary>
         public int Remaining => _remaining;
@@ -266,7 +267,7 @@ namespace CrowdMatch
             var pos = AcquireFreePos();
             if (pos == null)
                 return false;   // 无空闲落点，回退旧处理
-            _boardingPixels.Add(pixel);   // 上车中：侧倾时锁定其世界角度
+            _boardingPixels.Add(pixel);   // 上车中（未落定）：侧倾时逐帧锁定其世界角度，避免侧倾旋转偏移跳跃表现
             StartCoroutine(BoardRoutine(pixel, pos, onLastComplete));
             return true;
         }
@@ -298,7 +299,7 @@ namespace CrowdMatch
             {
                 GameData.ClearedPixelCount++;
                 pixel.transform.localPosition = Vector3.zero;   // 落定在落点上：不销毁，保留为乘客
-                _boardingPixels.Remove(pixel);   // 已落定，成为乘客，随车侧倾
+                _boardingPixels.Remove(pixel);   // 已落定，成为乘客；侧倾时不再锁定其世界角度
             }
             // 落点不释放：该座位被该像素永久占用，直到整辆车出库销毁时一并带走
 
@@ -363,6 +364,8 @@ namespace CrowdMatch
         /// </summary>
         private void PlayBoardElastic()
         {
+            if (_rollPhase != 0)
+                return;   // 侧倾中：忽略上车弹性（互斥，避免弹性换轴与侧倾换轴同时改车身父物体）
             if (_elasticPhase == 1)
                 return;   // 尚未到最大值：忽略新动画
             if (_elasticPhase == 2)
@@ -443,6 +446,7 @@ namespace CrowdMatch
         /// 侧倾 0→最大角匀减速；侧倾到最大角且完成补位移动后才匀加速归 0；
         /// 移动先完成则等侧倾到最大角再回正，侧倾先到最大角则保持最大角到移动完成再回正。
         /// 叠加规则（同上车弹性）：未到最大角忽略新移动；已过最大角（回正中）则自当前角重扩，保持与原加速度/最大幅度一致。
+        /// 互斥：若启动时上车弹性仍在进行，则本次忽略侧倾（仅补位移动，不旋转）。
         /// 无 roll 轴时返回 false，调用方回退旧 Lerp。
         /// </summary>
         public bool TryStartRefillRoll(Vector3 targetLocalPos, float refillSpeed, Action onComplete)
@@ -456,6 +460,7 @@ namespace CrowdMatch
             if (!active)
             {
                 _rollAxleLocalOffset = rollAxle.localPosition;   // 换轴前记录偏移（车身旋转恒为 identity，与 ContainerGroup 空间同向）
+                _rollSkipTilt = (_elasticPhase != 0 || _elasticAxleSwapped);   // 启动时弹性仍在进行 → 本次忽略侧倾
                 _rollPhase = 1;
                 _rollAngle = 0f;
                 _rollOutDur = Mathf.Max(refillRollOutDuration, 0.0001f);
@@ -488,7 +493,8 @@ namespace CrowdMatch
 
         private IEnumerator RefillRollRoutine()
         {
-            // 等上车弹性完成并收起轴，避免弹性轴与侧倾轴同时换轴冲突
+            // 等上车弹性结束并收起轴（弹性换轴会改车身父物体，必须等车身回到 ContainerGroup 才能换侧倾轴）。
+            // 侧倾不再等待跳跃中的像素落定——落定后触发的弹性由 PlayBoardElastic 内的互斥判断直接忽略。
             while (_elasticPhase != 0 || _elasticAxleSwapped)
                 yield return null;
 
@@ -518,31 +524,11 @@ namespace CrowdMatch
                     }
                 }
 
-                // 2. 侧倾角度推进
-                if (_rollPhase == 1)
+                if (_rollSkipTilt)
                 {
-                    _rollTimer += dt;
-                    float p = Mathf.Clamp01(_rollTimer / _rollOutDur);
-                    _rollAngle = refillRollMaxAngle * (1f - (1f - p) * (1f - p));   // 匀减速 ease-out
-                    if (p >= 1f)
+                    // 忽略侧倾：仅补位移动，不旋转；移动完成后直接收起轴
+                    if (_rollMoveDone)
                     {
-                        _rollAngle = refillRollMaxAngle;
-                        if (_rollMoveDone)
-                        {
-                            _rollPhase = 2;
-                            _rollTimer = 0f;
-                        }
-                        // 移动未完成：保持最大角（p 恒 1，角度恒最大）
-                    }
-                }
-                else if (_rollPhase == 2)
-                {
-                    _rollTimer += dt;
-                    float p = Mathf.Clamp01(_rollTimer / refillRollRecoverDuration);
-                    _rollAngle = refillRollMaxAngle * (1f - p * p);   // 匀加速 ease-in
-                    if (p >= 1f)
-                    {
-                        _rollAngle = 0f;
                         rollAxle.localRotation = Quaternion.identity;
                         RestoreRollAxle();
                         _rollPhase = 0;
@@ -553,11 +539,49 @@ namespace CrowdMatch
                         yield break;
                     }
                 }
+                else
+                {
+                    // 2. 侧倾角度推进
+                    if (_rollPhase == 1)
+                    {
+                        _rollTimer += dt;
+                        float p = Mathf.Clamp01(_rollTimer / _rollOutDur);
+                        _rollAngle = refillRollMaxAngle * (1f - (1f - p) * (1f - p));   // 匀减速 ease-out
+                        if (p >= 1f)
+                        {
+                            _rollAngle = refillRollMaxAngle;
+                            if (_rollMoveDone)
+                            {
+                                _rollPhase = 2;
+                                _rollTimer = 0f;
+                            }
+                            // 移动未完成：保持最大角（p 恒 1，角度恒最大）
+                        }
+                    }
+                    else if (_rollPhase == 2)
+                    {
+                        _rollTimer += dt;
+                        float p = Mathf.Clamp01(_rollTimer / refillRollRecoverDuration);
+                        _rollAngle = refillRollMaxAngle * (1f - p * p);   // 匀加速 ease-in
+                        if (p >= 1f)
+                        {
+                            _rollAngle = 0f;
+                            rollAxle.localRotation = Quaternion.identity;
+                            RestoreRollAxle();
+                            _rollPhase = 0;
+                            var cb = _rollOnComplete;
+                            _rollOnComplete = null;
+                            _rollRoutine = null;
+                            cb?.Invoke();
+                            yield break;
+                        }
+                    }
 
-                // 3. 应用侧倾角度 + 锁定上车中像素的世界角度
-                if (_rollPhase != 0 && rollAxle != null)
-                    rollAxle.localRotation = Quaternion.Euler(_rollAngle, 0f, 0f);
-                LockBoardingPixelsWorldRotation();
+                    // 3. 应用侧倾角度 + 锁定上车中像素世界角度（父物体为 Pos，侧倾旋转会偏移其位置）
+                    if (_rollPhase != 0 && rollAxle != null)
+                        rollAxle.localRotation = Quaternion.Euler(_rollAngle, 0f, 0f);
+                    LockBoardingPixelsWorldRotation();
+                }
 
                 yield return null;
             }
@@ -596,6 +620,16 @@ namespace CrowdMatch
             _rollAxleSwapped = false;
         }
 
+        /// <summary>侧倾时锁定上车中像素（父物体为 Pos，父物体旋转会偏移其位置）的世界角度为 0，保证跳跃上车表现不受侧倾影响。</summary>
+        private void LockBoardingPixelsWorldRotation()
+        {
+            foreach (var pixel in _boardingPixels)
+            {
+                if (pixel != null)
+                    pixel.transform.rotation = Quaternion.identity;
+            }
+        }
+
         /// <summary>
         /// 回正中重扩的到位时长：使重扩加速度与初始态直接 ease-out 一致（自中间逐帧还原直接态动画）。
         /// 剩余距离比 p_r² = |M-θ| / |M-0|，直接态动画在角度 θ 处剩余时长为 T·p_r，故 T' = T·√(p_r²) = T·p_r。
@@ -608,16 +642,6 @@ namespace CrowdMatch
             float remain = Mathf.Abs(refillRollMaxAngle - _rollAngle);
             float remainRatio = Mathf.Clamp01(remain / max);
             return Mathf.Sqrt(remainRatio) * refillRollOutDuration;
-        }
-
-        /// <summary>侧倾时锁定上车中像素（父物体为 Pos，父物体旋转会偏移其位置）的世界角度为 0，保证跳跃上车表现不受侧倾影响。</summary>
-        private void LockBoardingPixelsWorldRotation()
-        {
-            foreach (var pixel in _boardingPixels)
-            {
-                if (pixel != null)
-                    pixel.transform.rotation = Quaternion.identity;
-            }
         }
     }
 }
