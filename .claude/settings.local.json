@@ -14,7 +14,8 @@
       "WebFetch(domain:wmedia.es)",
       "WebFetch(domain:claude-codex.fr)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(node \"C:\\\\Users\\\\hougo\\\\.claude\\\\skills\\\\estimate-token-usage\\\\scripts\\\\estimate.js\")"
+      "Bash(node \"C:\\\\Users\\\\hougo\\\\.claude\\\\skills\\\\estimate-token-usage\\\\scripts\\\\estimate.js\")",
+      "Bash(grep -o 'm_Conditions:.\\\\{0,400\\\\}' \"C:\\\\Users\\\\hougo\\\\.claude\\\\projects\\\\F--CrowdMatch\\\\7af79093-572e-4ef8-9f77-89546145fe26.jsonl\")"
     ]
   }
 }
