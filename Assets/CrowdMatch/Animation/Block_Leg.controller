@@ -81,7 +81,7 @@ AnimatorStateMachine:
   m_ChildStates:
   - serializedVersion: 1
     m_State: {fileID: 8401398567667215953}
-    m_Position: {x: 404.00635, y: 201.48601, z: 0}
+    m_Position: {x: 400, y: 200, z: 0}
   - serializedVersion: 1
     m_State: {fileID: -163842530794425800}
     m_Position: {x: 606.7705, y: 359.3761, z: 0}
@@ -103,7 +103,7 @@ AnimatorState:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Spinning
-  m_Speed: 1
+  m_Speed: 2
   m_CycleOffset: 0
   m_Transitions:
   - {fileID: -2173315815405362943}
