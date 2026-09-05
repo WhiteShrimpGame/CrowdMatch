@@ -47,6 +47,12 @@ namespace CrowdMatch
         /// <summary>从 Walking 回到 Idle 时，Animator 所属 Transform 归零的时长（秒）。</summary>
         private const float IdleResetDuration = 0.1f;
 
+        /// <summary>Walking 状态的哈希（供 Play 以随机相位切入）。</summary>
+        private static readonly int WalkStateHash = Animator.StringToHash("Walking");
+
+        /// <summary>当前是否处于 Walking（只在 false→true 沿上随机相位，避免反复调用时抖动）。</summary>
+        private bool _walking;
+
         /// <summary>起跳坐回时 exposeMoveTarget 的目标 y（Awake 捕获预制体初始值，兜底 -0.6957998）。</summary>
         private float _restLocalY = -0.6957998f;
 
@@ -87,13 +93,18 @@ namespace CrowdMatch
 
         /// <summary>设置走/停动画：true = 播放 Walking，false = 回到 Idle（并确保 Animator 启用）。
         /// Walking 时恢复根运动；回到 Idle 时关闭根运动（停掉 Animator 对 transform 的覆盖），
-        /// 并用 DOTween 在 IdleResetDuration 内把 Animator 所属 Transform 的局部位置与旋转平滑归零。</summary>
+        /// 并用 DOTween 在 IdleResetDuration 内把 Animator 所属 Transform 的局部位置与旋转平滑归零。
+        /// 每次真正进入 Walking（false→true 沿）会以随机相位切入，避免所有像素走路节奏一致。</summary>
         public void SetWalking(bool walking)
         {
             if (animator == null)
                 return;
-            animator.SetBool(WalkParam, walking);
+
+            bool entering = walking && !_walking;   // false→true 沿：真正进入 Walking
+            _walking = walking;
+
             animator.enabled = true;
+            animator.SetBool(WalkParam, walking);
 
             // 停掉可能仍在进行的归零 tween（无论切到走还是停都先清）
             animator.transform.DOKill();
@@ -102,6 +113,12 @@ namespace CrowdMatch
             {
                 // 恢复根运动：身体随 Walking 的根运动位移/晃动
                 animator.applyRootMotion = true;
+
+                if (entering)
+                {
+                    // 随机起始相位：直接以随机 normalizedTime 切入 Walking，错开各像素的走路节奏
+                    animator.Play(WalkStateHash, 0, UnityEngine.Random.value);
+                }
             }
             else
             {

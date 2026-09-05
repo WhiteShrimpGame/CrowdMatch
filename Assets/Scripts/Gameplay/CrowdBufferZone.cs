@@ -45,6 +45,9 @@ namespace CrowdMatch
         [Tooltip("进入缓冲区（匀速阶段）与物理阶段的驱动速度（物理阶段每帧朝缺口方向直接设定速度）")]
         public float crowdSpeed = 5f;
 
+        [Tooltip("物理阶段像素朝出口（gap）方向转向的最大角速度（度/秒）。进入物理时不再瞬时朝向出口，而是从当前角度平滑趋近，避免角度跳变。")]
+        public float physicalRotateSpeed = 360f;
+
         [Header("墙")]
         [Tooltip("墙厚度")]
         public float wallThickness = 0.1f;
@@ -228,8 +231,10 @@ namespace CrowdMatch
                 if (dir.sqrMagnitude > 0.0001f)
                 {
                     rb.velocity = dir.normalized * crowdSpeed;
-                    // 物理移动阶段：z 正方向始终朝向出口（gap）
-                    p.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                    // 物理移动阶段：z 正方向以最大角速度平滑趋近出口（gap）方向，避免进入物理瞬间的角度跳变
+                    Quaternion target = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                    p.transform.rotation = Quaternion.RotateTowards(
+                        p.transform.rotation, target, physicalRotateSpeed * Time.fixedDeltaTime);
                 }
                 else
                 {
