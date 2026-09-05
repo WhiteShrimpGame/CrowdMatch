@@ -47,6 +47,12 @@ namespace CrowdMatch
         /// <summary>从 Walking 回到 Idle 时，Animator 所属 Transform 归零的时长（秒）。</summary>
         private const float IdleResetDuration = 0.1f;
 
+        /// <summary>最新期望的走/停状态（由传送带追赶状态等驱动；平滑期间会暂存而不立即应用）。</summary>
+        private bool _wantWalking;
+
+        /// <summary>是否正在做 Idle 平滑归零（期间不切回 Walking）。</summary>
+        private bool _smoothing;
+
         /// <summary>起跳坐回时 exposeMoveTarget 的目标 y（Awake 捕获预制体初始值，兜底 -0.6957998）。</summary>
         private float _restLocalY = -0.6957998f;
 
@@ -86,31 +92,66 @@ namespace CrowdMatch
         }
 
         /// <summary>设置走/停动画：true = 播放 Walking，false = 回到 Idle（并确保 Animator 启用）。
-        /// Walking 时恢复根运动；回到 Idle 时关闭根运动（停掉 Animator 对 transform 的覆盖），
-        /// 并用 DOTween 在 IdleResetDuration 内把 Animator 所属 Transform 的局部位置与旋转平滑归零。</summary>
+        /// Walking 时恢复根运动；回到 Idle 时关闭根运动，并用 DOTween 平滑归零。
+        /// 若切到 Idle 的平滑尚未完成，期间的 Walking 请求会被延后，待平滑结束且仍处于追赶状态时再切回 Walking。</summary>
         public void SetWalking(bool walking)
         {
             if (animator == null)
                 return;
 
-            animator.enabled = true;
-            animator.SetBool(WalkParam, walking);
-
-            // 停掉可能仍在进行的归零 tween（无论切到走还是停都先清）
-            animator.transform.DOKill();
+            _wantWalking = walking;
 
             if (walking)
             {
-                // 恢复根运动：身体随 Walking 的根运动位移/晃动
-                animator.applyRootMotion = true;
+                // 平滑归零进行中：不切回 Walking，等平滑结束再按最新期望状态决定
+                if (_smoothing)
+                    return;
+                ApplyWalking();
             }
             else
             {
-                // 关闭根运动：Animator 不再每帧写 transform，随后平滑归零
-                animator.applyRootMotion = false;
-                animator.transform.DOLocalMove(Vector3.zero, IdleResetDuration);
-                animator.transform.DOLocalRotate(Vector3.zero, IdleResetDuration);
+                ApplyIdle();
             }
+        }
+
+        /// <summary>立即切到 Walking：先直接归零再恢复根运动。</summary>
+        private void ApplyWalking()
+        {
+            animator.enabled = true;
+            animator.SetBool(WalkParam, true);
+
+            // 停掉可能仍在进行的归零 tween，并直接归零（正常情况下平滑已结束，这里兜底）
+            animator.transform.DOKill();
+            animator.transform.localPosition = Vector3.zero;
+            animator.transform.localRotation = Quaternion.identity;
+
+            // 恢复根运动：身体随 Walking 的根运动位移/晃动
+            animator.applyRootMotion = true;
+        }
+
+        /// <summary>切到 Idle：关闭根运动并平滑归零；完成后若仍处于追赶状态则切回 Walking。</summary>
+        private void ApplyIdle()
+        {
+            _smoothing = true;
+
+            animator.enabled = true;
+            animator.SetBool(WalkParam, false);
+
+            // 关闭根运动：Animator 不再每帧写 transform，随后平滑归零
+            animator.applyRootMotion = false;
+
+            animator.transform.DOKill();
+            animator.transform.DOLocalMove(Vector3.zero, IdleResetDuration);
+            animator.transform.DOLocalRotate(Vector3.zero, IdleResetDuration)
+                .OnComplete(OnIdleSmoothComplete);
+        }
+
+        /// <summary>Idle 平滑归零结束：清除标记，若期间又有追赶（Walking）请求则切回 Walking。</summary>
+        private void OnIdleSmoothComplete()
+        {
+            _smoothing = false;
+            if (_wantWalking && animator != null)
+                ApplyWalking();
         }
 
         /// <summary>把 exposeMoveTarget 匀速坐回原始 y（上车起跳时调用，默认回 _restLocalY）。</summary>
