@@ -62,6 +62,12 @@ namespace CrowdMatch
                 return;
             }
 
+            if (pixelGroup.pixelPrefab == null)
+            {
+                EditorUtility.DisplayDialog("批量图片转关卡", "PixelGroup.pixelPrefab 为空，请先指定 Block 预制体。", "确定");
+                return;
+            }
+
             int startIndex = CountExistingLevels(OutDir) + 1;
 
             if (!EditorUtility.DisplayDialog("批量图片转关卡",
@@ -203,19 +209,30 @@ namespace CrowdMatch
 
         private static void GeneratePixelGrid(PixelGroup pg)
         {
+            if (pg.pixelPrefab == null)
+            {
+                Debug.LogError(Tag + " PixelGroup.pixelPrefab 为空，无法生成像素网格。");
+                return;
+            }
+
             for (int col = 0; col < pg.columns; col++)
             {
                 for (int row = 0; row < pg.TotalRows; row++)
                 {
-                    var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    var go = InstantiateTemplate(pg.pixelPrefab, pg.transform);
                     go.name = "Pixel_" + row + "_" + col;
-                    go.transform.SetParent(pg.transform, false);
                     go.transform.localPosition = pg.GetLocalPosition(col, row);
                     go.transform.localScale = Vector3.one * pg.unitSize;
 
                     Undo.RegisterCreatedObjectUndo(go, "生成像素网格");
 
-                    var item = Undo.AddComponent<PixelItem>(go);
+                    var item = go.GetComponent<PixelItem>();
+                    if (item == null)
+                    {
+                        Debug.LogError(Tag + " 预制体 " + pg.pixelPrefab.name + " 缺少 PixelItem 组件，已销毁该实例。", go);
+                        Object.DestroyImmediate(go);
+                        continue;
+                    }
                     item.gridX = col;
                     item.gridZ = row;
                 }
@@ -385,6 +402,14 @@ namespace CrowdMatch
             if (PrefabUtility.GetPrefabAssetType(template) == PrefabAssetType.NotAPrefab)
                 return (GameObject)Object.Instantiate(template.gameObject, parent);
             return (GameObject)PrefabUtility.InstantiatePrefab(template.gameObject, parent);
+        }
+
+        /// <summary>实例化像素模板（GameObject 版本）：预制体资产走 InstantiatePrefab，场景对象走 Object.Instantiate 克隆。</summary>
+        private static GameObject InstantiateTemplate(GameObject template, Transform parent)
+        {
+            if (PrefabUtility.GetPrefabAssetType(template) == PrefabAssetType.NotAPrefab)
+                return (GameObject)Object.Instantiate(template, parent);
+            return (GameObject)PrefabUtility.InstantiatePrefab(template, parent);
         }
     }
 }

@@ -110,6 +110,7 @@ namespace CrowdMatch
                 return;
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
+            pixelGroup.RefreshExposed();
 
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels();
@@ -400,9 +401,15 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
-            // 从网格移除（匹配格先置空）
+            // 从网格移除（匹配格先置空，并关闭其暴露状态）
             foreach (var item in matched)
+            {
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
+                item.SetExposed(false);
+            }
+
+            // 移除后刷新剩余像素的暴露（可点击）状态
+            pixelGroup.RefreshExposed();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集

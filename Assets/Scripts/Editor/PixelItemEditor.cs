@@ -73,11 +73,13 @@ namespace CrowdMatch
             foreach (var t in targets)
             {
                 var item = (PixelItem)t;
-                var rend = item.GetComponent<Renderer>();
 
                 Undo.RecordObject(item, "Set Pixel Color");
-                if (rend != null)
-                    Undo.RecordObject(rend, "Set Pixel Material");
+                foreach (var r in item.renderers)
+                {
+                    if (r != null)
+                        Undo.RecordObject(r, "Set Pixel Material");
+                }
 
                 item.colorId = batchColorId;
                 item.ApplyMaterial(colorConfig);

@@ -626,9 +626,12 @@ MonoBehaviour:
   boardJumpPower: 2
   boardJumpCount: 1
   boardJumpDuration: 0.5
-  boardElasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
+  boardElasticTargetScale: {x: 1.08, y: 0.85, z: 1.08}
   boardElasticScaleDuration: 0.12
   boardElasticRecoverDuration: 0.12
+  refillRollMaxAngle: -10
+  refillRollOutDuration: 0.2
+  refillRollRecoverDuration: 0.15
   materialReplacements:
   - renderer: {fileID: 9032713773489488543}
     materialSlotIndex: 1

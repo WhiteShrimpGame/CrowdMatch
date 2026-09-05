@@ -21,7 +21,7 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "「生成网格」会删除现有 PixelItem 子物体，按当前参数重新生成 Sphere，并随机生成局部同色颜色分布。",
+                "「生成网格」会删除现有 PixelItem 子物体，按当前参数用 pixelPrefab 重新生成实例，并随机生成局部同色颜色分布。",
                 MessageType.Info);
 
             if (GUILayout.Button("生成网格"))
@@ -90,6 +90,12 @@ namespace CrowdMatch
 
         private void GenerateGrid(PixelGroup group)
         {
+            if (group.pixelPrefab == null)
+            {
+                EditorUtility.DisplayDialog("生成网格", "请先在 PixelGroup 上指定 pixelPrefab（Block 预制体，需自带 PixelItem 组件）。", "确定");
+                return;
+            }
+
             // 删除现有的 PixelItem 子物体
             for (int i = group.transform.childCount - 1; i >= 0; i--)
             {
@@ -98,20 +104,25 @@ namespace CrowdMatch
                     Undo.DestroyObjectImmediate(child.gameObject);
             }
 
-            // 以自身为中心重新生成（仅几何 + 组件，颜色由 AssignClusteredColors 统一分配）
+            // 以自身为中心重新生成（几何来自 pixelPrefab，颜色由 AssignClusteredColors 统一分配）
             for (int col = 0; col < group.columns; col++)
             {
                 for (int row = 0; row < group.TotalRows; row++)
                 {
-                    var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    var go = InstantiateTemplate(group.pixelPrefab, group.transform);
                     go.name = "Pixel_" + row + "_" + col; // 命名 row_col：row 0 = 前排（Z 最大），col 0 = 最左（X 最小）
-                    go.transform.SetParent(group.transform, false);
                     go.transform.localPosition = group.GetLocalPosition(col, row);
                     go.transform.localScale = Vector3.one * group.unitSize;
 
                     Undo.RegisterCreatedObjectUndo(go, "生成网格");
 
-                    var item = Undo.AddComponent<PixelItem>(go);
+                    var item = go.GetComponent<PixelItem>();
+                    if (item == null)
+                    {
+                        Debug.LogError("[PixelGroup] 预制体 " + group.pixelPrefab.name + " 缺少 PixelItem 组件，已销毁该实例。", go);
+                        Object.DestroyImmediate(go);
+                        continue;
+                    }
                     item.gridX = col;
                     item.gridZ = row;
                 }
@@ -226,8 +237,10 @@ namespace CrowdMatch
                     if (item == null) continue;
 
                     Undo.RecordObject(item, "Set Pixel Color");
-                    var rend = item.GetComponent<Renderer>();
-                    if (rend != null) Undo.RecordObject(rend, "Set Pixel Material");
+                    foreach (var rend in item.renderers)
+                    {
+                        if (rend != null) Undo.RecordObject(rend, "Set Pixel Material");
+                    }
 
                     item.colorId = cellColor[c, r];
                     item.ApplyMaterial(colorConfig);
@@ -326,8 +339,10 @@ namespace CrowdMatch
                     if (item == null) continue;
 
                     Undo.RecordObject(item, "补充生成尾部颜色");
-                    var rend = item.GetComponent<Renderer>();
-                    if (rend != null) Undo.RecordObject(rend, "补充生成尾部颜色");
+                    foreach (var rend in item.renderers)
+                    {
+                        if (rend != null) Undo.RecordObject(rend, "补充生成尾部颜色");
+                    }
 
                     item.colorId = tailColors[c, r - group.rows];
                     item.ApplyMaterial(colorConfig);
@@ -339,9 +354,15 @@ namespace CrowdMatch
             Debug.Log("[PixelGroup] 补充生成尾部颜色完成：尾部 " + group.columns + "×" + group.tailRows + " 行。");
         }
 
-        /// <summary>确保尾部（rows..TotalRows-1 行）的 PixelItem 几何存在，缺失则创建。</summary>
+        /// <summary>确保尾部（rows..TotalRows-1 行）的 PixelItem 几何存在，缺失则用 pixelPrefab 创建。</summary>
         private void EnsureTailGeometry(PixelGroup group)
         {
+            if (group.pixelPrefab == null)
+            {
+                Debug.LogWarning("[PixelGroup] pixelPrefab 为空，无法补充尾部网格。");
+                return;
+            }
+
             bool created = false;
             for (int c = 0; c < group.columns; c++)
             {
@@ -350,15 +371,20 @@ namespace CrowdMatch
                     if (group.GetItem(c, r) != null)
                         continue;
 
-                    var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    var go = InstantiateTemplate(group.pixelPrefab, group.transform);
                     go.name = "Pixel_" + r + "_" + c;
-                    go.transform.SetParent(group.transform, false);
                     go.transform.localPosition = group.GetLocalPosition(c, r);
                     go.transform.localScale = Vector3.one * group.unitSize;
 
                     Undo.RegisterCreatedObjectUndo(go, "补充生成尾部网格");
 
-                    var item = Undo.AddComponent<PixelItem>(go);
+                    var item = go.GetComponent<PixelItem>();
+                    if (item == null)
+                    {
+                        Debug.LogError("[PixelGroup] 预制体 " + group.pixelPrefab.name + " 缺少 PixelItem 组件，已销毁该实例。", go);
+                        Object.DestroyImmediate(go);
+                        continue;
+                    }
                     item.gridX = c;
                     item.gridZ = r;
                     created = true;
@@ -758,9 +784,11 @@ namespace CrowdMatch
                     continue;
 
                 Undo.RecordObject(item, "Import Pixel Color");
-                var rend = item.GetComponent<Renderer>();
-                if (rend != null)
-                    Undo.RecordObject(rend, "Import Pixel Material");
+                foreach (var r in item.renderers)
+                {
+                    if (r != null)
+                        Undo.RecordObject(r, "Import Pixel Material");
+                }
 
                 item.colorId = colorIndex;
                 item.ApplyMaterial(config);
@@ -772,6 +800,14 @@ namespace CrowdMatch
             EditorUtility.SetDirty(group);
 
             Debug.Log("[PixelGroup] 已从 " + path + " 导入 " + applied + " 个格子颜色。");
+        }
+
+        /// <summary>实例化像素模板：预制体资产走 InstantiatePrefab，场景对象走 Object.Instantiate 克隆。</summary>
+        private static GameObject InstantiateTemplate(GameObject template, Transform parent)
+        {
+            if (PrefabUtility.GetPrefabAssetType(template) == PrefabAssetType.NotAPrefab)
+                return (GameObject)Object.Instantiate(template, parent);
+            return (GameObject)PrefabUtility.InstantiatePrefab(template, parent);
         }
     }
 }
