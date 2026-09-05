@@ -329,10 +329,10 @@ MonoBehaviour:
   backDepth: 25
   physicalEntryDepth: 2.8
   radius: 0.25
-  crowdSpeed: 5
+  crowdSpeed: 7
   wallThickness: 0.1
   wallHeight: 2
-  extractSpeed: 5
+  extractSpeed: 7
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
   releaseRadius: 0.8

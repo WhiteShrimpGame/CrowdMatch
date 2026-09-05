@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -34,8 +35,20 @@ namespace CrowdMatch
         [Tooltip("暴露后把 exposeMoveTarget 匀速移动到 y=0 的时长（秒）")]
         public float exposeMoveDuration = 0.3f;
 
+        [Tooltip("点击碰撞体组件（挂在 Click 层的子物体上）；为空时在 Awake 中自动查找子物体")]
+        public PixelClickListener listener;
+
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
+
+        /// <summary>Animator 中「Walking」布尔参数名（控制走/停动画）。</summary>
+        private const string WalkParam = "Walking";
+
+        /// <summary>从 Walking 回到 Idle 时，Animator 所属 Transform 归零的时长（秒）。</summary>
+        private const float IdleResetDuration = 0.1f;
+
+        /// <summary>起跳坐回时 exposeMoveTarget 的目标 y（Awake 捕获预制体初始值，兜底 -0.6957998）。</summary>
+        private float _restLocalY = -0.6957998f;
 
         private Coroutine _exposeMove;
 
@@ -51,6 +64,62 @@ namespace CrowdMatch
         private void Awake()
         {
             ApplyMaterial();
+            BindClickListener();
+            if (exposeMoveTarget != null)
+                _restLocalY = exposeMoveTarget.localPosition.y;
+        }
+
+        /// <summary>查找并绑定点击碰撞体组件，赋值反向引用供点击判定使用。</summary>
+        private void BindClickListener()
+        {
+            if (listener == null)
+                listener = GetComponentInChildren<PixelClickListener>(true);
+            if (listener != null)
+                listener.pixel = this;
+        }
+
+        /// <summary>设置点击碰撞体是否启用（从网格移出时禁用，避免再次被点击）。</summary>
+        public void SetClickable(bool clickable)
+        {
+            if (listener != null)
+                listener.SetClickable(clickable);
+        }
+
+        /// <summary>设置走/停动画：true = 播放 Walking，false = 回到 Idle（并确保 Animator 启用）。
+        /// Walking 时恢复根运动；回到 Idle 时关闭根运动（停掉 Animator 对 transform 的覆盖），
+        /// 并用 DOTween 在 IdleResetDuration 内把 Animator 所属 Transform 的局部位置与旋转平滑归零。</summary>
+        public void SetWalking(bool walking)
+        {
+            if (animator == null)
+                return;
+            animator.SetBool(WalkParam, walking);
+            animator.enabled = true;
+
+            // 停掉可能仍在进行的归零 tween（无论切到走还是停都先清）
+            animator.transform.DOKill();
+
+            if (walking)
+            {
+                // 恢复根运动：身体随 Walking 的根运动位移/晃动
+                animator.applyRootMotion = true;
+            }
+            else
+            {
+                // 关闭根运动：Animator 不再每帧写 transform，随后平滑归零
+                animator.applyRootMotion = false;
+                animator.transform.DOLocalMove(Vector3.zero, IdleResetDuration);
+                animator.transform.DOLocalRotate(Vector3.zero, IdleResetDuration);
+            }
+        }
+
+        /// <summary>把 exposeMoveTarget 匀速坐回原始 y（上车起跳时调用，默认回 _restLocalY）。</summary>
+        public void SitDownExposeTarget()
+        {
+            if (exposeMoveTarget == null)
+                return;
+            if (_exposeMove != null)
+                StopCoroutine(_exposeMove);
+            _exposeMove = StartCoroutine(MoveExposeTargetToY(_restLocalY, exposeMoveDuration));
         }
 
         /// <summary>设置颜色 ID 并立即应用材质</summary>
@@ -100,7 +169,7 @@ namespace CrowdMatch
                     animator.enabled = true;
                 if (_exposeMove != null)
                     StopCoroutine(_exposeMove);
-                _exposeMove = StartCoroutine(MoveExposeTargetToYZero());
+                _exposeMove = StartCoroutine(MoveExposeTargetToY(0f, exposeMoveDuration));
             }
             else
             {
@@ -114,28 +183,28 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>把 exposeMoveTarget（localPosition）在 exposeMoveDuration 内匀速移动到 y=0。</summary>
-        private IEnumerator MoveExposeTargetToYZero()
+        /// <summary>把 exposeMoveTarget（localPosition）在 duration 内匀速移动到指定 y（x/z 保持）。</summary>
+        private IEnumerator MoveExposeTargetToY(float targetY, float duration)
         {
             if (exposeMoveTarget == null)
                 yield break;
 
             Transform t = exposeMoveTarget;
             Vector3 start = t.localPosition;
-            Vector3 target = new Vector3(start.x, 0f, start.z);
+            Vector3 target = new Vector3(start.x, targetY, start.z);
 
-            float duration = Mathf.Max(0f, exposeMoveDuration);
-            if (duration <= 0.0001f)
+            float dur = Mathf.Max(0f, duration);
+            if (dur <= 0.0001f)
             {
                 t.localPosition = target;
                 yield break;
             }
 
             float elapsed = 0f;
-            while (elapsed < duration)
+            while (elapsed < dur)
             {
                 elapsed += Time.deltaTime;
-                float k = Mathf.Clamp01(elapsed / duration);
+                float k = Mathf.Clamp01(elapsed / dur);
                 t.localPosition = Vector3.Lerp(start, target, k);
                 yield return null;
             }

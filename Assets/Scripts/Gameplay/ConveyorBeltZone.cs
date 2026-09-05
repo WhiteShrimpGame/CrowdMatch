@@ -46,7 +46,18 @@ namespace CrowdMatch
                 belt.ShouldLeave = ShouldLeave;
                 belt.OnLeave = OnLeave;
                 belt.SlotPassedEntry += OnSlotPassedEntry;
+                belt.SlotCatchUpChanged += OnSlotCatchUpChanged;
             }
+        }
+
+        /// <summary>槽位追赶状态变化：驱动该槽位乘员的走/停动画（追赶 = Walking，否则 = Idle）。</summary>
+        private void OnSlotCatchUpChanged(int slotIndex, bool catchingUp)
+        {
+            if (belt == null)
+                return;
+            var pixel = belt.GetItem(slotIndex) as PixelItem;
+            if (pixel != null)
+                pixel.SetWalking(catchingUp);
         }
 
         /// <summary>某槽位过关口：若该槽仍空且出口有球，取最近小球直接上车。每个槽位独立，互不阻塞。</summary>
@@ -68,11 +79,11 @@ namespace CrowdMatch
                 return;
             }
 
-            StartCoroutine(SettleRoutine(pixel));
+            StartCoroutine(SettleRoutine(pixel, slotIndex));
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
-        private IEnumerator SettleRoutine(PixelItem pixel)
+        private IEnumerator SettleRoutine(PixelItem pixel, int slotIndex)
         {
             float startDist = pixel.transform.localPosition.magnitude;
             bool secondHalf = false;
@@ -116,6 +127,9 @@ namespace CrowdMatch
             {
                 pixel.transform.localPosition = Vector3.zero;
                 pixel.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
+                // 落定后按当前槽位追赶状态决定走/停：追赶保持 Walking，否则回到 Idle（相对静止）
+                if (belt != null)
+                    pixel.SetWalking(belt.IsSlotCatchingUp(slotIndex));
             }
         }
 

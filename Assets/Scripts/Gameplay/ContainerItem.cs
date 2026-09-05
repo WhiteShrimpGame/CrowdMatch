@@ -289,6 +289,10 @@ namespace CrowdMatch
         {
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
 
+            // 起跳即回 Idle，并让身体（exposeMoveTarget）匀速坐回原始 y（-0.6957998）
+            pixel.SetWalking(false);
+            pixel.SitDownExposeTarget();
+
             // 跳跃与转向并行：DOLocalJump 落到 0 点，同时 localRotation 平滑归 0（各自独立 tween，同时长）
             var jumpTween = pixel.transform.DOLocalJump(Vector3.zero, boardJumpPower, boardJumpCount, boardJumpDuration);
             var rotateTween = pixel.transform.DOLocalRotate(Vector3.zero, boardJumpDuration);

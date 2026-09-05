@@ -60,6 +60,9 @@ namespace CrowdMatch
         private string _recordFilePath;
         private bool _transitioning;
 
+        /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
+        private int _clickMask;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -76,6 +79,8 @@ namespace CrowdMatch
                 pixelGroup = FindObjectOfType<PixelGroup>();
             if (containerGroup == null)
                 containerGroup = FindObjectOfType<ContainerGroup>();
+
+            _clickMask = LayerMask.GetMask("Click");
 
             if (recordMode)
                 BeginRecord();
@@ -313,12 +318,13 @@ namespace CrowdMatch
                 return;
 
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f))
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, _clickMask))
                 return;
 
-            var item = hit.collider.GetComponentInParent<PixelItem>();
-            if (item == null)
+            var listener = hit.collider.GetComponentInParent<PixelClickListener>();
+            if (listener == null || listener.pixel == null)
                 return;
+            var item = listener.pixel;
 
             // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需能通过空/组内格连通到首排）
             if (pixelGroup.GetItem(item.gridX, item.gridZ) != item)
@@ -401,11 +407,13 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
-            // 从网格移除（匹配格先置空，并关闭其暴露状态）
+            // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
             foreach (var item in matched)
             {
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
                 item.SetExposed(false);
+                item.SetClickable(false);
+                item.SetWalking(true);
             }
 
             // 移除后刷新剩余像素的暴露（可点击）状态
@@ -494,6 +502,7 @@ namespace CrowdMatch
 
             item.transform.localPosition = target;
             item.arrivedAtGatherPoint = true;
+            item.SetWalking(false);   // 抵达聚集点后相对静止 → Idle（回退无传送带路径）
         }
 
         private Vector3 RandomGatherTarget()

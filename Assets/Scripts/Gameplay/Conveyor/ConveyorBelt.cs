@@ -75,6 +75,9 @@ namespace CrowdMatch
         [Tooltip("追赶周期秒数（= 平移一格的时长；默认对齐槽位节拍 cycleTime/slotCount）。/ Catch-up period in seconds (also the duration of one shift step; defaults to the slot beat cycleTime/slotCount).")]
         public float catchUpInterval = 0.5f;
 
+        /// <summary>某槽位追赶状态变化回调（参数 = 槽位索引、是否进入追赶）。由宿主驱动乘员走/停动画。</summary>
+        public Action<int, bool> SlotCatchUpChanged;
+
         /// <summary>队首所在槽位（-1 = 无队首 / 空传送带）。队首不参与追赶，其余元素向其靠拢。</summary>
         private int _leaderSlot = -1;
 
@@ -345,6 +348,17 @@ namespace CrowdMatch
             return path.GetGlobalPosition(samplePhase * path.GetTotalPathLength());
         }
 
+        /// <summary>某槽位当前是否处于追赶（相位平移）中。</summary>
+        public bool IsSlotCatchingUp(int slotIndex)
+        {
+            for (int i = 0; i < _phaseShifts.Count; i++)
+            {
+                if (_phaseShifts[i].slot == slotIndex)
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// 追赶调度：推进进行中的相位平移（匀速），并按周期触发一次追赶 sweep。
         /// Drives in-progress phase shifts (uniform) and triggers one catch-up sweep per period.
@@ -368,6 +382,7 @@ namespace CrowdMatch
                 {
                     _slotPhase[s.slot] = s.targetPhase % 1f;
                     _phaseShifts.RemoveAt(i);
+                    SlotCatchUpChanged?.Invoke(s.slot, false);   // 追赶结束 → 乘员回到相对静止
                 }
                 else
                 {
@@ -465,6 +480,7 @@ namespace CrowdMatch
                     targetPhase = _slotPhase[i] + step,
                     t = 0f
                 });
+                SlotCatchUpChanged?.Invoke(i, true);   // 槽位进入追赶 → 乘员切到 Walking
             }
         }
 
