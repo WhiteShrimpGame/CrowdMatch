@@ -170,6 +170,6 @@ Material:
     - _OutlineColor: {r: 1, g: 1, b: 1, a: 1}
     - _ReflectionColor: {r: 0.47450984, g: 0.87753886, b: 1, a: 1}
     - _RimColor: {r: 1, g: 1, b: 1, a: 0.5}
-    - _SColor: {r: 0.0077119693, g: 0, b: 0.13207549, a: 1}
+    - _SColor: {r: 0.42806175, g: 0.3715913, b: 0.6415094, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
