@@ -74,10 +74,6 @@ namespace CrowdMatch
         [Tooltip("弹性缩放复原时长（秒，到达最大值后立即匀加速回到 1 的时长）")]
         public float elasticRecoverDuration = 0.2f;
 
-        [Header("调试 / Debug")]
-        [Tooltip("出车角度回正后（整车直行段）每帧输出小车世界 X 坐标与当前速度，用于核对加速趋势")]
-        public bool logExitDriveX = true;
-
         private bool _playing;
 
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
@@ -248,11 +244,6 @@ namespace CrowdMatch
                 v = Mathf.Min(v + exitDriveAcceleration * dt, exitMaxSpeed);
                 transform.position += -transform.right * (v * dt);
                 hold += dt;
-
-                // 回正后每帧输出世界 X 坐标与速度，核对加速趋势（期望：v 线性上升至 exitMaxSpeed 后恒定，X 先抛物线后线性）
-                if (logExitDriveX)
-                    Debug.Log("[ContainerExitDriver] 直行 t=" + hold.ToString("F3") + "s  worldX=" +
-                        transform.position.x.ToString("F4") + "  v=" + v.ToString("F3") + "m/s");
 
                 // 侧翻匀加速归 0（ease-in quad），归 0 后自转轴还给小车
                 if (!rollRestored)
