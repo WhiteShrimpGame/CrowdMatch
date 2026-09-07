@@ -330,7 +330,10 @@ MonoBehaviour:
   physicalEntryDepth: 2.8
   radius: 0.25
   crowdSpeed: 6
+  crowdSpeedRandomRange: 1
   physicalRotateSpeed: 180
+  aimOffsetX: 1.5
+  aimDirectDistanceZ: 2
   wallThickness: 0.1
   wallHeight: 2
   extractSpeed: 6

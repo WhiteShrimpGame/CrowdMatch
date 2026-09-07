@@ -42,11 +42,20 @@ namespace CrowdMatch
         [Tooltip("碰撞球世界半径（球视觉直径 = 像素直径 0.5，0.25 即刚好接触；调小可穿插表现拥挤）")]
         public float radius = 0.25f;
 
-        [Tooltip("进入缓冲区（匀速阶段）与物理阶段的驱动速度（物理阶段每帧朝缺口方向直接设定速度）")]
+        [Tooltip("物理阶段基础驱动速度（世界单位/秒），作为随机速度的中心值")]
         public float crowdSpeed = 5f;
+
+        [Tooltip("进入物理区域时速度的随机幅度（±，世界单位/秒）。每个像素进入时在 [crowdSpeed-该值, crowdSpeed+该值] 内随机一次，之后保持该速度前进")]
+        public float crowdSpeedRandomRange = 1f;
 
         [Tooltip("物理阶段像素朝出口（gap）方向转向的最大角速度（度/秒）。进入物理时不再瞬时朝向出口，而是从当前角度平滑趋近，避免角度跳变。")]
         public float physicalRotateSpeed = 360f;
+
+        [Tooltip("朝向点横向（x）随机偏移幅度（±，世界单位）。像素距出口前向（z）距离超过 aimDirectDistanceZ 时，不朝精确出口点，而在出口位置 ± 该值 内随机一个朝向点，用于分散人群")]
+        public float aimOffsetX = 1.5f;
+
+        [Tooltip("距出口前向（z）距离阈值（世界单位）。超过该值按 aimOffsetX 偏移的随机点朝向前进，小于该值才直接朝精确出口位置")]
+        public float aimDirectDistanceZ = 2f;
 
         [Header("墙")]
         [Tooltip("墙厚度")]
@@ -207,9 +216,9 @@ namespace CrowdMatch
             if (_physical.Count == 0)
                 return;
 
-            RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
+            RefreshGeometry(out _, out Vector3 gap, out Vector3 axis, out Vector3 perp, out _);
 
-            // 每个物理帧把速度直接设定为朝出口（gap）方向；碰撞挤开与侧边墙仍由物理引擎处理
+            // 每个物理帧把速度直接设定为朝出口方向；碰撞挤开与侧边墙仍由物理引擎处理
             for (int i = _physical.Count - 1; i >= 0; i--)
             {
                 var p = _physical[i];
@@ -226,15 +235,24 @@ namespace CrowdMatch
                     continue;
                 }
 
-                Vector3 dir = gap - p.transform.position;
+                Vector3 toGap = gap - p.transform.position;
+                toGap.y = 0f;
+
+                // 距出口前向（z）仍较远时，朝出口位置横向（x）偏移后的点前进以分散人群；足够近才直接朝精确出口
+                Vector3 target = gap;
+                float forwardDist = Vector3.Dot(toGap, axis);
+                if (forwardDist > aimDirectDistanceZ)
+                    target = gap + perp * p.bufferAimOffset;
+
+                Vector3 dir = target - p.transform.position;
                 dir.y = 0f;
                 if (dir.sqrMagnitude > 0.0001f)
                 {
-                    rb.velocity = dir.normalized * crowdSpeed;
-                    // 物理移动阶段：z 正方向以最大角速度平滑趋近出口（gap）方向，避免进入物理瞬间的角度跳变
-                    Quaternion target = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                    rb.velocity = dir.normalized * p.bufferCrowdSpeed;
+                    // 物理移动阶段：z 正方向以最大角速度平滑趋近目标方向，避免进入物理瞬间的角度跳变
+                    Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
                     p.transform.rotation = Quaternion.RotateTowards(
-                        p.transform.rotation, target, physicalRotateSpeed * Time.fixedDeltaTime);
+                        p.transform.rotation, targetRot, physicalRotateSpeed * Time.fixedDeltaTime);
                 }
                 else
                 {
@@ -735,12 +753,20 @@ namespace CrowdMatch
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
+            // 进入物理阶段：在 [crowdSpeed-crowdSpeedRandomRange, crowdSpeed+crowdSpeedRandomRange] 内随机一个速度并记录到像素，之后该像素一直以此速度前进
+            item.bufferCrowdSpeed = Random.Range(
+                Mathf.Max(0.01f, crowdSpeed - crowdSpeedRandomRange),
+                crowdSpeed + crowdSpeedRandomRange);
+
+            // 进入物理阶段：随机一个朝向点横向（x）偏移并记录到像素，距离出口较远时朝该偏移点前进
+            item.bufferAimOffset = Random.Range(-aimOffsetX, aimOffsetX);
+
             // 进入物理阶段即时给一个朝出口（gap）的初速度，后续由 FixedUpdate 每帧重写
             RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
             Vector3 dir = gap - item.transform.position;
             dir.y = 0f;
             dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
-            rb.velocity = dir * crowdSpeed;
+            rb.velocity = dir * item.bufferCrowdSpeed;
 
             _physical.Add(item);
         }
