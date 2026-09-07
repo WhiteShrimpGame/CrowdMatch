@@ -45,7 +45,6 @@ namespace CrowdMatch
             if (Input.GetKeyDown(KeyCode.N))
             {
                 GameWin();
-                ReloadLevel();
             }
             else if (Input.GetKeyDown(KeyCode.B))
             {

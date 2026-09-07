@@ -705,7 +705,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   containerPrefab: {fileID: 4074727829767371378, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
   columns: 4
-  rows: 20
+  rows: 19
   xSpacing: 2
   zSpacing: 1.2
   pixelGroup: {fileID: 882082744}
