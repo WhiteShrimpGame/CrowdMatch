@@ -48,7 +48,7 @@ namespace CrowdMatch
         /// 重建：扫描调用方提供的 (层, 颜色) 列表，按层和颜色统计。
         /// </summary>
         /// <param name="pixels">所有像素的 (层, 颜色) 列表。层 0 = 最前排。</param>
-        /// <param name="layerCount">总层数（PixelGroup.rows）。</param>
+        /// <param name="layerCount">总层数（PixelGroup.TotalRows，含尾部）。</param>
         /// <param name="colorCount">颜色总数（ColorConfig.Count）。</param>
         /// <param name="maxSpanLayers">抽取 pack 时最多跨多少层（0 = 仅最浅层）。</param>
         public void Rebuild(

@@ -159,7 +159,30 @@ belt.TryEnter(pixel, slotIndex);   // 内部：pixel.Transform.SetParent(carrier
 `CheckLeave` 每帧对每个占用槽调 `ShouldLeave`；命中后**先把像素从 carrier 解绑**（`SetParent(null, true)`）再清槽、再回调 `OnLeave`，
 宿主 `OnLeave` 里做吸收（见 §7）。
 
+### 6.3 追赶机制（catch-up）：整体平移相位、空隙挤到队尾
+
+槽位等距循环的副作用是：槽位过关口时若出口无球（或连续几拍无球），传送带上会留下**空槽**，后面的球与前车之间出现空隙，
+视觉上松松散散。追赶机制按固定周期把队首后方有空隙的整段队列**整体向前平移一格**，把空隙逐步挤到队尾，形成连续队列。
+
+实现方式从「顺切槽位 + localPosition 平滑」改为「**真的平移槽位相位**」：乘员始终 `localPosition = 0` 就位，追赶时不动乘员、
+只动槽位（carrier）在轨迹上的相位，因此乘员沿轨迹（含 180° 圆弧）完全贴合，转弯不再出现 localPosition 偏移造成的甩动。
+
+每个 `catchUpInterval` 周期：
+
+1. **瞬移空隙槽**：从队首沿旋转反方向、按相位「落后距离」递增（wrap 感知）找到第一个空槽位，把它的相位瞬移到与队首重合，并标记为**不可用**（经过入口时不被选中）。
+2. **整体平移一格**：除队首与「与队首直接相连的已占用块」外，其余所有槽位的相位在本周期内**匀速**前进 `1/slotCount`（一格）。
+3. **恢复不可用槽**：周期结束（相位平移完成）后，把之前瞬移到队首的空槽位恢复为可用；它此时已经落到队尾（队首正后方的一格空位）。
+
+方向约定：旋转方向 = 相位**递增**方向（更靠前）。由于追赶会重排相位，**索引顺序不再等于传送带上的顺序**，所有「前后 / 相邻」
+关系一律以相位为准——以队首相位为锚，用 wrap 感知的「落后距离」`(队首相位 − 该槽相位 + 1) mod 1` 排序（0=队首，越接近 1 越靠队尾）。
+「队首直接相连占用块」= 从队首沿此顺序连续占用直至第一个空槽位；「空隙」= 该块之后的第一个空槽位；「新队首」= 队首离开后
+落后距离最小的占用槽。
+
+> 与入口收敛（SettleRoutine）的交互：追赶只改槽位相位，入口收敛只改乘员 `localPosition`，两者互不冲突，无需再互相屏蔽
+> （旧的 `_settling` / `MarkSettled` / `IsBusy` 已移除）。
+
 ---
+
 
 ## 7. 匹配与离开（ShouldLeave / OnLeave）
 
@@ -194,6 +217,11 @@ belt.OnLeave = item =>
 
 `ContainerGroup.ConsumePixel(pixel, container)`：沿用现有 `MovePixelToContainer` 抽掉"找像素"后的逻辑——
 `Consume()` 扣容量 → 协程 Lerp 像素到容器位置 → 销毁像素 → 若 `isLast` 则 `DisappearAndRefill`。
+
+> **匹配以像素实际位置为准**：`FindFrontContainerInFrontOf` / `IsAtFarSide` 读的是 `pixel.transform.position`——
+> 像素是 carrier 的子物体，其世界坐标 = carrier 位置 + 旋转后的 `localPosition` 偏移。追赶动画中 `localPosition` 非零，
+> 实际位置滞后于逻辑槽位，因此必须用实际位置判定（否则追赶动画还没到位就提前匹配）。`CheckLeave` 在 `AdvanceCatchUp`
+> 之后执行，读到的是当前帧最新位置，无滞后。
 
 > 由于传送带按槽位等距错开、且 `CheckLeave` 一帧对同一槽位最多触发一次，
 > 两像素同帧抢同一容器的竞态概率低；仍建议 `ConsumePixel` 开头加 `if (container.IsEmpty) return;` 兜底（见 review H1/M1）。
@@ -240,13 +268,15 @@ public PixelItem CollectNearest()   // 由 ConveyorBeltZone.OnSlotPassedEntry �
 | 入口 | `Action<int> SlotPassedEntry` | 槽位过关口时触发（参数 = 槽位索引），由宿主注入 |
 | 钩子 | `Func<IConveyorItem,bool> ShouldLeave` | 离开判定（宿主注入） |
 | 钩子 | `Action<IConveyorItem> OnLeave` | 离开回调（宿主注入） |
+| 追赶 | `bool catchUpEnabled = true` | 是否启用追赶 |
+| 追赶 | `float catchUpInterval = 0.5` | 追赶周期秒数（= 追赶一步时长） |
 | 方法 | `Initialize()` | 建 `slots[]` + `carriers[]`，`path.InitializePaths()` |
-| 方法 | `bool TryEnter(IConveyorItem, int)` | 置槽位 + `item.Transform.SetParent(carriers[i], true)` |
+| 方法 | `bool TryEnter(IConveyorItem, int)` | 置槽位 + `item.Transform.SetParent(carriers[i], true)` + 队首标记 |
 | 方法 | `IConveyorItem GetItem(int)` | 取槽位乘员 |
-| 方法 | `void ClearSlot(int)` | 解绑 + 清空（不触发 OnLeave） |
+| 方法 | `void ClearSlot(int)` | 解绑 + 清空（不触发 OnLeave）+ 队首更替 |
 | 属性 | `int OccupiedCount` | 已占用槽位数（供 UI） |
 | 方法 | `Vector3 GetSlotWorldPosition(int)` | 某槽位当前世界坐标（供背压/调试） |
-| — | `Update()` | `Advance → ApplyPositions(写 carrier + 过关口检测) → CheckLeave` |
+| — | `Update()` | `Advance → ApplyPositions(写 carrier + 过关口检测) → AdvanceCatchUp(追赶) → CheckLeave` |
 
 ### 9.2 `ConveyorBeltZone`（宿主，`Gameplay/ConveyorBeltZone.cs`）
 
@@ -259,7 +289,7 @@ public PixelItem CollectNearest()   // 由 ConveyorBeltZone.OnSlotPassedEntry �
 | 匹配 | `float matchRangeZ` | 0.8 | 正前方纵向判定（远侧到容器前排的间隙） |
 | 方法 | `Start()` | 注入 `ShouldLeave` / `OnLeave`，订阅 `SlotPassedEntry` |
 | 方法 | `OnSlotPassedEntry(int)` | 槽位过关口：取最近像素 `TryEnter` 上车 + 起 `SettleRoutine` |
-| 方法 | `SettleRoutine(PixelItem)` | localPosition 平滑到 0（每像素一条协程） |
+| 方法 | `SettleRoutine(PixelItem)` | localPosition 平滑到 0（每像素一条协程，互不阻塞） |
 | 方法 | `ShouldLeave(IConveyorItem)` / `OnLeave(IConveyorItem)` | 远侧同色前排容器匹配判定 / 吸收 |
 | 属性 | `int OccupiedSlots` / `int TotalSlots` | 供 UI |
 
@@ -324,6 +354,10 @@ ContainerGroup.ConsumePixel(pixel, container)
 | 像素到远侧但正前方无同色前排容器 | `ShouldLeave=false`，像素无限绕圈等待（R3 确认接受） |
 | 某颜色容器全部耗尽 | 该颜色像素永久绕圈（既有边界，传送带下更显眼，本期不兜底） |
 | 传送带空 | `Update` 只推进 offset，无槽位写操作，零开销 |
+| 队首离开传送带 | 向旋转反向（递减槽位）找最近占用槽为新队首；全空则 `_leaderSlot = -1` |
+| 追赶周期内被标记为队首 | 该槽位本周期仍完成相位平移；下一周期 sweep 重新计算「直接相连占用块」，作为队首不再平移 |
+| 被瞬移到队首的空槽位 | 周期内标记不可用（入口跳过收集），周期结束恢复可用并落到队尾 |
+| 已占用块本身连续（无内部空隙） | sweep 检测到 `connected.Count == occupiedCount` 直接返回，不做追赶 |
 | 像素在传送带上被销毁（异常） | `ApplyPositions` 用 `slots[i].Transform == null` 跳过；正常流程只在 `OnLeave` 后销毁（槽已先清），不触发 |
 | carrier scale 非 1 | 会导致像素世界尺寸缩放；实现时强制 carrier scale=1 |
 | `entryGate` 未赋值 | 关口 X 回退用 `transform.position.x`（belt 根 X）；建议显式放置一个空 GameObject 标定 |
@@ -342,6 +376,7 @@ ContainerGroup.ConsumePixel(pixel, container)
 | `matchRangeX` | 正前方横向判定 | 更易命中（跨列） | 更严格对齐列 |
 | `matchRangeZ` | 正前方纵向判定 | 更易命中 | 只在紧贴容器时才匹配 |
 | `entryGate.x` | 收集关口位置 | 越靠缓冲区缺口越早收集 | 越靠传送带远侧越晚收集 |
+| `catchUpInterval` | 追赶一步/周期时长 | 更慢、更从容 | 更快、压实更急促 |
 | 直线段长度 | 覆盖容器横向跨度 | — | 需 ≥ `columns × xSpacing` |
 | 圆弧半径 | 传送带宽度（近/远侧 Z 间距） | 更宽、两段分离更远 | 更窄、更紧凑 |
 

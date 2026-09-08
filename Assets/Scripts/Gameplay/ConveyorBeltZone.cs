@@ -27,6 +27,9 @@ namespace CrowdMatch
         [Tooltip("正前方纵向判定范围（远侧到容器前排的间隙）")]
         public float matchRangeZ = 0.8f;
 
+        [Tooltip("上车收敛的旋转角速度（度/秒）：平滑到槽位途中前半段归 0、后半段转至 localEulerY = -90")]
+        public float settleRotateSpeed = 360f;
+
         private const float ArriveEpsilon = 0.05f;
         private const float BoardSmoothRate = 10f;   // localPosition 收敛速率（指数平滑）
 
@@ -43,7 +46,18 @@ namespace CrowdMatch
                 belt.ShouldLeave = ShouldLeave;
                 belt.OnLeave = OnLeave;
                 belt.SlotPassedEntry += OnSlotPassedEntry;
+                belt.SlotCatchUpChanged += OnSlotCatchUpChanged;
             }
+        }
+
+        /// <summary>槽位追赶状态变化：驱动该槽位乘员的走/停动画（追赶 = Walking，否则 = Idle）。</summary>
+        private void OnSlotCatchUpChanged(int slotIndex, bool catchingUp)
+        {
+            if (belt == null)
+                return;
+            var pixel = belt.GetItem(slotIndex) as PixelItem;
+            if (pixel != null)
+                pixel.SetWalking(catchingUp);
         }
 
         /// <summary>某槽位过关口：若该槽仍空且出口有球，取最近小球直接上车。每个槽位独立，互不阻塞。</summary>
@@ -65,41 +79,122 @@ namespace CrowdMatch
                 return;
             }
 
-            StartCoroutine(SettleRoutine(pixel));
+            StartCoroutine(SettleRoutine(pixel, slotIndex));
         }
 
-        /// <summary>上车后的收敛：localPosition 平滑到 0。每个小球一条协程，互不阻塞。</summary>
-        private IEnumerator SettleRoutine(PixelItem pixel)
+        /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
+        private IEnumerator SettleRoutine(PixelItem pixel, int slotIndex)
         {
-            while (pixel != null && pixel.transform.localPosition.sqrMagnitude > ArriveEpsilon * ArriveEpsilon)
+            float startDist = pixel.transform.localPosition.magnitude;
+            bool secondHalf = false;
+
+            while (pixel != null)
             {
                 float k = 1f - Mathf.Exp(-BoardSmoothRate * Time.deltaTime);
                 pixel.transform.localPosition = Vector3.Lerp(pixel.transform.localPosition, Vector3.zero, k);
+
+                // 位置收敛进度：0 = 起点，1 = 到达槽位，按已走距离占初始距离的比例划分前后半段
+                float progress = startDist > ArriveEpsilon
+                    ? 1f - pixel.transform.localPosition.magnitude / startDist
+                    : 1f;
+                progress = Mathf.Clamp01(progress);
+
+                if (progress < 0.5f)
+                {
+                    // 前半段：localRotation 归 0
+                    pixel.transform.localRotation = Quaternion.RotateTowards(
+                        pixel.transform.localRotation, Quaternion.identity, settleRotateSpeed * Time.deltaTime);
+                }
+                else
+                {
+                    // 后半段：localEulerY 匀速转至 -90（X/Z 归 0）
+                    secondHalf = true;
+                    Vector3 euler = pixel.transform.localEulerAngles;
+                    float newY = Mathf.MoveTowardsAngle(euler.y, -90f, settleRotateSpeed * Time.deltaTime);
+                    pixel.transform.localRotation = Quaternion.Euler(0f, newY, 0f);
+                }
+
+                bool posDone = pixel.transform.localPosition.sqrMagnitude <= ArriveEpsilon * ArriveEpsilon;
+                bool rotDone = secondHalf
+                    ? Mathf.Abs(Mathf.DeltaAngle(pixel.transform.localEulerAngles.y, -90f)) <= 0.5f
+                    : Quaternion.Angle(pixel.transform.localRotation, Quaternion.identity) <= 0.5f;
+                if (posDone && rotDone)
+                    break;
+
                 yield return null;
             }
             if (pixel != null)
+            {
                 pixel.transform.localPosition = Vector3.zero;
+                pixel.transform.localRotation = Quaternion.Euler(0f, -90f, 0f);
+                // 落定后按当前槽位追赶状态决定走/停：追赶保持 Walking，否则回到 Idle（相对静止）
+                if (belt != null)
+                    pixel.SetWalking(belt.IsSlotCatchingUp(slotIndex));
+            }
         }
 
-        /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container。</summary>
+        /// <summary>离开判定：像素到达远侧且正前方有同色非空前排 Container；记录模式下到达远侧即离开。</summary>
         private bool ShouldLeave(IConveyorItem item)
         {
             var pixel = item as PixelItem;
-            if (pixel == null || containerGroup == null)
+            if (pixel == null)
                 return false;
-            return containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ) != null;
+
+            var gc = GameController.Instance;
+            if (gc != null && gc.recordMode)
+                return IsAtFarSide(pixel);
+
+            if (containerGroup == null)
+                return false;
+            return containerGroup.FindMatchableContainer(pixel, matchRangeX, matchRangeZ) != null;
         }
 
-        /// <summary>离开回调：把像素交给同色前排 Container 吸收。</summary>
+        /// <summary>离开回调：正常模式交给同色前排 Container 吸收；记录模式下直接消失并写入序列文件。</summary>
         private void OnLeave(IConveyorItem item)
         {
             var pixel = item as PixelItem;
-            if (pixel == null || containerGroup == null)
+            if (pixel == null)
                 return;
 
-            var container = containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ);
+            var gc = GameController.Instance;
+            if (gc != null && gc.recordMode)
+            {
+                gc.RecordBall(pixel.colorId);
+                Destroy(pixel.gameObject);
+                return;
+            }
+
+            if (containerGroup == null)
+                return;
+
+            var container = containerGroup.FindMatchableContainer(pixel, matchRangeX, matchRangeZ);
             if (container != null)
                 containerGroup.ConsumePixel(pixel, container);
+        }
+
+        /// <summary>像素是否到达传送带远侧（以 ContainerGroup 前排 Z 为基准，纵向落入 matchRangeZ）。</summary>
+        private bool IsAtFarSide(PixelItem pixel)
+        {
+            if (containerGroup == null)
+                return false;
+            // 前排 row 0 的本地 Z = 0，故世界 Z 即 containerGroup 原点 Z
+            float frontZ = containerGroup.transform.position.z;
+            return Mathf.Abs(pixel.transform.position.z - frontZ) <= matchRangeZ;
+        }
+
+        /// <summary>清空传送带上所有像素（供重载关卡时清理）。</summary>
+        public void ClearBelt()
+        {
+            if (belt == null)
+                return;
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                var pixel = belt.GetItem(i) as PixelItem;
+                if (pixel == null)
+                    continue;
+                belt.ClearSlot(i);
+                Destroy(pixel.gameObject);
+            }
         }
     }
 }

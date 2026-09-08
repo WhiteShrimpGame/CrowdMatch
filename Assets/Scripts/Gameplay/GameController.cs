@@ -1,14 +1,16 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace CrowdMatch
 {
     /// <summary>
-    /// 全局单例，负责点击匹配、聚集与补位逻辑。
-    /// 点击最前排（Z 最大）的 PixelItem 后，连同相邻同色单位一起移动到聚集点；
-    /// 空位由后排单位依次匀速补位到前排。
+    /// 全局单例，负责点击匹配与聚集逻辑。
+    /// 点击一个 PixelItem 后，连同相邻同色单位一起离开：只要该同色组能通过空/组内格连通到首排（row 0）即可点击；
+    /// 像素离开后，后方像素不再补位（网格保持空位，空位随匹配逐步累积）。
     /// </summary>
     [DefaultExecutionOrder(-900)]
     public class GameController : MonoBehaviour
@@ -25,12 +27,12 @@ namespace CrowdMatch
         [Tooltip("管理的 PixelGroup，留空会自动查找")]
         public PixelGroup pixelGroup;
 
+        [Tooltip("管理的 ContainerGroup，留空会自动查找")]
+        public ContainerGroup containerGroup;
+
         [Header("速度")]
         [Tooltip("单位向聚集点移动的速度（世界单位/秒）")]
         public float gatherSpeed = 12f;
-
-        [Tooltip("后排补位移动的速度（世界单位/秒）")]
-        public float refillSpeed = 10f;
 
         [Header("聚集表现")]
         [Tooltip("单位到达聚集点后的散布半径，避免完全重叠")]
@@ -44,10 +46,22 @@ namespace CrowdMatch
         [Tooltip("释放后像素进入的闭环传送带；留空则显示 gatheredItems 计数")]
         public ConveyorBeltZone conveyorZone;
 
+        [Header("Record 模式")]
+        [Tooltip("勾选后运行时新建序列文件；小球到达传送带远侧时直接消失并把颜色写入文件，不进入容器")]
+        public bool recordMode = false;
+
+        [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
+        public string recordOutputDir = "";
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
-        private int _refillMovingCount;
+        private StreamWriter _recordWriter;
+        private string _recordFilePath;
+        private bool _transitioning;
+
+        /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
+        private int _clickMask;
 
         private void Awake()
         {
@@ -63,21 +77,250 @@ namespace CrowdMatch
         {
             if (pixelGroup == null)
                 pixelGroup = FindObjectOfType<PixelGroup>();
-            if (crowdBuffer != null)
-                crowdBuffer.OnBatchExtracted += HandleBatchExtracted;
+            if (containerGroup == null)
+                containerGroup = FindObjectOfType<ContainerGroup>();
+
+            _clickMask = LayerMask.GetMask("Click");
+
+            if (recordMode)
+                BeginRecord();
+
+            Init();
         }
 
-        /// <summary>一批像素全部离开网格后补位（由 CrowdBufferZone 在提取完成时回调）</summary>
-        private void HandleBatchExtracted()
+        // ===== 关卡流程（初始化 / 胜负检测 / 重载） =====
+
+        /// <summary>进入游玩模式并加载当前关卡。</summary>
+        private void Init()
         {
-            CollapseColumns();
+            GameState.GameStart();
+            InitLevel(GameData.CurrentLevel);
+        }
+
+        /// <summary>按关卡序号加载并应用关卡：清理上一关残留 → 解析 JSON → 应用到两个网格 → 统计像素总数。</summary>
+        private void InitLevel(int level)
+        {
+            CleanupLevel();
+
+            var gm = GameManager.Instance;
+            TextAsset json = gm != null ? gm.GetLevelJson(level) : null;
+            if (json == null)
+            {
+                Debug.LogError("[GameController] 找不到第 " + level + " 关的关卡 JSON，无法初始化。");
+                return;
+            }
+
+            LevelData data = LevelLoader.Parse(json);
+            if (data == null)
+                return;
+
+            Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
+
+#if UNITY_EDITOR
+            LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
+#endif
+
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定 Container 时跳过）
+            if (!data.container.lockContainer)
+                LevelLoader.ShuffleContainers(data.container);
+
+            LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
+            pixelGroup.RefreshExposed();
+
+#if UNITY_EDITOR
+            // 缓存初始化（洗牌后）的关卡数据快照，供编辑器在 Play 模式下导出「锁定」初始状态
+            LevelDataCache.LastInitData = JsonUtility.FromJson<LevelData>(JsonUtility.ToJson(data));
+#endif
+
+            GameData.Init(true);
+            GameData.TotalPixelCount = CountPixels();
+            GameData.ClearedPixelCount = 0;
+        }
+
+        /// <summary>原地重载当前关卡（由 GameManager 在胜负过渡后调用）。</summary>
+        public void ReloadLevel()
+        {
+            _transitioning = false;
+            GameState.GameStart();
+            InitLevel(GameData.CurrentLevel);
+        }
+
+        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem）。</summary>
+        private int CountPixels()
+        {
+            if (pixelGroup == null)
+                return 0;
+            int n = 0;
+            foreach (var it in pixelGroup.GetComponentsInChildren<PixelItem>())
+            {
+                if (it != null && pixelGroup.IsInRange(it.gridX, it.gridZ))
+                    n++;
+            }
+            return n;
+        }
+
+        /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
+        private void CheckWin()
+        {
+            if (_transitioning)
+                return;
+            if (GameData.TotalPixelCount <= 0)
+                return;
+            if (GameData.ClearedPixelCount >= GameData.TotalPixelCount)
+            {
+                _transitioning = true;
+                GameState.GameWin();
+                Invoke(nameof(DoGameWin), 1.5f);
+            }
+        }
+
+        /// <summary>失败检测：传送带满，且带上所有像素都无法与前排容器匹配。触发后等待 1.5s 重置当前关。</summary>
+        private void CheckFail()
+        {
+            if (_transitioning)
+                return;
+            if (IsFail())
+            {
+                _transitioning = true;
+                GameState.GameFail();
+                Invoke(nameof(DoGameFail), 1.5f);
+            }
+        }
+
+        /// <summary>失败判定：传送带占满且每个槽位像素都没有同色非空前排容器。</summary>
+        private bool IsFail()
+        {
+            if (conveyorZone == null || conveyorZone.belt == null)
+                return false;
+            if (conveyorZone.TotalSlots <= 0)
+                return false;
+            if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
+                return false;
+            if (containerGroup == null)
+                return false;
+
+            var belt = conveyorZone.belt;
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                var pixel = belt.GetItem(i) as PixelItem;
+                if (pixel == null)
+                    continue;
+                if (containerGroup.HasMatchableContainerOfColor(pixel.colorId))
+                    return false;   // 至少一个可匹配 → 未失败
+            }
+            return true;
+        }
+
+        private void DoGameWin()
+        {
+            var gm = GameManager.Instance;
+            if (gm != null)
+                gm.GameWin();
+        }
+
+        private void DoGameFail()
+        {
+            var gm = GameManager.Instance;
+            if (gm != null)
+                gm.GameFail();
+        }
+
+        /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
+        private void CleanupLevel()
+        {
+            StopAllCoroutines();
+
+            foreach (var item in gatheredItems)
+            {
+                if (item != null)
+                    Destroy(item.gameObject);
+            }
+            gatheredItems.Clear();
+
+            if (conveyorZone != null)
+                conveyorZone.ClearBelt();
+
+            if (crowdBuffer != null)
+                crowdBuffer.ResetAll();
+        }
+
+        // ===== Record 模式 =====
+
+        /// <summary>Record 默认输出目录：编辑器下为工程目录（Assets 的上一级）下的 Record 文件夹；构建时回退 persistentDataPath。</summary>
+        private static string DefaultRecordDir()
+        {
+#if UNITY_EDITOR
+            string projectDir = Path.GetDirectoryName(Application.dataPath);
+            return Path.Combine(projectDir, "Record");
+#else
+            return Application.persistentDataPath;
+#endif
+        }
+
+        /// <summary>开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建带时间戳的序列文件。</summary>
+        private void BeginRecord()
+        {
+            string dir = string.IsNullOrEmpty(recordOutputDir)
+                ? DefaultRecordDir()
+                : recordOutputDir;
+
+            try
+            {
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                string name = "Record_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt";
+                _recordFilePath = Path.Combine(dir, name);
+                _recordWriter = new StreamWriter(_recordFilePath, false, System.Text.Encoding.UTF8);
+                Debug.Log("[GameController] Record 模式已开启，序列文件：" + _recordFilePath);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[GameController] 创建记录文件失败：" + e.Message);
+                _recordWriter = null;
+            }
+        }
+
+        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。由 ConveyorBeltZone 在记录模式下调用。</summary>
+        public void RecordBall(int colorId)
+        {
+            if (_recordWriter == null)
+                return;
+            _recordWriter.WriteLine(colorId);
+            _recordWriter.Flush();
+        }
+
+        private void CloseRecord()
+        {
+            if (_recordWriter == null)
+                return;
+            _recordWriter.Flush();
+            _recordWriter.Close();
+            _recordWriter = null;
+            Debug.Log("[GameController] 已关闭记录文件：" + _recordFilePath);
+        }
+
+        private void OnApplicationQuit()
+        {
+            CloseRecord();
+        }
+
+        private void OnDestroy()
+        {
+            CloseRecord();
         }
 
         private void Update()
         {
             UpdateCountText();
 
-            if (Input.GetMouseButtonDown(0))
+            if (GameState.IsGameStart)
+            {
+                CheckWin();
+                CheckFail();
+            }
+
+            if (Input.GetMouseButtonDown(0) && GameState.IsGameStart)
                 HandleClick();
         }
 
@@ -94,35 +337,78 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
-            // 补位动画进行中或提取（寻路离开）进行中时暂不响应，保证网格状态一致
-            if (_refillMovingCount > 0)
-                return;
+            // 提取（寻路离开）进行中时暂不响应，保证网格状态一致
             if (crowdBuffer != null && crowdBuffer.IsExtracting)
                 return;
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
                 return;
 
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f))
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, _clickMask))
                 return;
 
-            var item = hit.collider.GetComponentInParent<PixelItem>();
-            if (item == null)
+            var listener = hit.collider.GetComponentInParent<PixelClickListener>();
+            if (listener == null || listener.pixel == null)
                 return;
+            var item = listener.pixel;
 
-            // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需连通到首排）
+            // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需能通过空/组内格连通到首排）
             if (pixelGroup.GetItem(item.gridX, item.gridZ) != item)
                 return;
 
             ResolveMatch(item);
         }
 
-        /// <summary>同色组是否连通到首排（任意成员 gridZ == 0）。连通到首排才可能被移出网格。</summary>
-        private bool ReachesFront(List<PixelItem> matched)
+        /// <summary>
+        /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。
+        /// 有路径即可点击离开（组能寻路到出口）；否则组被其他像素完全包围、无法离开。
+        /// </summary>
+        private bool CanReachFront(List<PixelItem> matched)
         {
-            foreach (var item in matched)
-                if (item.gridZ == 0)
-                    return true;
+            int cols = pixelGroup.columns;
+            int rows = pixelGroup.TotalRows;
+
+            var inGroup = new HashSet<PixelItem>(matched);
+            var visited = new bool[cols, rows];
+            var queue = new Queue<Vector2Int>();
+
+            foreach (var it in matched)
+            {
+                if (!pixelGroup.IsInRange(it.gridX, it.gridZ))
+                    continue;
+                queue.Enqueue(new Vector2Int(it.gridX, it.gridZ));
+                visited[it.gridX, it.gridZ] = true;
+            }
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (cur.y == 0)
+                    return true;   // 到达首排
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + dx[d];
+                    int nz = cur.y + dz[d];
+                    if (!pixelGroup.IsInRange(nx, nz))
+                        continue;
+                    if (visited[nx, nz])
+                        continue;
+                    if (pixelGroup.IsWall(nx, nz))
+                        continue;   // 墙体 = 障碍，不可穿过
+
+                    var cell = pixelGroup.grid[nx, nz];
+                    if (cell != null && !inGroup.Contains(cell))
+                        continue;   // 非组内像素 = 障碍
+
+                    visited[nx, nz] = true;
+                    queue.Enqueue(new Vector2Int(nx, nz));
+                }
+            }
+
             return false;
         }
 
@@ -130,8 +416,8 @@ namespace CrowdMatch
         {
             List<PixelItem> matched = FloodFill(start);
 
-            // 只有能连通到首排（gridZ 0）的同色组才可移出；否则点击无效
-            if (!ReachesFront(matched))
+            // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
+            if (!CanReachFront(matched))
                 return;
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
@@ -149,12 +435,20 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
-            // 从网格移除（匹配格先置空）
+            // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
             foreach (var item in matched)
+            {
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
+                item.SetExposed(false);
+                item.SetClickable(false);
+                item.SetWalking(true);
+            }
 
-            // 有缓冲区：进入提取阶段（网格寻路离开），补位推迟到提取完成（OnBatchExtracted 回调）
-            // 否则：回退到旧的直接散布聚集 + 立即补位
+            // 移除后刷新剩余像素的暴露（可点击）状态
+            pixelGroup.RefreshExposed();
+
+            // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
+            // 否则：回退到旧的直接散布聚集
             if (crowdBuffer != null)
             {
                 crowdBuffer.EnterBatch(matched, pixelGroup);
@@ -163,7 +457,6 @@ namespace CrowdMatch
             {
                 foreach (var item in matched)
                     GatherItem(item);
-                CollapseColumns();
             }
         }
 
@@ -237,66 +530,14 @@ namespace CrowdMatch
 
             item.transform.localPosition = target;
             item.arrivedAtGatherPoint = true;
+            item.SetWalking(false);   // 抵达聚集点后相对静止 → Idle（回退无传送带路径）
         }
 
         private Vector3 RandomGatherTarget()
         {
-            Vector2 circle = Random.insideUnitCircle * gatherScatterRadius;
+            Vector2 circle = UnityEngine.Random.insideUnitCircle * gatherScatterRadius;
             return new Vector3(circle.x, 0f, circle.y);
         }
 
-        private void CollapseColumns()
-        {
-            for (int col = 0; col < pixelGroup.columns; col++)
-            {
-                var remaining = new List<PixelItem>();
-                for (int r = 0; r < pixelGroup.rows; r++)
-                {
-                    var it = pixelGroup.grid[col, r];
-                    if (it != null)
-                        remaining.Add(it);
-                    pixelGroup.grid[col, r] = null;
-                }
-
-                // 依次把剩余单位挤到最前排（从 row 0 往下填）
-                int targetRow = 0;
-                for (int i = 0; i < remaining.Count; i++)
-                {
-                    var it = remaining[i];
-                    int oldRow = it.gridZ;
-                    it.gridZ = targetRow;
-                    pixelGroup.grid[col, targetRow] = it;
-
-                    if (oldRow != targetRow)
-                        StartCoroutine(MoveToGridCell(it, col, targetRow));
-
-                    targetRow++;
-                }
-            }
-        }
-
-        private IEnumerator MoveToGridCell(PixelItem item, int col, int row)
-        {
-            _refillMovingCount++;
-
-            Vector3 start = item.transform.localPosition;
-            Vector3 target = pixelGroup.GetLocalPosition(col, row);
-
-            float duration = refillSpeed > 0.0001f
-                ? Vector3.Distance(start, target) / refillSpeed
-                : 0f;
-
-            float t = 0f;
-            while (t < duration)
-            {
-                t += Time.deltaTime;
-                float k = Mathf.Clamp01(duration > 0.0001f ? t / duration : 1f);
-                item.transform.localPosition = Vector3.Lerp(start, target, k);
-                yield return null;
-            }
-
-            item.transform.localPosition = target;
-            _refillMovingCount--;
-        }
     }
 }
