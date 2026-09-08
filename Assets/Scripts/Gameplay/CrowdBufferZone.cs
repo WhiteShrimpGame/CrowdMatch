@@ -42,11 +42,33 @@ namespace CrowdMatch
         [Tooltip("碰撞球世界半径（球视觉直径 = 像素直径 0.5，0.25 即刚好接触；调小可穿插表现拥挤）")]
         public float radius = 0.25f;
 
-        [Tooltip("进入缓冲区（匀速阶段）与物理阶段的驱动速度（物理阶段每帧朝缺口方向直接设定速度）")]
+        [Tooltip("物理阶段基础驱动速度（世界单位/秒），作为随机速度的中心值")]
         public float crowdSpeed = 5f;
+
+        [Tooltip("进入物理区域时速度的随机幅度（±，世界单位/秒）。每个像素进入时在 [crowdSpeed-该值, crowdSpeed+该值] 内随机一次，之后保持该速度前进")]
+        public float crowdSpeedRandomRange = 1f;
 
         [Tooltip("物理阶段像素朝出口（gap）方向转向的最大角速度（度/秒）。进入物理时不再瞬时朝向出口，而是从当前角度平滑趋近，避免角度跳变。")]
         public float physicalRotateSpeed = 360f;
+
+        [Tooltip("朝向点横向（x）随机偏移幅度（±，世界单位）。像素距出口前向（z）距离超过 aimDirectDistanceZ 时，不朝精确出口点，而在出口位置 ± 该值 内随机一个朝向点，用于分散人群")]
+        public float aimOffsetX = 1.5f;
+
+        [Tooltip("距出口前向（z）距离阈值（世界单位）。超过该值按 aimOffsetX 偏移的随机点朝向前进，小于该值才直接朝精确出口位置")]
+        public float aimDirectDistanceZ = 2f;
+
+        [Header("像素尺寸归一")]
+        [Tooltip("进入物理区域后像素统一到的目标尺寸（世界缩放，通常 0.5，与碰撞半径对应）")]
+        public float physicalTargetScale = 0.5f;
+
+        [Tooltip("尺寸偏差容差（相对目标尺寸的比例，0.01 = 1%；偏差超过该值才触发平滑）")]
+        public float scaleTolerance = 0.01f;
+
+        [Tooltip("进入物理区域后把像素尺寸匀速平滑到目标尺寸的时长（秒）")]
+        public float scaleSmoothDuration = 0.5f;
+
+        [Tooltip("进入物理区域后延迟多久才开始缩放（秒）")]
+        public float scaleDelay = 0.3f;
 
         [Header("墙")]
         [Tooltip("墙厚度")]
@@ -207,9 +229,9 @@ namespace CrowdMatch
             if (_physical.Count == 0)
                 return;
 
-            RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
+            RefreshGeometry(out _, out Vector3 gap, out Vector3 axis, out Vector3 perp, out _);
 
-            // 每个物理帧把速度直接设定为朝出口（gap）方向；碰撞挤开与侧边墙仍由物理引擎处理
+            // 每个物理帧把速度直接设定为朝出口方向；碰撞挤开与侧边墙仍由物理引擎处理
             for (int i = _physical.Count - 1; i >= 0; i--)
             {
                 var p = _physical[i];
@@ -226,15 +248,24 @@ namespace CrowdMatch
                     continue;
                 }
 
-                Vector3 dir = gap - p.transform.position;
+                Vector3 toGap = gap - p.transform.position;
+                toGap.y = 0f;
+
+                // 距出口前向（z）仍较远时，朝出口位置横向（x）偏移后的点前进以分散人群；足够近才直接朝精确出口
+                Vector3 target = gap;
+                float forwardDist = Vector3.Dot(toGap, axis);
+                if (forwardDist > aimDirectDistanceZ)
+                    target = gap + perp * p.bufferAimOffset;
+
+                Vector3 dir = target - p.transform.position;
                 dir.y = 0f;
                 if (dir.sqrMagnitude > 0.0001f)
                 {
-                    rb.velocity = dir.normalized * crowdSpeed;
-                    // 物理移动阶段：z 正方向以最大角速度平滑趋近出口（gap）方向，避免进入物理瞬间的角度跳变
-                    Quaternion target = Quaternion.LookRotation(dir.normalized, Vector3.up);
+                    rb.velocity = dir.normalized * p.bufferCrowdSpeed;
+                    // 物理移动阶段：z 正方向以最大角速度平滑趋近目标方向，避免进入物理瞬间的角度跳变
+                    Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
                     p.transform.rotation = Quaternion.RotateTowards(
-                        p.transform.rotation, target, physicalRotateSpeed * Time.fixedDeltaTime);
+                        p.transform.rotation, targetRot, physicalRotateSpeed * Time.fixedDeltaTime);
                 }
                 else
                 {
@@ -495,9 +526,11 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>某格是否为障碍：未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        /// <summary>某格是否为障碍：墙体、未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
         private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
+            if (_extractGroup.IsWall(col, row))
+                return true;
             if (_extractGroup.grid[col, row] != null)
                 return true;
             if (claimed[col, row])
@@ -525,7 +558,7 @@ namespace CrowdMatch
             var queue = new Queue<Vector2Int>();
             for (int c = 0; c < cols; c++)
             {
-                if (_extractGroup.grid[c, 0] == null)
+                if (_extractGroup.IsEmpty(c, 0))
                 {
                     dist[c, 0] = 0;
                     queue.Enqueue(new Vector2Int(c, 0));
@@ -545,7 +578,7 @@ namespace CrowdMatch
                         continue;
                     if (dist[nx, nz] != INF)
                         continue;
-                    if (_extractGroup.grid[nx, nz] != null)
+                    if (!_extractGroup.IsEmpty(nx, nz))
                         continue;
                     dist[nx, nz] = dist[cur.x, cur.y] + 1;
                     queue.Enqueue(new Vector2Int(nx, nz));
@@ -712,12 +745,12 @@ namespace CrowdMatch
                 Destroy(c);
             }
 
-            // 球碰撞体：radius 字段为世界半径，SphereCollider.radius 是本地值（乘 lossyScale），需除回
+            // 球碰撞体：本地半径固定为「参考尺寸(physicalTargetScale)下世界半径 = radius」对应的本地值，
+            // 此后随视觉 localScale 同步缩放（进入物理后视觉放大时，碰撞球也一起放大，始终贴合视觉）
             var sphere = item.GetComponent<SphereCollider>();
             if (sphere == null)
                 sphere = item.gameObject.AddComponent<SphereCollider>();
-            float s = Mathf.Max(0.0001f, item.transform.lossyScale.x);
-            sphere.radius = radius / s;
+            sphere.radius = radius / Mathf.Max(0.0001f, physicalTargetScale);
             sphere.enabled = true;
 
             // 刚体：冻结 Y 与旋转，关重力，只在 XZ 平面做真实碰撞
@@ -735,14 +768,63 @@ namespace CrowdMatch
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
+            // 进入物理阶段：在 [crowdSpeed-crowdSpeedRandomRange, crowdSpeed+crowdSpeedRandomRange] 内随机一个速度并记录到像素，之后该像素一直以此速度前进
+            item.bufferCrowdSpeed = Random.Range(
+                Mathf.Max(0.01f, crowdSpeed - crowdSpeedRandomRange),
+                crowdSpeed + crowdSpeedRandomRange);
+
+            // 进入物理阶段：随机一个朝向点横向（x）偏移并记录到像素，距离出口较远时朝该偏移点前进
+            item.bufferAimOffset = Random.Range(-aimOffsetX, aimOffsetX);
+
             // 进入物理阶段即时给一个朝出口（gap）的初速度，后续由 FixedUpdate 每帧重写
             RefreshGeometry(out _, out Vector3 gap, out _, out _, out _);
             Vector3 dir = gap - item.transform.position;
             dir.y = 0f;
             dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
-            rb.velocity = dir * crowdSpeed;
+            rb.velocity = dir * item.bufferCrowdSpeed;
+
+            // 像素尺寸归一：若当前尺寸与目标（physicalTargetScale）偏差超过容差，则在 scaleSmoothDuration 内匀速平滑到目标
+            float curScale = item.transform.localScale.x;
+            if (Mathf.Abs(curScale - physicalTargetScale) > physicalTargetScale * scaleTolerance)
+                StartCoroutine(SmoothScaleToTarget(item));
 
             _physical.Add(item);
+        }
+
+        /// <summary>
+        /// 延迟 scaleDelay 秒后，把像素尺寸在 scaleSmoothDuration 内匀速（线性）平滑到 physicalTargetScale；
+        /// 碰撞球本地半径保持固定，因此世界碰撞尺寸随视觉 localScale 同步缩放（无需额外补偿）。
+        /// </summary>
+        private IEnumerator SmoothScaleToTarget(PixelItem item)
+        {
+            if (item == null || item.transform == null)
+                yield break;
+
+            // 延迟一小段时间再开始缩放（等待像素先进入物理、就位）
+            if (scaleDelay > 0f)
+                yield return new WaitForSeconds(scaleDelay);
+
+            if (item == null || item.transform == null)
+                yield break;
+
+            var t = item.transform;
+            Vector3 start = t.localScale;
+            Vector3 target = Vector3.one * physicalTargetScale;
+
+            float dur = Mathf.Max(0.0001f, scaleSmoothDuration);
+            float elapsed = 0f;
+            while (elapsed < dur)
+            {
+                if (item == null || t == null)
+                    yield break;
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / dur);
+                t.localScale = Vector3.Lerp(start, target, k);
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = target;
         }
 
         /// <summary>每个满足间隔的帧，释放距缺口最近的已就位像素（每次最多一个）</summary>

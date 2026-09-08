@@ -64,6 +64,12 @@ namespace CrowdMatch
         /// <summary>是否已到达聚集点（运行时标记，供 ContainerGroup 消费）</summary>
         [System.NonSerialized] public bool arrivedAtGatherPoint;
 
+        /// <summary>进入物理缓冲区时随机到的个人前进速度（世界单位/秒，由 CrowdBufferZone 赋值，进入后保持不变）</summary>
+        [System.NonSerialized] public float bufferCrowdSpeed;
+
+        /// <summary>进入物理缓冲区时随机到的朝向点横向（x）偏移（世界单位，由 CrowdBufferZone 赋值；距出口较远时朝 gap + perp*该偏移 前进）</summary>
+        [System.NonSerialized] public float bufferAimOffset;
+
         /// <summary>IConveyorItem：供传送带定位的 Transform。</summary>
         public Transform Transform => transform;
 

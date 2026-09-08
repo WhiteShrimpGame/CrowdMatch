@@ -50,7 +50,7 @@ namespace CrowdMatch
         [Tooltip("勾选后运行时新建序列文件；小球到达传送带远侧时直接消失并把颜色写入文件，不进入容器")]
         public bool recordMode = false;
 
-        [Tooltip("序列文件输出目录；留空使用 Application.persistentDataPath")]
+        [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
         public string recordOutputDir = "";
 
         /// <summary>处于聚集点中的单位</summary>
@@ -114,11 +114,23 @@ namespace CrowdMatch
             if (data == null)
                 return;
 
-            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同
-            LevelLoader.ShuffleContainers(data.container);
+            Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
+
+#if UNITY_EDITOR
+            LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
+#endif
+
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定 Container 时跳过）
+            if (!data.container.lockContainer)
+                LevelLoader.ShuffleContainers(data.container);
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
             pixelGroup.RefreshExposed();
+
+#if UNITY_EDITOR
+            // 缓存初始化（洗牌后）的关卡数据快照，供编辑器在 Play 模式下导出「锁定」初始状态
+            LevelDataCache.LastInitData = JsonUtility.FromJson<LevelData>(JsonUtility.ToJson(data));
+#endif
 
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels();
@@ -234,11 +246,22 @@ namespace CrowdMatch
 
         // ===== Record 模式 =====
 
-        /// <summary>开启记录：在指定目录（默认 persistentDataPath）新建带时间戳的序列文件。</summary>
+        /// <summary>Record 默认输出目录：编辑器下为工程目录（Assets 的上一级）下的 Record 文件夹；构建时回退 persistentDataPath。</summary>
+        private static string DefaultRecordDir()
+        {
+#if UNITY_EDITOR
+            string projectDir = Path.GetDirectoryName(Application.dataPath);
+            return Path.Combine(projectDir, "Record");
+#else
+            return Application.persistentDataPath;
+#endif
+        }
+
+        /// <summary>开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建带时间戳的序列文件。</summary>
         private void BeginRecord()
         {
             string dir = string.IsNullOrEmpty(recordOutputDir)
-                ? Application.persistentDataPath
+                ? DefaultRecordDir()
                 : recordOutputDir;
 
             try
@@ -374,6 +397,8 @@ namespace CrowdMatch
                         continue;
                     if (visited[nx, nz])
                         continue;
+                    if (pixelGroup.IsWall(nx, nz))
+                        continue;   // 墙体 = 障碍，不可穿过
 
                     var cell = pixelGroup.grid[nx, nz];
                     if (cell != null && !inGroup.Contains(cell))
