@@ -26,11 +26,19 @@ namespace CrowdMatch
         }
 
         /// <summary>积压区间段：进度到 percent%（含）之前生成的容器使用 [backlogMin, backlogMax]；尾段 percent 强制 100。</summary>
+        [Serializable]
         public class BacklogSegment
         {
             public int percent;
             public int backlogMin;
             public int backlogMax;
+        }
+
+        /// <summary>积压分段参数模板（导出 / 导入 JSON 用）。</summary>
+        [Serializable]
+        public class BacklogSegmentConfig
+        {
+            public List<BacklogSegment> segments = new List<BacklogSegment>();
         }
 
         /// <summary>每次取出的像素数（= 标准容器容量；不足时记剩余数量）。</summary>
@@ -99,31 +107,47 @@ namespace CrowdMatch
         /// <summary>
         /// 执行重排：按进度分段生成容器序列 → 随机分布回各列 → 产出新的 LevelData（pixel 不变，lockContainer=true）。
         /// </summary>
-        public static LevelData Rearrange(LevelData data, IReadOnlyList<int> seq, IReadOnlyList<BacklogSegment> segments, int seed)
+        public static LevelData Rearrange(LevelData data, IReadOnlyList<int> seq, IReadOnlyList<BacklogSegment> segments, int columnOverride, int seed)
         {
             var rng = MakeRng(seed);
             var segs = NormalizeSegments(segments);
             var entries = GenerateSequence(seq, segs, rng);
 
-            int columns = Mathf.Max(1, data.container.columns);
-            int[] colCount = new int[columns];
+            int origColumns = Mathf.Max(1, data.container.columns);
+            int[] origColCount = new int[origColumns];
             if (data.container.items != null)
             {
                 foreach (var it in data.container.items)
                 {
-                    if (it.x >= 0 && it.x < columns)
-                        colCount[it.x]++;
+                    if (it.x >= 0 && it.x < origColumns)
+                        origColCount[it.x]++;
                 }
             }
 
             int origCount = 0;
-            foreach (var c in colCount) origCount += c;
+            foreach (var c in origColCount) origCount += c;
             if (entries.Count != origCount)
                 Debug.LogError("[ContainerRearranger] 生成的容器数(" + entries.Count + ")与原容器数(" + origCount +
                     ")不一致；关卡容器容量可能不是 3 的拆分，分布结果可能不完整。");
 
+            // 列数：0 / 负 = 维持原列数；否则按新列数平均每列数量
+            int columns;
+            int[] colCount;
+            if (columnOverride > 0 && columnOverride != origColumns)
+            {
+                columns = columnOverride;
+                colCount = EvenlySplit(entries.Count, columns);
+            }
+            else
+            {
+                columns = origColumns;
+                colCount = origColCount;
+            }
+
             var result = JsonUtility.FromJson<LevelData>(JsonUtility.ToJson(data));
             result.container.lockContainer = true;
+            result.container.columns = columns;
+            result.container.rows = Mathf.Max(result.container.rows, CeilDiv(entries.Count, columns));
             result.container.items = Distribute(entries, columns, colCount, rng);
 
             LogSummary(entries, result.container.items, columns);
@@ -298,6 +322,23 @@ namespace CrowdMatch
             return seed != 0 ? new System.Random(seed) : new System.Random(Environment.TickCount);
         }
 
+        /// <summary>把 total 个容器平均分到 columns 列：每列 base 个，多出的 remainder 个分给前 rem 列（每列 +1）。</summary>
+        private static int[] EvenlySplit(int total, int columns)
+        {
+            int[] result = new int[columns];
+            int baseCount = total / columns;
+            int rem = total % columns;
+            for (int i = 0; i < columns; i++)
+                result[i] = baseCount + (i < rem ? 1 : 0);
+            return result;
+        }
+
+        /// <summary>整数向上取整除法。</summary>
+        private static int CeilDiv(int a, int b)
+        {
+            return (a + b - 1) / b;
+        }
+
         private static void LogSummary(List<Entry> entries, LevelData.ContainerItemData[] items, int columns)
         {
             int totalCap = 0;
@@ -327,6 +368,7 @@ namespace CrowdMatch
     {
         private const string RecordPathKey = "CrowdMatch.ContainerRearranger.LastRecordPath";
         private const string ExportPathKey = "CrowdMatch.ContainerRearranger.LastExportPath";
+        private const string TemplatePathKey = "CrowdMatch.ContainerRearranger.LastTemplatePath";
 
         private TextAsset levelJson;
         private string recordPath = "";
@@ -335,6 +377,7 @@ namespace CrowdMatch
             new ContainerRearranger.BacklogSegment { percent = 100, backlogMin = 0, backlogMax = 6 }
         };
         private int seed = 0;
+        private int columnOverride = 0;
 
         [MenuItem("CrowdMatch/按 Record 重排容器")]
         public static void Open() => GetWindow<ContainerRearrangerWindow>("按 Record 重排容器");
@@ -395,6 +438,15 @@ namespace CrowdMatch
                 EditorGUILayout.HelpBox(segErr, MessageType.Warning);
 
             EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("导出分段模板", GUILayout.Width(96)))
+                ExportSegmentsTemplate();
+            if (GUILayout.Button("导入分段模板", GUILayout.Width(96)))
+                ImportSegmentsTemplate();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4);
+            columnOverride = EditorGUILayout.IntField("容器列数（0=维持原列数）", columnOverride);
             seed = EditorGUILayout.IntField("随机种子（0=随机）", seed);
 
             EditorGUILayout.Space(8);
@@ -441,6 +493,71 @@ namespace CrowdMatch
                 return;
             EditorPathMemory.SaveDir(RecordPathKey, path);
             recordPath = path;
+        }
+
+        private void ExportSegmentsTemplate()
+        {
+            var cfg = new ContainerRearranger.BacklogSegmentConfig();
+            foreach (var s in segments)
+                cfg.segments.Add(new ContainerRearranger.BacklogSegment
+                {
+                    percent = s.percent,
+                    backlogMin = s.backlogMin,
+                    backlogMax = s.backlogMax,
+                });
+
+            string json = JsonUtility.ToJson(cfg, true);
+
+            string defaultDir = EditorPathMemory.LoadDir(TemplatePathKey, "Assets");
+            string path = EditorUtility.SaveFilePanel("导出积压分段模板", defaultDir, "BacklogSegments.json", "json");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(TemplatePathKey, path);
+
+            File.WriteAllText(path, json, new UTF8Encoding(false));
+            AssetDatabase.Refresh();
+            Debug.Log("[ContainerRearranger] 已导出积压分段模板到 " + path);
+        }
+
+        private void ImportSegmentsTemplate()
+        {
+            string defaultDir = EditorPathMemory.LoadDir(TemplatePathKey, "Assets");
+            string path = EditorUtility.OpenFilePanel("导入积压分段模板", defaultDir, "json");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(TemplatePathKey, path);
+
+            string json;
+            try
+            {
+                json = File.ReadAllText(path);
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("导入积压分段模板", "读取失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            ContainerRearranger.BacklogSegmentConfig cfg;
+            try
+            {
+                cfg = JsonUtility.FromJson<ContainerRearranger.BacklogSegmentConfig>(json);
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("导入积压分段模板", "解析失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            if (cfg == null || cfg.segments == null || cfg.segments.Count == 0)
+            {
+                EditorUtility.DisplayDialog("导入积压分段模板", "模板中没有任何分段。", "确定");
+                return;
+            }
+
+            segments = cfg.segments;
+            Repaint();
+            Debug.Log("[ContainerRearranger] 已导入积压分段模板（" + segments.Count + " 段）：" + path);
         }
 
         private void GenerateAndExport()
@@ -495,7 +612,7 @@ namespace CrowdMatch
                 return;
             }
 
-            var outData = ContainerRearranger.Rearrange(data, seq, segments, seed);
+            var outData = ContainerRearranger.Rearrange(data, seq, segments, columnOverride, seed);
 
             string json = JsonUtility.ToJson(outData, true);
 
