@@ -334,6 +334,10 @@ MonoBehaviour:
   physicalRotateSpeed: 180
   aimOffsetX: 1.5
   aimDirectDistanceZ: 2
+  physicalTargetScale: 0.5
+  scaleTolerance: 0.01
+  scaleSmoothDuration: 0.8
+  scaleDelay: 0.2
   wallThickness: 0.1
   wallHeight: 2
   extractSpeed: 6
@@ -570,11 +574,12 @@ MonoBehaviour:
   columns: 15
   rows: 15
   tailRows: 0
-  colorIds: 020000000300000004000000080000000b0000000f0000001100000013000000
+  colorIds: 0000000001000000020000000300000004000000050000000600000007000000080000000e0000001500000013000000
   minRunLength: 4
   maxRunLength: 8
   fillToMultipleOf3: 1
   pixelPrefab: {fileID: 4974077334147149108, guid: 1a4154a9e973cb6489645085010fb729, type: 3}
+  wallPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
 --- !u!4 &882082745
 Transform:
   m_ObjectHideFlags: 0
@@ -705,7 +710,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   containerPrefab: {fileID: 4074727829767371378, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
   columns: 4
-  rows: 19
+  rows: 50
   xSpacing: 2
   zSpacing: 1.2
   pixelGroup: {fileID: 882082744}
@@ -1135,7 +1140,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
-  levelJsons: []
+  levelJsons:
+  - {fileID: 4900000, guid: 5135b1e47e3242249a5d528304f9b85d, type: 3}
+  - {fileID: 4900000, guid: 5449a2927a461f04f8d97efc52b5775d, type: 3}
+  - {fileID: 4900000, guid: fdf741b4628f32b47ab4a5d513a1b809, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:

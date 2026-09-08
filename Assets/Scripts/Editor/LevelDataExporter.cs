@@ -82,8 +82,8 @@ namespace CrowdMatch
             AssetDatabase.Refresh();
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
-                (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个" +
-                (locked ? "，已锁定" : "") + "）");
+                (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
+                data.walls.Length + " 段" + (locked ? "，已锁定" : "") + "）");
 
             EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
@@ -176,6 +176,7 @@ namespace CrowdMatch
             {
                 Undo.RegisterFullObjectHierarchyUndo(pixelGroup.gameObject, "清空 Group 子物体");
                 pixelGroup.ClearPixels();
+                pixelGroup.ClearWalls();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -245,6 +246,16 @@ namespace CrowdMatch
                 }
             }
             data.container.items = items.ToArray();
+
+            // 墙体：扫描 PixelGroup 下的 WallItem，每个墙存一组端点
+            var walls = new List<LevelData.WallData>();
+            foreach (var wall in pg.GetComponentsInChildren<WallItem>())
+            {
+                if (wall == null || wall.points == null || wall.points.Count < 2)
+                    continue;
+                walls.Add(new LevelData.WallData { points = wall.points.ToArray() });
+            }
+            data.walls = walls.ToArray();
 
             return data;
         }

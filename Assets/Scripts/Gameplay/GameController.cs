@@ -397,6 +397,8 @@ namespace CrowdMatch
                         continue;
                     if (visited[nx, nz])
                         continue;
+                    if (pixelGroup.IsWall(nx, nz))
+                        continue;   // 墙体 = 障碍，不可穿过
 
                     var cell = pixelGroup.grid[nx, nz];
                     if (cell != null && !inGroup.Contains(cell))

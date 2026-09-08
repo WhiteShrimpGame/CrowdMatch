@@ -47,8 +47,14 @@ namespace CrowdMatch
         [Tooltip("PixelItem 预制体模板（Block），需自带 PixelItem 组件并配置好 renderers 列表")]
         public GameObject pixelPrefab;
 
+        [Tooltip("墙体像素块预制体模板（每个被墙体占据的格子会生成一个，作为 WallItem 的子物体，用于运行时可视化）")]
+        public GameObject wallPrefab;
+
         /// <summary>运行时网格 [column, row]，row 0 为最前排（+Z），row = TotalRows-1 为后排（-Z，含尾部）</summary>
         [System.NonSerialized] public PixelItem[,] grid;
+
+        /// <summary>墙体占用表 [column, row]：true = 该格被 WallItem 占据（作为障碍参与暴露与寻路）。</summary>
+        [System.NonSerialized] public bool[,] wallGrid;
 
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
@@ -64,16 +70,30 @@ namespace CrowdMatch
             RebuildGrid();
         }
 
-        /// <summary>扫描子物体，重建 grid 数组</summary>
+        /// <summary>扫描子物体，重建 grid 数组与墙体占用表</summary>
         public void RebuildGrid()
         {
             grid = new PixelItem[columns, TotalRows];
+            wallGrid = new bool[columns, TotalRows];
+
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
                 if (IsInRange(item.gridX, item.gridZ))
                 {
                     grid[item.gridX, item.gridZ] = item;
                     item.group = this;
+                }
+            }
+
+            foreach (var wall in GetComponentsInChildren<WallItem>())
+            {
+                if (wall == null)
+                    continue;
+                wall.group = this;
+                foreach (var cell in wall.EnumerateOccupiedCells())
+                {
+                    if (IsInRange(cell.x, cell.y))
+                        wallGrid[cell.x, cell.y] = true;
                 }
             }
         }
@@ -92,6 +112,26 @@ namespace CrowdMatch
         public bool IsInRange(int col, int row)
         {
             return col >= 0 && col < columns && row >= 0 && row < TotalRows;
+        }
+
+        /// <summary>该格是否被墙体占据。</summary>
+        public bool IsWall(int col, int row)
+        {
+            if (wallGrid == null)
+                return false;
+            if (!IsInRange(col, row))
+                return false;
+            return wallGrid[col, row];
+        }
+
+        /// <summary>该格是否为空（既无像素也无墙体，可作为可通行 / 暴露判定依据）。grid 未重建时视为非空。</summary>
+        public bool IsEmpty(int col, int row)
+        {
+            if (!IsInRange(col, row))
+                return false;
+            if (grid == null)
+                return false;
+            return grid[col, row] == null && !IsWall(col, row);
         }
 
         /// <summary>
@@ -125,20 +165,20 @@ namespace CrowdMatch
             int cols = columns;
             int totalRows = TotalRows;
 
-            // 1. 标记「直接暴露」格子
+            // 1. 标记「直接暴露」格子（墙体视为占用：前方/侧方有墙时不算暴露）
             var directlyExposed = new bool[cols, totalRows];
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null)
+                    if (grid[c, r] == null || IsWall(c, r))
                         continue;
                     directlyExposed[c, r] =
-                        r == 0 ||                                            // 前方：出口（第一排）或空
-                        grid[c, r - 1] == null ||                            // 前方空
-                        (r + 1 < totalRows && grid[c, r + 1] == null) ||     // 后方空（后面暴露）
-                        (c - 1 >= 0 && grid[c - 1, r] == null) ||            // 左方空（侧面暴露）
-                        (c + 1 < cols && grid[c + 1, r] == null);            // 右方空（侧面暴露）
+                        r == 0 ||                                            // 前方：出口（第一排）
+                        IsEmpty(c, r - 1) ||                                 // 前方空
+                        (r + 1 < totalRows && IsEmpty(c, r + 1)) ||          // 后方空（后面暴露）
+                        (c - 1 >= 0 && IsEmpty(c - 1, r)) ||                 // 左方空（侧面暴露）
+                        (c + 1 < cols && IsEmpty(c + 1, r));                 // 右方空（侧面暴露）
                 }
             }
 
@@ -152,7 +192,7 @@ namespace CrowdMatch
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null || visited[c, r])
+                    if (grid[c, r] == null || IsWall(c, r) || visited[c, r])
                         continue;
 
                     int color = grid[c, r].colorId;
@@ -179,7 +219,7 @@ namespace CrowdMatch
                                 continue;
 
                             var nb = grid[nx, nz];
-                            if (nb == null || nb.colorId != color)
+                            if (nb == null || IsWall(nx, nz) || nb.colorId != color)
                                 continue;
 
                             visited[nx, nz] = true;
@@ -223,6 +263,58 @@ namespace CrowdMatch
                 else
                     DestroyImmediate(it.gameObject);
             }
+        }
+
+        /// <summary>清空所有 WallItem 子物体（供关卡重载时重建墙体）。</summary>
+        public void ClearWalls()
+        {
+            var walls = GetComponentsInChildren<WallItem>();
+            for (int i = walls.Length - 1; i >= 0; i--)
+            {
+                var w = walls[i];
+                if (w == null)
+                    continue;
+                w.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(w.gameObject);
+                else
+                    DestroyImmediate(w.gameObject);
+            }
+            wallGrid = new bool[columns, TotalRows];
+        }
+
+        /// <summary>
+        /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
+        /// 并在其占据的每个网格格上生成 wallPrefab 像素块作为子物体（运行时可视化）。
+        /// </summary>
+        public WallItem SpawnWall(IList<Vector2> points)
+        {
+            if (wallPrefab == null)
+            {
+                Debug.LogError("[PixelGroup] wallPrefab 为空，无法生成墙体像素块（请挂 Block 预制体，用于填充墙体占据的格子）。");
+                return null;
+            }
+
+            var go = new GameObject("Wall_" + (transform.childCount + 1));
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+
+            var wall = go.AddComponent<WallItem>();
+            wall.points = new List<Vector2>(points);
+
+            // 在墙体占据的每个格子上生成像素块作为子物体（运行时可视化）
+            foreach (var cell in wall.EnumerateOccupiedCells())
+            {
+                if (!IsInRange(cell.x, cell.y))
+                    continue;
+                var block = Instantiate(wallPrefab);
+                block.name = "WallBlock_" + cell.y + "_" + cell.x;
+                block.transform.SetParent(go.transform, false);
+                block.transform.localPosition = GetLocalPosition(cell.x, cell.y);
+                block.transform.localScale = Vector3.one * unitSize;
+            }
+
+            return wall;
         }
 
         /// <summary>在指定格子生成一个 PixelItem 并应用颜色材质（供运行时关卡加载使用）。PixelItem 组件来自预制体，不再动态创建。</summary>

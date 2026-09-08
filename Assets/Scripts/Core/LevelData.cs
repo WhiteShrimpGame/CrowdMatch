@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 namespace CrowdMatch
 {
@@ -12,6 +13,7 @@ namespace CrowdMatch
         public int version = 1;
         public PixelData pixel = new PixelData();
         public ContainerData container = new ContainerData();
+        public WallData[] walls = new WallData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -46,6 +48,13 @@ namespace CrowdMatch
             public int y;
             public int colorId;
             public int capacity;
+        }
+
+        /// <summary>一段墙体：端点序列（网格坐标，x = 列 col，y = 行 row），相邻两点构成一段，每段平行于 X 或 Z 轴。</summary>
+        [Serializable]
+        public class WallData
+        {
+            public Vector2[] points = new Vector2[0];
         }
     }
 

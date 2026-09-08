@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -51,12 +52,15 @@ namespace CrowdMatch
             if (data == null)
                 return;
             if (pixelGroup != null)
-                ApplyPixel(pixelGroup, data.pixel, colorConfig);
+            {
+                ApplyPixel(pixelGroup, data.pixel, data.walls, colorConfig);
+                ApplyWalls(pixelGroup, data.walls);
+            }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -75,14 +79,54 @@ namespace CrowdMatch
 
             pg.ClearPixels();
 
+            // 收集墙体占据的网格格，导入像素时跳过这些格子（墙体位置不再创建 Pixel）
+            var wallCells = new HashSet<Vector2Int>();
+            if (walls != null)
+            {
+                foreach (var w in walls)
+                {
+                    if (w == null || w.points == null)
+                        continue;
+                    WallItem.CollectOccupiedCells(w.points, wallCells);
+                }
+            }
+
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
                 {
+                    if (wallCells.Contains(new Vector2Int(c, r)))
+                        continue;
                     int colorId = d.cells[r * columns + c];
                     pg.SpawnPixel(c, r, colorId, config);
                 }
 
             pg.RebuildGrid();
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的墙体（少于 2 个端点或为空的墙被跳过）。</summary>
+        private static void ApplyWalls(PixelGroup pg, LevelData.WallData[] walls)
+        {
+            pg.ClearWalls();
+
+            if (walls == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var w in walls)
+            {
+                if (w == null || w.points == null || w.points.Length < 2)
+                    continue;
+                if (pg.SpawnWall(w.points) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 段墙体。");
         }
 
         private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)
