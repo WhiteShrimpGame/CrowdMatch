@@ -625,7 +625,7 @@ MonoBehaviour:
   - {fileID: 5621284353001030607}
   boardJumpPower: 2
   boardJumpCount: 1
-  boardJumpDuration: 0.5
+  boardJumpDuration: 0.4
   boardElasticTargetScale: {x: 1.08, y: 0.85, z: 1.08}
   boardElasticScaleDuration: 0.12
   boardElasticRecoverDuration: 0.12
@@ -671,8 +671,8 @@ MonoBehaviour:
   rollOutDuration: 0.4
   rollRecoverDuration: 0.2
   elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
-  elasticScaleDuration: 0.15
-  elasticRecoverDuration: 0.2
+  elasticScaleDuration: 0.05
+  elasticRecoverDuration: 0.1
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0
