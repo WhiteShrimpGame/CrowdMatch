@@ -146,6 +146,21 @@ namespace CrowdMatch
         /// <summary>是否正在提取（还有匹配像素在网格内寻路离开）</summary>
         public bool IsExtracting => _extracting.Count > 0;
 
+        /// <summary>该格是否被提取中的像素「占用」：有等待停靠的像素，或有正在进入该格的像素。
+        /// 仅有正在离开该格（已决定移入下一格）的像素视为不占用。供管道蛇头判断前方格是否可进入。</summary>
+        public bool IsExtractingOccupied(int col, int row)
+        {
+            for (int i = 0; i < _extracting.Count; i++)
+            {
+                var st = _extracting[i];
+                if (st == null || st.exiting)
+                    continue;
+                if (st.col == col && st.row == row)
+                    return true;
+            }
+            return false;
+        }
+
         // 封闭区间的墙（运行时创建，static 碰撞体）：漏斗两条斜边 + 游戏区两条侧边 + 后墙 + 缺口封口墙
         private GameObject _funnelLeftWall;
         private GameObject _funnelRightWall;
@@ -357,6 +372,7 @@ namespace CrowdMatch
             // 4. 全部离开 → 清理
             if (_extracting.Count == 0)
             {
+                ClearExtractionWalkableFlags();
                 _extractGroup = null;
                 _matchedOccupied = null;
             }
@@ -526,18 +542,48 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>某格是否为障碍：墙体、未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        /// <summary>某格是否为障碍：墙体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
         private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
             if (_extractGroup.IsWall(col, row))
                 return true;
-            if (_extractGroup.grid[col, row] != null)
+            var gridItem = _extractGroup.grid[col, row];
+            if (gridItem != null && !gridItem.walkableDuringExtraction)
                 return true;
             if (claimed[col, row])
                 return true;
             if (_matchedOccupied[col, row] && !vacated[col, row])
                 return true;
             return false;
+        }
+
+        /// <summary>该格是否对提取寻路「可通行」：非墙体/管道自身格，且为空或为管道蛇形生成中（walkableDuringExtraction）的像素。</summary>
+        private bool IsEmptyForExtraction(int col, int row)
+        {
+            if (_extractGroup == null)
+                return false;
+            if (!_extractGroup.IsInRange(col, row))
+                return false;
+            if (_extractGroup.IsBlocked(col, row))
+                return false;
+            var item = _extractGroup.grid[col, row];
+            if (item == null)
+                return true;
+            return item.walkableDuringExtraction;
+        }
+
+        /// <summary>清除所有网格像素上的「提取可通行」标记（本批提取结束时调用，此后这些像素恢复为普通障碍）。</summary>
+        private void ClearExtractionWalkableFlags()
+        {
+            if (_extractGroup == null || _extractGroup.grid == null)
+                return;
+            for (int c = 0; c < _extractGroup.columns; c++)
+                for (int r = 0; r < _extractGroup.TotalRows; r++)
+                {
+                    var item = _extractGroup.grid[c, r];
+                    if (item != null)
+                        item.walkableDuringExtraction = false;
+                }
         }
 
         /// <summary>
@@ -558,7 +604,7 @@ namespace CrowdMatch
             var queue = new Queue<Vector2Int>();
             for (int c = 0; c < cols; c++)
             {
-                if (_extractGroup.IsEmpty(c, 0))
+                if (IsEmptyForExtraction(c, 0))
                 {
                     dist[c, 0] = 0;
                     queue.Enqueue(new Vector2Int(c, 0));
@@ -578,7 +624,7 @@ namespace CrowdMatch
                         continue;
                     if (dist[nx, nz] != INF)
                         continue;
-                    if (!_extractGroup.IsEmpty(nx, nz))
+                    if (!IsEmptyForExtraction(nx, nz))
                         continue;
                     dist[nx, nz] = dist[cur.x, cur.y] + 1;
                     queue.Enqueue(new Vector2Int(nx, nz));

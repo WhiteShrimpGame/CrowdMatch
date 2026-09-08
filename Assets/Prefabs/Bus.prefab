@@ -673,7 +673,6 @@ MonoBehaviour:
   elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
   elasticScaleDuration: 0.15
   elasticRecoverDuration: 0.2
-  logExitDriveX: 1
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0

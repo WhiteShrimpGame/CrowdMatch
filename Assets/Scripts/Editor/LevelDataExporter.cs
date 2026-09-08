@@ -83,7 +83,7 @@ namespace CrowdMatch
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
                 (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
-                data.walls.Length + " 段" + (locked ? "，已锁定" : "") + "）");
+                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个" + (locked ? "，已锁定" : "") + "）");
 
             EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
@@ -177,6 +177,7 @@ namespace CrowdMatch
                 Undo.RegisterFullObjectHierarchyUndo(pixelGroup.gameObject, "清空 Group 子物体");
                 pixelGroup.ClearPixels();
                 pixelGroup.ClearWalls();
+                pixelGroup.ClearPipes();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -256,6 +257,16 @@ namespace CrowdMatch
                 walls.Add(new LevelData.WallData { points = wall.points.ToArray() });
             }
             data.walls = walls.ToArray();
+
+            // 管道：扫描 PixelGroup 下的 PipeItem，每个管道存轨迹端点 + 每波颜色
+            var pipes = new List<LevelData.PipeData>();
+            foreach (var pipe in pg.GetComponentsInChildren<PipeItem>())
+            {
+                if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null || pipe.colors.Count < 1)
+                    continue;
+                pipes.Add(new LevelData.PipeData { points = pipe.points.ToArray(), colors = pipe.colors.ToArray() });
+            }
+            data.pipes = pipes.ToArray();
 
             return data;
         }

@@ -41,6 +41,12 @@ namespace CrowdMatch
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
+        /// <summary>管道放置中标记：期间 SetExposed 只记录状态、不激活 Animator，待放置完成后统一激活。</summary>
+        [System.NonSerialized] public bool placing;
+
+        /// <summary>管道蛇形生成期间标记：提取寻路（本批离开的像素）中把该像素视为可通行（不阻挡）。由 CrowdBufferZone 在提取结束时清除。</summary>
+        [System.NonSerialized] public bool walkableDuringExtraction;
+
         /// <summary>Animator 中「Walking」布尔参数名（控制走/停动画）。</summary>
         private const string WalkParam = "Walking";
 
@@ -210,7 +216,14 @@ namespace CrowdMatch
             if (IsExposed == exposed)
                 return;
             IsExposed = exposed;
+            if (placing)
+                return;   // 管道放置中：只记录状态，不激活动画，放置完成后由 MarkPlaced / RefreshExposed 统一应用
+            ApplyExposedState(exposed);
+        }
 
+        /// <summary>按暴露状态应用动画：激活/关闭 Animator，并把 exposeMoveTarget 平滑到 y=0 / 停止。</summary>
+        private void ApplyExposedState(bool exposed)
+        {
             if (exposed)
             {
                 if (animator != null)
@@ -229,6 +242,16 @@ namespace CrowdMatch
                 if (animator != null)
                     animator.enabled = false;
             }
+        }
+
+        /// <summary>管道放置完成：清除放置标记并把暴露状态复位（Animator 关闭、Root 归位），等待后续 RefreshExposed 统一激活。</summary>
+        public void MarkPlaced()
+        {
+            if (!placing)
+                return;
+            placing = false;
+            IsExposed = false;
+            ApplyExposedState(false);
         }
 
         /// <summary>把 exposeMoveTarget（localPosition）在 duration 内匀速移动到指定 y（x/z 保持）。</summary>
