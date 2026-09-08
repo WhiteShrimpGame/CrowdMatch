@@ -654,12 +654,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a5c85d2042b1b6e4fa4bfbc8d20f06b1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  reverseDuration: 0.2
+  reverseDuration: 0.1
   reverseDistance: 0.05
   reverseAngle: 25
-  reverseWait: 0.15
+  reverseWait: 0.05
   reverseSquashScale: 0.93
-  reverseSquashDelay: 0.15
+  reverseSquashDelay: 0.05
   exitScaleRecoverDuration: 0.2
   exitAcceleration: 10
   exitAngularAcceleration: 600

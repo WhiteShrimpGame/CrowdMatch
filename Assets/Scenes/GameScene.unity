@@ -332,7 +332,7 @@ MonoBehaviour:
   backDepth: 25
   physicalEntryDepth: 2.8
   radius: 0.25
-  crowdSpeed: 6
+  crowdSpeed: 10
   crowdSpeedRandomRange: 1
   physicalRotateSpeed: 180
   aimOffsetX: 1.5
@@ -343,7 +343,7 @@ MonoBehaviour:
   scaleDelay: 0.2
   wallThickness: 0.1
   wallHeight: 2
-  extractSpeed: 6
+  extractSpeed: 10
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
   releaseRadius: 0.8
@@ -491,7 +491,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   path: {fileID: 1785929099}
   cycleTime: 6
-  speed: 1
+  speed: 2
   slotCount: 30
   entryGate: {fileID: 1467064619}
   catchUpEnabled: 1
@@ -1563,7 +1563,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 52fea11c77c9ba14d9800223fda64c05, type: 3}
+  - {fileID: 4900000, guid: fdf741b4628f32b47ab4a5d513a1b809, type: 3}
+  - {fileID: 4900000, guid: 5449a2927a461f04f8d97efc52b5775d, type: 3}
+  - {fileID: 4900000, guid: 5135b1e47e3242249a5d528304f9b85d, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:
