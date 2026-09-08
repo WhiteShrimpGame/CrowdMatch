@@ -57,6 +57,19 @@ namespace CrowdMatch
         [Tooltip("距出口前向（z）距离阈值（世界单位）。超过该值按 aimOffsetX 偏移的随机点朝向前进，小于该值才直接朝精确出口位置")]
         public float aimDirectDistanceZ = 2f;
 
+        [Header("像素尺寸归一")]
+        [Tooltip("进入物理区域后像素统一到的目标尺寸（世界缩放，通常 0.5，与碰撞半径对应）")]
+        public float physicalTargetScale = 0.5f;
+
+        [Tooltip("尺寸偏差容差（相对目标尺寸的比例，0.01 = 1%；偏差超过该值才触发平滑）")]
+        public float scaleTolerance = 0.01f;
+
+        [Tooltip("进入物理区域后把像素尺寸匀速平滑到目标尺寸的时长（秒）")]
+        public float scaleSmoothDuration = 0.5f;
+
+        [Tooltip("进入物理区域后延迟多久才开始缩放（秒）")]
+        public float scaleDelay = 0.3f;
+
         [Header("墙")]
         [Tooltip("墙厚度")]
         public float wallThickness = 0.1f;
@@ -513,9 +526,11 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>某格是否为障碍：未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        /// <summary>某格是否为障碍：墙体、未匹配球、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
         private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
+            if (_extractGroup.IsWall(col, row))
+                return true;
             if (_extractGroup.grid[col, row] != null)
                 return true;
             if (claimed[col, row])
@@ -543,7 +558,7 @@ namespace CrowdMatch
             var queue = new Queue<Vector2Int>();
             for (int c = 0; c < cols; c++)
             {
-                if (_extractGroup.grid[c, 0] == null)
+                if (_extractGroup.IsEmpty(c, 0))
                 {
                     dist[c, 0] = 0;
                     queue.Enqueue(new Vector2Int(c, 0));
@@ -563,7 +578,7 @@ namespace CrowdMatch
                         continue;
                     if (dist[nx, nz] != INF)
                         continue;
-                    if (_extractGroup.grid[nx, nz] != null)
+                    if (!_extractGroup.IsEmpty(nx, nz))
                         continue;
                     dist[nx, nz] = dist[cur.x, cur.y] + 1;
                     queue.Enqueue(new Vector2Int(nx, nz));
@@ -730,12 +745,12 @@ namespace CrowdMatch
                 Destroy(c);
             }
 
-            // 球碰撞体：radius 字段为世界半径，SphereCollider.radius 是本地值（乘 lossyScale），需除回
+            // 球碰撞体：本地半径固定为「参考尺寸(physicalTargetScale)下世界半径 = radius」对应的本地值，
+            // 此后随视觉 localScale 同步缩放（进入物理后视觉放大时，碰撞球也一起放大，始终贴合视觉）
             var sphere = item.GetComponent<SphereCollider>();
             if (sphere == null)
                 sphere = item.gameObject.AddComponent<SphereCollider>();
-            float s = Mathf.Max(0.0001f, item.transform.lossyScale.x);
-            sphere.radius = radius / s;
+            sphere.radius = radius / Mathf.Max(0.0001f, physicalTargetScale);
             sphere.enabled = true;
 
             // 刚体：冻结 Y 与旋转，关重力，只在 XZ 平面做真实碰撞
@@ -768,7 +783,48 @@ namespace CrowdMatch
             dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
             rb.velocity = dir * item.bufferCrowdSpeed;
 
+            // 像素尺寸归一：若当前尺寸与目标（physicalTargetScale）偏差超过容差，则在 scaleSmoothDuration 内匀速平滑到目标
+            float curScale = item.transform.localScale.x;
+            if (Mathf.Abs(curScale - physicalTargetScale) > physicalTargetScale * scaleTolerance)
+                StartCoroutine(SmoothScaleToTarget(item));
+
             _physical.Add(item);
+        }
+
+        /// <summary>
+        /// 延迟 scaleDelay 秒后，把像素尺寸在 scaleSmoothDuration 内匀速（线性）平滑到 physicalTargetScale；
+        /// 碰撞球本地半径保持固定，因此世界碰撞尺寸随视觉 localScale 同步缩放（无需额外补偿）。
+        /// </summary>
+        private IEnumerator SmoothScaleToTarget(PixelItem item)
+        {
+            if (item == null || item.transform == null)
+                yield break;
+
+            // 延迟一小段时间再开始缩放（等待像素先进入物理、就位）
+            if (scaleDelay > 0f)
+                yield return new WaitForSeconds(scaleDelay);
+
+            if (item == null || item.transform == null)
+                yield break;
+
+            var t = item.transform;
+            Vector3 start = t.localScale;
+            Vector3 target = Vector3.one * physicalTargetScale;
+
+            float dur = Mathf.Max(0.0001f, scaleSmoothDuration);
+            float elapsed = 0f;
+            while (elapsed < dur)
+            {
+                if (item == null || t == null)
+                    yield break;
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / dur);
+                t.localScale = Vector3.Lerp(start, target, k);
+                yield return null;
+            }
+
+            if (t != null)
+                t.localScale = target;
         }
 
         /// <summary>每个满足间隔的帧，释放距缺口最近的已就位像素（每次最多一个）</summary>

@@ -21,27 +21,59 @@ namespace CrowdMatch
         private const string ImportPathKey = "CrowdMatch.LevelDataExporter.LastImportPath";
 
         [MenuItem("CrowdMatch/导出关卡 JSON")]
-        public static void ExportCurrentLevel()
+        public static void ExportCurrentLevel() => ExportCurrentLevel(locked: false);
+
+        [MenuItem("CrowdMatch/导出关卡 JSON", true)]
+        private static bool ValidateExportCurrentLevel() => !EditorApplication.isPlaying;
+
+        /// <summary>Play 模式下的锁定导出：导出关卡初始化时的状态，并把 lockContainer 置为 true。</summary>
+        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）")]
+        public static void ExportCurrentLevelLocked() => ExportCurrentLevel(locked: true);
+
+        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）", true)]
+        private static bool ValidateExportCurrentLevelLocked() => EditorApplication.isPlaying;
+
+        private static void ExportCurrentLevel(bool locked)
         {
-            var pixelGroup = Object.FindObjectOfType<PixelGroup>();
-            var containerGroup = Object.FindObjectOfType<ContainerGroup>();
+            LevelData data;
+            string dialogTitle = locked ? "导出关卡 JSON（锁定）" : "导出关卡 JSON";
 
-            if (pixelGroup == null)
+            if (locked)
             {
-                EditorUtility.DisplayDialog("导出关卡 JSON", "场景中找不到 PixelGroup。", "确定");
-                return;
+                // Play 模式：改用关卡初始化时缓存的初始状态（复制一份，避免改动缓存），并锁定容器
+                if (LevelDataCache.LastInitData == null)
+                {
+                    EditorUtility.DisplayDialog(dialogTitle,
+                        "没有可用的初始化关卡数据。\n请先进入 Play 模式并加载关卡（触发初始化）后再导出。",
+                        "确定");
+                    return;
+                }
+                data = JsonUtility.FromJson<LevelData>(JsonUtility.ToJson(LevelDataCache.LastInitData));
+                data.container.lockContainer = true;
             }
-            if (containerGroup == null)
+            else
             {
-                EditorUtility.DisplayDialog("导出关卡 JSON", "场景中找不到 ContainerGroup。", "确定");
-                return;
+                var pixelGroup = Object.FindObjectOfType<PixelGroup>();
+                var containerGroup = Object.FindObjectOfType<ContainerGroup>();
+
+                if (pixelGroup == null)
+                {
+                    EditorUtility.DisplayDialog(dialogTitle, "场景中找不到 PixelGroup。", "确定");
+                    return;
+                }
+                if (containerGroup == null)
+                {
+                    EditorUtility.DisplayDialog(dialogTitle, "场景中找不到 ContainerGroup。", "确定");
+                    return;
+                }
+
+                data = BuildLevelData(pixelGroup, containerGroup);
             }
 
-            var data = BuildLevelData(pixelGroup, containerGroup);
             string json = JsonUtility.ToJson(data, true);
 
             string defaultDir = EditorPathMemory.LoadDir(ExportPathKey, "Assets/Levels");
-            string path = EditorUtility.SaveFilePanel("导出关卡 JSON", defaultDir, "Level.json", "json");
+            string path = EditorUtility.SaveFilePanel(dialogTitle, defaultDir, "Level.json", "json");
             if (string.IsNullOrEmpty(path))
                 return;
             EditorPathMemory.SaveDir(ExportPathKey, path);
@@ -50,9 +82,10 @@ namespace CrowdMatch
             AssetDatabase.Refresh();
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
-                (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个）");
+                (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
+                data.walls.Length + " 段" + (locked ? "，已锁定" : "") + "）");
 
-            EditorUtility.DisplayDialog("导出关卡 JSON",
+            EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
                 "\n\n请确保该文件位于 Assets 目录下，并在 GameManager.levelJsons 中按关卡序号依次引用。",
                 "确定");
@@ -143,6 +176,7 @@ namespace CrowdMatch
             {
                 Undo.RegisterFullObjectHierarchyUndo(pixelGroup.gameObject, "清空 Group 子物体");
                 pixelGroup.ClearPixels();
+                pixelGroup.ClearWalls();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -212,6 +246,16 @@ namespace CrowdMatch
                 }
             }
             data.container.items = items.ToArray();
+
+            // 墙体：扫描 PixelGroup 下的 WallItem，每个墙存一组端点
+            var walls = new List<LevelData.WallData>();
+            foreach (var wall in pg.GetComponentsInChildren<WallItem>())
+            {
+                if (wall == null || wall.points == null || wall.points.Count < 2)
+                    continue;
+                walls.Add(new LevelData.WallData { points = wall.points.ToArray() });
+            }
+            data.walls = walls.ToArray();
 
             return data;
         }

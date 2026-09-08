@@ -45,13 +45,10 @@ namespace CrowdMatch
             if (Input.GetKeyDown(KeyCode.N))
             {
                 GameWin();
-                ReloadLevel();
             }
             else if (Input.GetKeyDown(KeyCode.B))
             {
-                GameData.CurrentLevel = Mathf.Max(1, GameData.CurrentLevel - 1);
-                GameData.FailCount = 0;
-                ReloadLevel();
+                PrevLevel();
             }
         }
 #endif
@@ -80,6 +77,14 @@ namespace CrowdMatch
         public void GameWin()
         {
             GameData.CurrentLevel++;
+            GameData.FailCount = 0;
+            ReloadLevel();
+        }
+
+        /// <summary>上一关：关卡序号 -1（不低于 1），连败清零，重载关卡。</summary>
+        public void PrevLevel()
+        {
+            GameData.CurrentLevel = Mathf.Max(1, GameData.CurrentLevel - 1);
             GameData.FailCount = 0;
             ReloadLevel();
         }
