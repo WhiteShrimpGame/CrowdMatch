@@ -491,7 +491,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   path: {fileID: 1785929099}
   cycleTime: 6
-  speed: 2
+  speed: 1.5
   slotCount: 30
   entryGate: {fileID: 1467064619}
   catchUpEnabled: 1
