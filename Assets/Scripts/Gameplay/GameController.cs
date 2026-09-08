@@ -133,7 +133,7 @@ namespace CrowdMatch
 #endif
 
             GameData.Init(true);
-            GameData.TotalPixelCount = CountPixels();
+            GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
         }
 
@@ -155,6 +155,24 @@ namespace CrowdMatch
             {
                 if (it != null && pixelGroup.IsInRange(it.gridX, it.gridZ))
                     n++;
+            }
+            return n;
+        }
+
+        /// <summary>统计管道将要生成的像素总数（每管 = 轨道格数 × 波次颜色数），计入胜利判定。</summary>
+        private int CountPipePixels()
+        {
+            if (pixelGroup == null)
+                return 0;
+            int n = 0;
+            foreach (var pipe in pixelGroup.GetComponentsInChildren<PipeItem>())
+            {
+                if (pipe == null || pipe.colors == null)
+                    continue;
+                int track = pipe.TrackCellCount();
+                if (track <= 0)
+                    continue;
+                n += track * pipe.colors.Count;
             }
             return n;
         }
@@ -397,8 +415,8 @@ namespace CrowdMatch
                         continue;
                     if (visited[nx, nz])
                         continue;
-                    if (pixelGroup.IsWall(nx, nz))
-                        continue;   // 墙体 = 障碍，不可穿过
+                    if (pixelGroup.IsBlocked(nx, nz))
+                        continue;   // 墙体/管道 = 障碍，不可穿过
 
                     var cell = pixelGroup.grid[nx, nz];
                     if (cell != null && !inGroup.Contains(cell))
