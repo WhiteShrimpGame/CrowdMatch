@@ -4697,6 +4697,8 @@ IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void GameData_set_CurrentLevel_m1B5B665FFADB9
 IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR void GameData_set_FailCount_m89B2D12FA5E8A54390009C56A26D5343A5D6892C_inline (int32_t ___value0, const RuntimeMethod* method) ;
 // System.Void CrowdMatch.GameManager::ReloadLevel()
 IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void GameManager_ReloadLevel_m7649628B70A5549BE7FAA7BF302D2E8ADEF041D3 (GameManager_t5B23045F478AD8B0E3D943ECC8493384B02FF32F* __this, const RuntimeMethod* method) ;
+// System.Int32 UnityEngine.Mathf::Max(System.Int32,System.Int32)
+IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t Mathf_Max_m7FA442918DE37E3A00106D1F2E789D65829792B8_inline (int32_t ___a0, int32_t ___b1, const RuntimeMethod* method) ;
 // System.Int32 CrowdMatch.GameData::get_FailCount()
 IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t GameData_get_FailCount_m4C1193F7DC51BFDB770FD0755ECD6E531B0D4F66_inline (const RuntimeMethod* method) ;
 // System.Void CrowdMatch.GameData::Init(System.Boolean)
@@ -4743,8 +4745,6 @@ IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void LevelLoader_ApplyPixel_mF735CFEA269034BF
 IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void LevelLoader_ApplyWalls_m9211D744736D4A9E8DB12F51C2547A87C063A61C (PixelGroup_tD54EFA9929375FA39FEAEF3455304E3C4D131E80* ___pg0, WallDataU5BU5D_t8F1261933A768C962E09DA457A9E03AE0268D353* ___walls1, const RuntimeMethod* method) ;
 // System.Void CrowdMatch.LevelLoader::ApplyContainer(CrowdMatch.ContainerGroup,CrowdMatch.LevelData/ContainerData,CrowdMatch.ColorConfig)
 IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void LevelLoader_ApplyContainer_m0ECA2012141131F2E26448AE6B0E7BBF6E00EC00 (ContainerGroup_t4E8C2C211C9490625D25CE060D3AD94505CA9300* ___cg0, ContainerData_t0A6214FB89926D5E00FB37D03655E86863685C71* ___d1, ColorConfig_tCFE08A98D99EE62711B453124E88292D1545172C* ___config2, const RuntimeMethod* method) ;
-// System.Int32 UnityEngine.Mathf::Max(System.Int32,System.Int32)
-IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t Mathf_Max_m7FA442918DE37E3A00106D1F2E789D65829792B8_inline (int32_t ___a0, int32_t ___b1, const RuntimeMethod* method) ;
 // System.String System.Int32::ToString()
 IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR String_t* Int32_ToString_m030E01C24E294D6762FB0B6F37CB541581F55CA5 (int32_t* __this, const RuntimeMethod* method) ;
 // System.String System.String::Concat(System.String[])
@@ -6962,6 +6962,31 @@ IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void GameManager_GameWin_m65A28284A87BCEEAE65
 		int32_t L_0;
 		L_0 = GameData_get_CurrentLevel_m67EA567B2AF2042C4F90774F5E4BF30C0AED369B(NULL);
 		GameData_set_CurrentLevel_m1B5B665FFADB96F136E2E305D2FDE7F56BB0A7D6(((int32_t)il2cpp_codegen_add(L_0, 1)), NULL);
+		// GameData.FailCount = 0;
+		GameData_set_FailCount_m89B2D12FA5E8A54390009C56A26D5343A5D6892C_inline(0, NULL);
+		// ReloadLevel();
+		GameManager_ReloadLevel_m7649628B70A5549BE7FAA7BF302D2E8ADEF041D3(__this, NULL);
+		// }
+		return;
+	}
+}
+// System.Void CrowdMatch.GameManager::PrevLevel()
+IL2CPP_EXTERN_C IL2CPP_METHOD_ATTR void GameManager_PrevLevel_m53AEC4E3BF586BAAF764D5F175322FB30F17FCFC (GameManager_t5B23045F478AD8B0E3D943ECC8493384B02FF32F* __this, const RuntimeMethod* method) 
+{
+	static bool s_Il2CppMethodInitialized;
+	if (!s_Il2CppMethodInitialized)
+	{
+		il2cpp_codegen_initialize_runtime_metadata((uintptr_t*)&GameData_tA0B8EDE15CB4A51CEBF5CC777366E3BF043145C5_il2cpp_TypeInfo_var);
+		s_Il2CppMethodInitialized = true;
+	}
+	{
+		// GameData.CurrentLevel = Mathf.Max(1, GameData.CurrentLevel - 1);
+		il2cpp_codegen_runtime_class_init_inline(GameData_tA0B8EDE15CB4A51CEBF5CC777366E3BF043145C5_il2cpp_TypeInfo_var);
+		int32_t L_0;
+		L_0 = GameData_get_CurrentLevel_m67EA567B2AF2042C4F90774F5E4BF30C0AED369B(NULL);
+		int32_t L_1;
+		L_1 = Mathf_Max_m7FA442918DE37E3A00106D1F2E789D65829792B8_inline(1, ((int32_t)il2cpp_codegen_subtract(L_0, 1)), NULL);
+		GameData_set_CurrentLevel_m1B5B665FFADB96F136E2E305D2FDE7F56BB0A7D6(L_1, NULL);
 		// GameData.FailCount = 0;
 		GameData_set_FailCount_m89B2D12FA5E8A54390009C56A26D5343A5D6892C_inline(0, NULL);
 		// ReloadLevel();
@@ -30260,6 +30285,42 @@ IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR void GameData_set_FailCount_m89B2
 		return;
 	}
 }
+IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t Mathf_Max_m7FA442918DE37E3A00106D1F2E789D65829792B8_inline (int32_t ___a0, int32_t ___b1, const RuntimeMethod* method) 
+{
+	int32_t V_0 = 0;
+	int32_t G_B3_0 = 0;
+	{
+		int32_t L_0 = ___a0;
+		int32_t L_1 = ___b1;
+		if ((((int32_t)L_0) > ((int32_t)L_1)))
+		{
+			goto IL_0008;
+		}
+	}
+	{
+		int32_t L_2 = ___b1;
+		G_B3_0 = L_2;
+		goto IL_0009;
+	}
+
+IL_0008:
+	{
+		int32_t L_3 = ___a0;
+		G_B3_0 = L_3;
+	}
+
+IL_0009:
+	{
+		V_0 = G_B3_0;
+		goto IL_000c;
+	}
+
+IL_000c:
+	{
+		int32_t L_4 = V_0;
+		return L_4;
+	}
+}
 IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t GameData_get_FailCount_m4C1193F7DC51BFDB770FD0755ECD6E531B0D4F66_inline (const RuntimeMethod* method) 
 {
 	static bool s_Il2CppMethodInitialized;
@@ -30316,42 +30377,6 @@ IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t GameState_get_CurrentStat
 		// public static State CurrentState { get; private set; }
 		int32_t L_0 = ((GameState_t07F263FE9AD8D5FCD986E8B66BD43150826D2369_StaticFields*)il2cpp_codegen_static_fields_for(GameState_t07F263FE9AD8D5FCD986E8B66BD43150826D2369_il2cpp_TypeInfo_var))->___U3CCurrentStateU3Ek__BackingField_0;
 		return L_0;
-	}
-}
-IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR int32_t Mathf_Max_m7FA442918DE37E3A00106D1F2E789D65829792B8_inline (int32_t ___a0, int32_t ___b1, const RuntimeMethod* method) 
-{
-	int32_t V_0 = 0;
-	int32_t G_B3_0 = 0;
-	{
-		int32_t L_0 = ___a0;
-		int32_t L_1 = ___b1;
-		if ((((int32_t)L_0) > ((int32_t)L_1)))
-		{
-			goto IL_0008;
-		}
-	}
-	{
-		int32_t L_2 = ___b1;
-		G_B3_0 = L_2;
-		goto IL_0009;
-	}
-
-IL_0008:
-	{
-		int32_t L_3 = ___a0;
-		G_B3_0 = L_3;
-	}
-
-IL_0009:
-	{
-		V_0 = G_B3_0;
-		goto IL_000c;
-	}
-
-IL_000c:
-	{
-		int32_t L_4 = V_0;
-		return L_4;
 	}
 }
 IL2CPP_MANAGED_FORCE_INLINE IL2CPP_METHOD_ATTR void Vector2Int__ctor_mC20D1312133EB8CB63EC11067088B043660F11CE_inline (Vector2Int_t69B2886EBAB732D9B880565E18E7568F3DE0CE6A* __this, int32_t ___x0, int32_t ___y1, const RuntimeMethod* method) 
