@@ -240,8 +240,9 @@ namespace CrowdMatch
 
         /// <summary>
         /// 刷新所有像素的「暴露（可点击）」状态：
-        /// 先标记「直接暴露」的格子（第 0 行，或四周前/后/左/右任一紧邻格为空），
+        /// 先标记「直接暴露」的格子（第 0 行，或四周前/后/左/右任一紧邻格为「连通首排的空格」），
         /// 再把每个同色连通块整体激活——只要该连通块包含至少一个直接暴露格，块内所有像素同时激活。
+        /// 「空」必须是真正通向出口的空：被活跃管道（新蛇即将填充）隔开的空格不算，避免蛇被移出后误暴露。
         /// 已离开网格的像素由调用方显式关闭，不在此处理。
         /// </summary>
         public void RefreshExposed()
@@ -252,7 +253,42 @@ namespace CrowdMatch
             int cols = columns;
             int totalRows = TotalRows;
 
-            // 1. 标记「直接暴露」格子（墙体/管道视为占用：前方/侧方有障碍时不算暴露）
+            // 0. 计算「能连通到首排的空格」：从首排空/出口出发 BFS，只通过 IsEmptyForExposure 的空格扩散。
+            //    「空」必须是真正通向出口的空——被活跃管道（新蛇即将填充）隔开的空格不算，
+            //    避免蛇被移出后，紧邻非蛇同色 Pixel 的其他颜色块因「局部空」被误激活 Animator。
+            var reachableEmpty = new bool[cols, totalRows];
+            {
+                int[] edx = { 1, -1, 0, 0 };
+                int[] edz = { 0, 0, 1, -1 };
+                var q = new Queue<Vector2Int>();
+                for (int c = 0; c < cols; c++)
+                {
+                    if (IsEmptyForExposure(c, 0))
+                    {
+                        reachableEmpty[c, 0] = true;
+                        q.Enqueue(new Vector2Int(c, 0));
+                    }
+                }
+                while (q.Count > 0)
+                {
+                    var cur = q.Dequeue();
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int nx = cur.x + edx[d];
+                        int nz = cur.y + edz[d];
+                        if (nx < 0 || nx >= cols || nz < 0 || nz >= totalRows)
+                            continue;
+                        if (reachableEmpty[nx, nz])
+                            continue;
+                        if (!IsEmptyForExposure(nx, nz))
+                            continue;
+                        reachableEmpty[nx, nz] = true;
+                        q.Enqueue(new Vector2Int(nx, nz));
+                    }
+                }
+            }
+
+            // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）
             var directlyExposed = new bool[cols, totalRows];
             for (int c = 0; c < cols; c++)
             {
@@ -262,10 +298,10 @@ namespace CrowdMatch
                         continue;
                     directlyExposed[c, r] =
                         r == 0 ||                                            // 前方：出口（第一排）
-                        IsEmptyForExposure(c, r - 1) ||                      // 前方空
-                        (r + 1 < totalRows && IsEmptyForExposure(c, r + 1)) ||   // 后方空（后面暴露）
-                        (c - 1 >= 0 && IsEmptyForExposure(c - 1, r)) ||      // 左方空（侧面暴露）
-                        (c + 1 < cols && IsEmptyForExposure(c + 1, r));      // 右方空（侧面暴露）
+                        (r - 1 >= 0 && reachableEmpty[c, r - 1]) ||          // 前方空（连通首排）
+                        (r + 1 < totalRows && reachableEmpty[c, r + 1]) ||   // 后方空（连通首排）
+                        (c - 1 >= 0 && reachableEmpty[c - 1, r]) ||          // 左方空（连通首排）
+                        (c + 1 < cols && reachableEmpty[c + 1, r]);          // 右方空（连通首排）
                 }
             }
 
