@@ -101,6 +101,8 @@ MonoBehaviour:
   colors: 
   cellMoveDuration: 0.1
   spawnInterval: 0.1
+  debugLog: 0
+  pauseOnLog: 0
   waveCountText: {fileID: 100013}
   nextColorIndicators:
   - renderer: {fileID: 100003}
