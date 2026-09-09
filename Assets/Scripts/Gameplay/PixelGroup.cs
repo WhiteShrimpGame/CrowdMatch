@@ -185,6 +185,28 @@ namespace CrowdMatch
             return false;
         }
 
+        /// <summary>所有「正在释放中」管道的轨迹（管道自身格 + 轨道格）占据的 row 最小值。
+        /// 无正在释放的管道时返回 int.MaxValue（表示不限制离场）。</summary>
+        public int MinActivePipeTrackRow()
+        {
+            if (pipes == null)
+                return int.MaxValue;
+            int min = int.MaxValue;
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null || !pipe.IsReleasing || pipe.points == null)
+                    continue;
+                for (int j = 0; j < pipe.points.Count; j++)
+                {
+                    int r = Mathf.RoundToInt(pipe.points[j].y);
+                    if (r < min)
+                        min = r;
+                }
+            }
+            return min;
+        }
+
         /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
         public bool IsEmptyForExposure(int col, int row)
         {

@@ -112,6 +112,7 @@ namespace CrowdMatch
         {
             public PixelItem item;
             public int col, row;        // 当前逻辑格（本 tick 结束后所在格）
+            public int fromCol, fromRow;// 最近一次移动的离开格（移动决定时记录，动画期间保留；停靠时为 (0,0) 无意义）
             public int waitCount;       // 等待计数：被挡住的次数（公平性，等待越多下次越优先）
 
             public bool moving;         // 是否在网格内做格子到格子的平滑动画
@@ -159,6 +160,37 @@ namespace CrowdMatch
                     return true;
             }
             return false;
+        }
+
+        /// <summary>诊断用：返回所有提取中像素的「离开格 → 进入格」快照（蛇头前进判定时打印）。
+        /// 停靠块打印停靠格；移动块打印离开(fromCol,fromRow)→进入(col,row)；离场块打印离场格。</summary>
+        public string DescribeExtraction()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"寻路块 n={_extracting.Count}");
+            for (int i = 0; i < _extracting.Count; i++)
+            {
+                var st = _extracting[i];
+                if (st == null)
+                    continue;
+                string name = st.item != null ? st.item.name : "null";
+                string state;
+                if (st.exiting)
+                {
+                    state = $"离场({st.col},{st.row})";
+                }
+                else if (st.moving)
+                {
+                    state = $"离开({st.fromCol},{st.fromRow})->进入({st.col},{st.row})";
+                }
+                else
+                {
+                    string target = st.pendingNext.x < 0 ? "停" : $"->({st.pendingNext.x},{st.pendingNext.y})";
+                    state = $"停({st.col},{st.row}){target}";
+                }
+                sb.Append($" | #{i} {name} {state} wait={st.waitCount}");
+            }
+            return sb.ToString();
         }
 
         // 封闭区间的墙（运行时创建，static 碰撞体）：漏斗两条斜边 + 游戏区两条侧边 + 后墙 + 缺口封口墙
@@ -525,6 +557,8 @@ namespace CrowdMatch
         /// <summary>开始一次格子到格子的平滑动画</summary>
         private void StartCellMove(ExtractState st, Vector2Int to)
         {
+            st.fromCol = st.col;    // 离开格：此刻 st.col 尚未更新为 to，正是本段动画的起点格
+            st.fromRow = st.row;
             st.animFrom = st.item.transform.position;
             st.animTo = _extractGroup.GetWorldPosition(to.x, to.y);
             st.animT = 0f;
@@ -534,6 +568,13 @@ namespace CrowdMatch
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
         private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed)
         {
+            // 只有 row 小于「正在释放管道」轨迹占据的 row 最小值时才离场：
+            // 提取球必须走到管道轨迹的最前排之前（row 更小）才算真正越过管道，方可离场。
+            // 不再考虑像素是否恰好落在某条管道轨迹格上。
+            int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
+            if (row >= minTrackRow)
+                return false;
+
             for (int r = 0; r < row; r++)
             {
                 if (IsObstacle(col, r, vacated, claimed))
