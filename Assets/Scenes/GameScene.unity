@@ -783,7 +783,7 @@ MonoBehaviour:
   minRunLength: 4
   maxRunLength: 8
   fillToMultipleOf3: 1
-  pixelPrefab: {fileID: 4974077334147149108, guid: 1a4154a9e973cb6489645085010fb729, type: 3}
+  pixelPrefab: {fileID: 4974077334147149108, guid: 04cb2981992b05b49b540b2987e11453, type: 3}
   wallPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   pipePrefab: {fileID: 100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
 --- !u!4 &882082745
