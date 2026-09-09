@@ -484,6 +484,25 @@ namespace CrowdMatch
                 }
             }
 
+            // 蛇格：正在释放管道的轨道格（蛇形生成中的格子），按蛇头→蛇尾给出 rank。
+            // 寻路时把蛇格降级为低优先级：优先用非蛇格（含迭代腾出的新空格），
+            // 非蛇格全部判定完仍有 wait 块时，才按蛇头→蛇尾顺序允许进入蛇格。
+            var snakeOrder = new Dictionary<Vector2Int, int>();
+            {
+                int rank = 0;
+                foreach (var pipe in _extractGroup.pipes)
+                {
+                    if (pipe == null || !pipe.IsReleasing || pipe.snakeCells == null)
+                        continue;
+                    for (int i = 0; i < pipe.snakeCells.Count; i++)   // snakeCells 已按蛇头→蛇尾顺序
+                    {
+                        var c = pipe.snakeCells[i];
+                        if (!snakeOrder.ContainsKey(c))
+                            snakeOrder[c] = rank++;
+                    }
+                }
+            }
+
             // 种子：所有"当前可被填"的格（起始空位 + 退出者刚腾出的格）。IsObstacle 取反 = 可填。
             var frontier = new List<Vector2Int>();
             for (int c = 0; c < cols; c++)
@@ -492,12 +511,25 @@ namespace CrowdMatch
                         frontier.Add(new Vector2Int(c, r));
 
             // 步骤 1..N：逐层传播 —— 每个可用格从相邻像素里挑 wait 最高者填入（空格找像素）。
-            // 每层按"离出口更近（dist 更小）"优先处理，保证像素优先朝前而非横向绕行；
+            // 非蛇格优先（含迭代腾出的新空格），蛇格仅在非蛇格判完、仍有 wait 块时按蛇头→蛇尾进入；
             // 填入后，像素腾出的旧格进入下一层，形成波前连续推进。
             while (frontier.Count > 0)
             {
                 frontier.Sort((a, b) =>
                 {
+                    bool sa = snakeOrder.ContainsKey(a);
+                    bool sb = snakeOrder.ContainsKey(b);
+                    if (sa != sb)
+                        return sa ? 1 : -1;                     // 非蛇格优先
+
+                    if (sa)                                      // 蛇格内部：蛇头→蛇尾
+                    {
+                        int ra = snakeOrder[a];
+                        int rb = snakeOrder[b];
+                        if (ra != rb)
+                            return ra.CompareTo(rb);
+                    }
+
                     int d = dist[a.x, a.y].CompareTo(dist[b.x, b.y]);
                     if (d != 0)
                         return d;

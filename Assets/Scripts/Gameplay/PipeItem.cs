@@ -58,6 +58,9 @@ namespace CrowdMatch
         [System.NonSerialized] private int _waveIndex;   // 已生成波数（下一波用 colors[_waveIndex]）
         [System.NonSerialized] private bool _spawning;
 
+        /// <summary>蛇形生成中，蛇当前占据的格子（蛇头→蛇尾顺序，含蛇头正在前往的格子）。仅 IsReleasing 期间有效。</summary>
+        [System.NonSerialized] public List<Vector2Int> snakeCells = new List<Vector2Int>();
+
         /// <summary>所属 PixelGroup（惰性：先读运行时赋值，为空则向上查找）。</summary>
         public PixelGroup Group => group != null ? group : (group = GetComponentInParent<PixelGroup>());
 
@@ -277,6 +280,7 @@ namespace CrowdMatch
             int n = track.Count;
             if (n == 0)
             {
+                snakeCells.Clear();
                 _spawning = false;
                 yield break;
             }
@@ -315,6 +319,7 @@ namespace CrowdMatch
             for (int s = 1; s <= n; s++)
             {
                 var headDest = path[s];
+                UpdateSnakeCells(s, path);   // 蛇头正在前往 path[s]，蛇体已占据 path[s-1..1]
                 yield return WaitUntilCellFree(path[s - 1], headDest, s);
 
                 int launched = Mathf.Min(s, items.Count);
@@ -346,7 +351,16 @@ namespace CrowdMatch
                 item.SetClickable(true);
             }
             Group?.RefreshExposed();
+            snakeCells.Clear();
             _spawning = false;
+        }
+
+        /// <summary>更新蛇形生成中的实时蛇格：蛇头正在前往 path[s]，蛇体已占据 path[s-1..1]，按蛇头→蛇尾顺序。</summary>
+        private void UpdateSnakeCells(int s, List<Vector2Int> path)
+        {
+            snakeCells.Clear();
+            for (int i = s; i >= 1; i--)
+                snakeCells.Add(path[i]);
         }
 
         private PixelItem SpawnPixelAtPipe(int color, ColorConfig config, Vector2Int pipeCell)
