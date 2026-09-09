@@ -1009,8 +1009,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   containerPrefab: {fileID: 4074727829767371378, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
-  columns: 4
-  rows: 30
+  columns: 3
+  rows: 40
   xSpacing: 2
   zSpacing: 1.2
   pixelGroup: {fileID: 882082744}
@@ -1563,7 +1563,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 52fea11c77c9ba14d9800223fda64c05, type: 3}
+  - {fileID: 4900000, guid: 9bacc4936cc240e429f15a5ab747199e, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:
