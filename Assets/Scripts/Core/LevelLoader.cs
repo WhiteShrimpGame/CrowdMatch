@@ -53,14 +53,15 @@ namespace CrowdMatch
                 return;
             if (pixelGroup != null)
             {
-                ApplyPixel(pixelGroup, data.pixel, data.walls, colorConfig);
+                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, colorConfig);
                 ApplyWalls(pixelGroup, data.walls);
+                ApplyPipes(pixelGroup, data.pipes);
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -79,22 +80,31 @@ namespace CrowdMatch
 
             pg.ClearPixels();
 
-            // 收集墙体占据的网格格，导入像素时跳过这些格子（墙体位置不再创建 Pixel）
-            var wallCells = new HashSet<Vector2Int>();
+            // 收集墙体占据的网格格 + 管道自身所在格，导入像素时跳过这些格子（墙体/管道位置不再创建 Pixel）
+            var skipCells = new HashSet<Vector2Int>();
             if (walls != null)
             {
                 foreach (var w in walls)
                 {
                     if (w == null || w.points == null)
                         continue;
-                    WallItem.CollectOccupiedCells(w.points, wallCells);
+                    WallItem.CollectOccupiedCells(w.points, skipCells);
+                }
+            }
+            if (pipes != null)
+            {
+                foreach (var p in pipes)
+                {
+                    if (p == null || p.points == null || p.points.Length < 1)
+                        continue;
+                    skipCells.Add(PipeItem.GetPipeCell(p.points));
                 }
             }
 
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
                 {
-                    if (wallCells.Contains(new Vector2Int(c, r)))
+                    if (skipCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int colorId = d.cells[r * columns + c];
                     pg.SpawnPixel(c, r, colorId, config);
@@ -127,6 +137,32 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 段墙体。");
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的管道（少于 2 个端点或无颜色的管道被跳过）。</summary>
+        private static void ApplyPipes(PixelGroup pg, LevelData.PipeData[] pipes)
+        {
+            pg.ClearPipes();
+
+            if (pipes == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var p in pipes)
+            {
+                if (p == null || p.points == null || p.points.Length < 2 || p.colors == null || p.colors.Length < 1)
+                    continue;
+                if (pg.SpawnPipe(p.points, p.colors) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
         }
 
         private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)

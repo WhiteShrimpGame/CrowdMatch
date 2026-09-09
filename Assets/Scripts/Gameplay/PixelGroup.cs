@@ -50,11 +50,20 @@ namespace CrowdMatch
         [Tooltip("墙体像素块预制体模板（每个被墙体占据的格子会生成一个，作为 WallItem 的子物体，用于运行时可视化）")]
         public GameObject wallPrefab;
 
+        [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
+        public GameObject pipePrefab;
+
         /// <summary>运行时网格 [column, row]，row 0 为最前排（+Z），row = TotalRows-1 为后排（-Z，含尾部）</summary>
         [System.NonSerialized] public PixelItem[,] grid;
 
         /// <summary>墙体占用表 [column, row]：true = 该格被 WallItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] wallGrid;
+
+        /// <summary>管道占用表 [column, row]：true = 该格被 PipeItem 占据（作为障碍参与暴露与寻路）。</summary>
+        [System.NonSerialized] public bool[,] pipeGrid;
+
+        /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
+        [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
 
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
@@ -70,11 +79,13 @@ namespace CrowdMatch
             RebuildGrid();
         }
 
-        /// <summary>扫描子物体，重建 grid 数组与墙体占用表</summary>
+        /// <summary>扫描子物体，重建 grid 数组、墙体占用表与管道占用表</summary>
         public void RebuildGrid()
         {
             grid = new PixelItem[columns, TotalRows];
             wallGrid = new bool[columns, TotalRows];
+            pipeGrid = new bool[columns, TotalRows];
+            pipes = new List<PipeItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -95,6 +106,17 @@ namespace CrowdMatch
                     if (IsInRange(cell.x, cell.y))
                         wallGrid[cell.x, cell.y] = true;
                 }
+            }
+
+            foreach (var pipe in GetComponentsInChildren<PipeItem>())
+            {
+                if (pipe == null)
+                    continue;
+                pipe.group = this;
+                pipes.Add(pipe);
+                var cell = PipeItem.GetPipeCell(pipe.points);
+                if (IsInRange(cell.x, cell.y))
+                    pipeGrid[cell.x, cell.y] = true;
             }
         }
 
@@ -124,14 +146,57 @@ namespace CrowdMatch
             return wallGrid[col, row];
         }
 
-        /// <summary>该格是否为空（既无像素也无墙体，可作为可通行 / 暴露判定依据）。grid 未重建时视为非空。</summary>
+        /// <summary>该格是否被管道占据。</summary>
+        public bool IsPipe(int col, int row)
+        {
+            if (pipeGrid == null)
+                return false;
+            if (!IsInRange(col, row))
+                return false;
+            return pipeGrid[col, row];
+        }
+
+        /// <summary>该格是否为障碍（墙体或管道）。</summary>
+        public bool IsBlocked(int col, int row) => IsWall(col, row) || IsPipe(col, row);
+
+        /// <summary>该格是否为空（既无像素也无墙体/管道，可作为可通行 / 暴露判定依据）。grid 未重建时视为非空。</summary>
         public bool IsEmpty(int col, int row)
         {
             if (!IsInRange(col, row))
                 return false;
             if (grid == null)
                 return false;
-            return grid[col, row] == null && !IsWall(col, row);
+            return grid[col, row] == null && !IsBlocked(col, row);
+        }
+
+        /// <summary>该格是否被「仍有未释放波次的管道」覆盖（管道自身格 + 轨道格）。暴露判定时视为阻挡。</summary>
+        public bool IsActivePipeBlocked(int col, int row)
+        {
+            if (pipes == null)
+                return false;
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null || !pipe.HasRemainingWaves)
+                    continue;
+                if (pipe.CoversCell(col, row))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
+        public bool IsEmptyForExposure(int col, int row)
+        {
+            if (!IsInRange(col, row))
+                return false;
+            if (grid == null)
+                return false;
+            if (grid[col, row] != null)
+                return false;
+            if (IsBlocked(col, row))
+                return false;
+            return !IsActivePipeBlocked(col, row);
         }
 
         /// <summary>
@@ -165,20 +230,20 @@ namespace CrowdMatch
             int cols = columns;
             int totalRows = TotalRows;
 
-            // 1. 标记「直接暴露」格子（墙体视为占用：前方/侧方有墙时不算暴露）
+            // 1. 标记「直接暴露」格子（墙体/管道视为占用：前方/侧方有障碍时不算暴露）
             var directlyExposed = new bool[cols, totalRows];
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null || IsWall(c, r))
+                    if (grid[c, r] == null || IsBlocked(c, r))
                         continue;
                     directlyExposed[c, r] =
                         r == 0 ||                                            // 前方：出口（第一排）
-                        IsEmpty(c, r - 1) ||                                 // 前方空
-                        (r + 1 < totalRows && IsEmpty(c, r + 1)) ||          // 后方空（后面暴露）
-                        (c - 1 >= 0 && IsEmpty(c - 1, r)) ||                 // 左方空（侧面暴露）
-                        (c + 1 < cols && IsEmpty(c + 1, r));                 // 右方空（侧面暴露）
+                        IsEmptyForExposure(c, r - 1) ||                      // 前方空
+                        (r + 1 < totalRows && IsEmptyForExposure(c, r + 1)) ||   // 后方空（后面暴露）
+                        (c - 1 >= 0 && IsEmptyForExposure(c - 1, r)) ||      // 左方空（侧面暴露）
+                        (c + 1 < cols && IsEmptyForExposure(c + 1, r));      // 右方空（侧面暴露）
                 }
             }
 
@@ -192,7 +257,7 @@ namespace CrowdMatch
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null || IsWall(c, r) || visited[c, r])
+                    if (grid[c, r] == null || IsBlocked(c, r) || visited[c, r])
                         continue;
 
                     int color = grid[c, r].colorId;
@@ -219,7 +284,7 @@ namespace CrowdMatch
                                 continue;
 
                             var nb = grid[nx, nz];
-                            if (nb == null || IsWall(nx, nz) || nb.colorId != color)
+                            if (nb == null || IsBlocked(nx, nz) || nb.colorId != color)
                                 continue;
 
                             visited[nx, nz] = true;
@@ -283,6 +348,25 @@ namespace CrowdMatch
             wallGrid = new bool[columns, TotalRows];
         }
 
+        /// <summary>清空所有 PipeItem 子物体（供关卡重载时重建管道）。</summary>
+        public void ClearPipes()
+        {
+            var items = GetComponentsInChildren<PipeItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var p = items[i];
+                if (p == null)
+                    continue;
+                p.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(p.gameObject);
+                else
+                    DestroyImmediate(p.gameObject);
+            }
+            pipeGrid = new bool[columns, TotalRows];
+            pipes = new List<PipeItem>();
+        }
+
         /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
         /// 并在其占据的每个网格格上生成 wallPrefab 像素块作为子物体（运行时可视化）。
@@ -318,7 +402,7 @@ namespace CrowdMatch
         }
 
         /// <summary>在指定格子生成一个 PixelItem 并应用颜色材质（供运行时关卡加载使用）。PixelItem 组件来自预制体，不再动态创建。</summary>
-        public PixelItem SpawnPixel(int col, int row, int colorId, ColorConfig config)
+        public PixelItem SpawnPixel(int col, int row, int colorId, ColorConfig config, bool scaleZero = false)
         {
             if (pixelPrefab == null)
             {
@@ -330,7 +414,7 @@ namespace CrowdMatch
             go.name = "Pixel_" + row + "_" + col;
             go.transform.SetParent(transform, false);
             go.transform.localPosition = GetLocalPosition(col, row);
-            go.transform.localScale = Vector3.one * unitSize;
+            go.transform.localScale = Vector3.one * (scaleZero ? 0f : unitSize);
 
             var item = go.GetComponent<PixelItem>();
             if (item == null)
@@ -344,6 +428,69 @@ namespace CrowdMatch
             item.colorId = colorId;
             item.ApplyMaterial(config);
             return item;
+        }
+
+        /// <summary>
+        /// 在 PixelGroup 下动态创建一个 PipeItem（用 pipePrefab 实例化），
+        /// 定位到 points[0] 所在格；points/colors 交由调用方传入。
+        /// </summary>
+        public PipeItem SpawnPipe(IList<Vector2> points, IList<int> colors)
+        {
+            if (pipePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] pipePrefab 为空，无法生成管道（请指定自带 PipeItem 组件的预制体）。");
+                return null;
+            }
+
+            var go = Instantiate(pipePrefab);
+            go.name = "Pipe_" + (transform.childCount + 1);
+            go.transform.SetParent(transform, false);
+
+            var pipe = go.GetComponent<PipeItem>();
+            if (pipe == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + pipePrefab.name + " 缺少 PipeItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
+            pipe.points = new List<Vector2>(points);
+            pipe.colors = new List<int>(colors);
+            var cell = PipeItem.GetPipeCell(pipe.points);
+            go.transform.localPosition = GetLocalPosition(cell.x, cell.y);
+            return pipe;
+        }
+
+        /// <summary>
+        /// 收集用于容器规划的 (层, 颜色) 列表：静态像素（含轨道上的初始像素）+ 管道将生成的像素。
+        /// 编辑器与运行时均可调用（不依赖 grid 重建）。
+        /// </summary>
+        public List<(int layer, int color)> CollectPlanningPixels()
+        {
+            var pixels = new List<(int, int)>();
+            foreach (var it in GetComponentsInChildren<PixelItem>())
+            {
+                if (it != null && IsInRange(it.gridX, it.gridZ))
+                    pixels.Add((it.gridZ, it.colorId));
+            }
+
+            foreach (var pipe in GetComponentsInChildren<PipeItem>())
+            {
+                if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null)
+                    continue;
+                int track = PipeItem.CountTrackCells(pipe.points, columns, TotalRows);
+                if (track <= 0)
+                    continue;
+                var pipeCell = PipeItem.GetPipeCell(pipe.points);
+                int layer = Mathf.Clamp(pipeCell.y, 0, TotalRows - 1);
+                foreach (int c in pipe.colors)
+                    for (int k = 0; k < track; k++)
+                        pixels.Add((layer, c));
+            }
+            return pixels;
         }
     }
 }

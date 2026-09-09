@@ -90,23 +90,14 @@ namespace CrowdMatch
                 var colorConfig = ColorConfigLocator.Find();
                 Debug.Log(Tag + " colorConfig = " + (colorConfig != null ? colorConfig.name : "NULL（找不到 ColorConfig）"));
 
-                // 1) 扫描 PixelItem → (layer, color) 列表，layer 0 = 最前排（gridZ 0 = Z 最大）
+                // 1) 收集 (layer, color) 列表（静态像素 + 管道将生成的像素），layer 0 = 最前排（gridZ 0 = Z 最大）
                 int colorCount = colorConfig != null ? colorConfig.Count : 0;
-                var pixels = new List<(int layer, int color)>();
+                var pixels = pixelGroup.CollectPlanningPixels();
                 int maxColorId = -1;
                 int totalPixels = 0;
-
-                foreach (var it in pixelGroup.GetComponentsInChildren<PixelItem>())
+                foreach (var p in pixels)
                 {
-                    if (!pixelGroup.IsInRange(it.gridX, it.gridZ))
-                    {
-                        Debug.LogWarning(Tag + " PixelItem 越界被忽略：gridX=" + it.gridX + " gridZ=" + it.gridZ +
-                                         " colorId=" + it.colorId);
-                        continue;
-                    }
-                    int layer = it.gridZ; // PixelGroup 前排（gridZ 0 = Z 最大）→ layer 0
-                    pixels.Add((layer, it.colorId));
-                    if (it.colorId > maxColorId) maxColorId = it.colorId;
+                    if (p.color > maxColorId) maxColorId = p.color;
                     totalPixels++;
                 }
 
@@ -118,7 +109,7 @@ namespace CrowdMatch
                 }
 
                 colorCount = Mathf.Max(colorCount, maxColorId + 1);
-                Debug.Log(Tag + " 扫描到 " + totalPixels + " 个像素，颜色上限 " + colorCount +
+                Debug.Log(Tag + " 扫描到 " + totalPixels + " 个像素（含管道生成），颜色上限 " + colorCount +
                           "，span=" + group.maxSpanLayers);
 
                 // 2) 用分层颜色池生成容器计划（大色块优先，逐层抽同色 pack）

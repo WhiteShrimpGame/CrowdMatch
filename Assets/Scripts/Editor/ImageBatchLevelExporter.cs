@@ -177,6 +177,7 @@ namespace CrowdMatch
             // 1. 清空两个 Group
             pixelGroup.ClearPixels();
             pixelGroup.ClearWalls();
+            pixelGroup.ClearPipes();
             containerGroup.ClearContainers();
 
             // 2. 按图片像素设置 PixelGroup 网格数并生成网格
