@@ -617,10 +617,10 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>某格是否为障碍：墙体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
         private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
-            if (_extractGroup.IsWall(col, row))
+            if (_extractGroup.IsBlocked(col, row))
                 return true;
             var gridItem = _extractGroup.grid[col, row];
             if (gridItem != null && !gridItem.walkableDuringExtraction)
