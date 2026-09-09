@@ -1563,7 +1563,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 9bacc4936cc240e429f15a5ab747199e, type: 3}
+  - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:
