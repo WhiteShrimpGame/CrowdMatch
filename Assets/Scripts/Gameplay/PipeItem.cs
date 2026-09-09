@@ -29,6 +29,13 @@ namespace CrowdMatch
         [Tooltip("（已弃用）旧版相邻像素生成间隔；流式补位按 cellMoveDuration 逐格推进，此值不再使用")]
         public float spawnInterval = 0.3f;
 
+        [Header("调试")]
+        [Tooltip("开启后输出「蛇头合法前进时」的蛇头上一格/前进格，以及所有寻路块当前格/目标格（定位完可关闭）")]
+        public bool debugLog = true;
+
+        [Tooltip("（仅 Editor）开启后，每次打印上述 step 日志时暂停编辑器播放，便于逐帧查看场景/Inspector 状态")]
+        public bool pauseOnLog = false;
+
         [Header("显示")]
         [Tooltip("剩余波次数字（UI Text，留空自动从子物体查找）")]
         public Text waveCountText;
@@ -44,12 +51,18 @@ namespace CrowdMatch
 
             [Tooltip("要替换的材质槽位下标（Renderer.materials 数组的 index）")]
             public int materialIndex;
+
+            [Tooltip("默认材质（Awake 时记录，颜色耗尽后恢复）")]
+            [System.NonSerialized] public Material defaultMaterial;
         }
 
         [System.NonSerialized] public PixelGroup group;
 
         [System.NonSerialized] private int _waveIndex;   // 已生成波数（下一波用 colors[_waveIndex]）
         [System.NonSerialized] private bool _spawning;
+
+        /// <summary>蛇形生成中，蛇当前占据的格子（蛇头→蛇尾顺序，含蛇头正在前往的格子）。仅 IsReleasing 期间有效。</summary>
+        [System.NonSerialized] public List<Vector2Int> snakeCells = new List<Vector2Int>();
 
         /// <summary>所属 PixelGroup（惰性：先读运行时赋值，为空则向上查找）。</summary>
         public PixelGroup Group => group != null ? group : (group = GetComponentInParent<PixelGroup>());
@@ -70,6 +83,9 @@ namespace CrowdMatch
 
         /// <summary>是否还有未释放的波次（colors 未耗尽）。</summary>
         public bool HasRemainingWaves => colors != null && _waveIndex < colors.Count;
+
+        /// <summary>是否正在释放一波（蛇形生成动画进行中，_spawning）。</summary>
+        public bool IsReleasing => _spawning;
 
         /// <summary>该格是否属于管道覆盖范围（管道自身格 + 轨道格）。供暴露判定把管道覆盖格视为阻挡。</summary>
         public bool CoversCell(int col, int row)
@@ -176,6 +192,19 @@ namespace CrowdMatch
         {
             if (waveCountText == null)
                 waveCountText = GetComponentInChildren<Text>(true);
+
+            // 记录每个指示器槽位的默认材质，供颜色耗尽后恢复
+            if (nextColorIndicators != null)
+            {
+                foreach (var ind in nextColorIndicators)
+                {
+                    if (ind == null || ind.renderer == null)
+                        continue;
+                    var mats = ind.renderer.sharedMaterials;
+                    if (mats != null && ind.materialIndex >= 0 && ind.materialIndex < mats.Length)
+                        ind.defaultMaterial = mats[ind.materialIndex];
+                }
+            }
         }
 
         private void Start()
@@ -202,14 +231,54 @@ namespace CrowdMatch
             StartCoroutine(SpawnWave(colors[_waveIndex]));
         }
 
-        /// <summary>等待某格不再被提取中的像素占用（停靠/进入视为占用，正在离开不算）。无缓冲区时立即返回。</summary>
-        private IEnumerator WaitUntilCellFree(int col, int row)
+        /// <summary>等待某格不再被提取中的像素占用（停靠/进入视为占用，正在离开不算）。无缓冲区时立即返回。
+        /// 判定不合法（前方被占用）首次进入等待时打印一条等待日志；判定通过后（与判定同一帧）打印蛇头前进日志，
+        /// 确保快照精确反映「判定那一刻」所有寻路块的状态。</summary>
+        private IEnumerator WaitUntilCellFree(Vector2Int fromCell, Vector2Int toCell, int step)
         {
             var gc = GameController.Instance;
             if (gc == null || gc.crowdBuffer == null)
+            {
+                if (debugLog)
+                    LogAdvance(fromCell, toCell, step);
                 yield break;
-            while (gc.crowdBuffer.IsExtractingOccupied(col, row))
+            }
+            bool waitLogged = false;
+            while (gc.crowdBuffer.IsExtractingOccupied(toCell.x, toCell.y))
+            {
+                if (debugLog && !waitLogged)
+                {
+                    waitLogged = true;
+                    LogWait(fromCell, toCell, step);
+                }
                 yield return null;
+            }
+            if (debugLog)
+                LogAdvance(fromCell, toCell, step);
+        }
+
+        /// <summary>蛇头判定合法前进时打印：上一格 → 当前前进格，以及所有寻路块当前格/目标格。</summary>
+        private void LogAdvance(Vector2Int fromCell, Vector2Int toCell, int step)
+        {
+            LogStep(fromCell, toCell, step, "合法前进");
+        }
+
+        /// <summary>蛇头判定前进不合法、前方被占用开始等待时打印（每次等待只打印一条）。</summary>
+        private void LogWait(Vector2Int fromCell, Vector2Int toCell, int step)
+        {
+            LogStep(fromCell, toCell, step, "等待（前方被占用）");
+        }
+
+        /// <summary>统一打印一条蛇头判定日志（前进或等待），附带所有寻路块快照。</summary>
+        private void LogStep(Vector2Int fromCell, Vector2Int toCell, int step, string verdict)
+        {
+            var cb = GameController.Instance != null ? GameController.Instance.crowdBuffer : null;
+            string dump = cb != null ? cb.DescribeExtraction() : "无 crowdBuffer";
+            Debug.Log($"[Pipe] {name} step{step}: 蛇头 {fromCell}->{toCell} {verdict} | {dump}");
+#if UNITY_EDITOR
+            if (pauseOnLog)
+                UnityEditor.EditorApplication.isPaused = true;
+#endif
         }
 
         /// <summary>
@@ -227,6 +296,7 @@ namespace CrowdMatch
             int n = track.Count;
             if (n == 0)
             {
+                snakeCells.Clear();
                 _spawning = false;
                 yield break;
             }
@@ -265,7 +335,8 @@ namespace CrowdMatch
             for (int s = 1; s <= n; s++)
             {
                 var headDest = path[s];
-                yield return WaitUntilCellFree(headDest.x, headDest.y);
+                UpdateSnakeCells(s, path);   // 蛇头正在前往 path[s]，蛇体已占据 path[s-1..1]
+                yield return WaitUntilCellFree(path[s - 1], headDest, s);
 
                 int launched = Mathf.Min(s, items.Count);
                 int active = launched;
@@ -296,7 +367,16 @@ namespace CrowdMatch
                 item.SetClickable(true);
             }
             Group?.RefreshExposed();
+            snakeCells.Clear();
             _spawning = false;
+        }
+
+        /// <summary>更新蛇形生成中的实时蛇格：蛇头正在前往 path[s]，蛇体已占据 path[s-1..1]，按蛇头→蛇尾顺序。</summary>
+        private void UpdateSnakeCells(int s, List<Vector2Int> path)
+        {
+            snakeCells.Clear();
+            for (int i = s; i >= 1; i--)
+                snakeCells.Add(path[i]);
         }
 
         private PixelItem SpawnPixelAtPipe(int color, ColorConfig config, Vector2Int pipeCell)
@@ -360,10 +440,22 @@ namespace CrowdMatch
 
         private void UpdateDisplay()
         {
-            if (waveCountText != null)
-                waveCountText.text = Mathf.Max(0, colors.Count - _waveIndex).ToString();
-
             bool hasNext = _waveIndex < colors.Count;
+
+            if (waveCountText != null)
+            {
+                if (hasNext)
+                {
+                    waveCountText.gameObject.SetActive(true);
+                    waveCountText.text = (colors.Count - _waveIndex).ToString();
+                }
+                else
+                {
+                    waveCountText.text = "";
+                    waveCountText.gameObject.SetActive(false);   // 库存耗尽：隐藏剩余波次数字
+                }
+            }
+
             int nextColor = hasNext ? colors[_waveIndex] : -1;
             ApplyNextColor(nextColor);
         }
@@ -380,12 +472,23 @@ namespace CrowdMatch
             {
                 if (ind == null || ind.renderer == null)
                     continue;
-                if (mat == null)
-                    continue;   // 颜色耗尽：不隐藏管道，材质保留最后一波颜色（管道本体保持可见）
-                ind.renderer.gameObject.SetActive(true);
+
                 var mats = ind.renderer.sharedMaterials;
                 if (mats == null || ind.materialIndex < 0 || ind.materialIndex >= mats.Length)
                     continue;
+
+                if (mat == null)
+                {
+                    // 颜色耗尽：恢复默认材质（而非保留最后一波颜色）
+                    if (ind.defaultMaterial != null)
+                    {
+                        mats[ind.materialIndex] = ind.defaultMaterial;
+                        ind.renderer.sharedMaterials = mats;
+                    }
+                    continue;
+                }
+
+                ind.renderer.gameObject.SetActive(true);
                 mats[ind.materialIndex] = mat;
                 ind.renderer.sharedMaterials = mats;
             }

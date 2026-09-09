@@ -613,33 +613,51 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>统计当前网格每种颜色的总数，并输出是否被 3 整除（不能整除则显示余数）。</summary>
+        /// <summary>统计当前网格每种颜色的总数（实际像素 + 管道计划生成），并输出是否被 3 整除（不能整除则显示余数）。</summary>
         private void LogColorCounts(PixelGroup group)
         {
-            var items = group.GetComponentsInChildren<PixelItem>();
-            var counts = new Dictionary<int, int>();
-            foreach (var it in items)
+            // 实际像素颜色
+            var actual = new Dictionary<int, int>();
+            foreach (var it in group.GetComponentsInChildren<PixelItem>())
             {
                 if (it == null) continue;
-                counts.TryGetValue(it.colorId, out int c);
-                counts[it.colorId] = c + 1;
+                actual.TryGetValue(it.colorId, out int c);
+                actual[it.colorId] = c + 1;
             }
 
-            if (counts.Count == 0)
+            // 管道计划生成的颜色数量（每波颜色 × 轨道格数）
+            var planned = new Dictionary<int, int>();
+            foreach (var pipe in group.GetComponentsInChildren<PipeItem>())
             {
-                Debug.Log("[PixelGroup] 没有找到任何 PixelItem，请先「生成网格」。");
+                if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null)
+                    continue;
+                int track = PipeItem.CountTrackCells(pipe.points, group.columns, group.TotalRows);
+                if (track <= 0)
+                    continue;
+                foreach (int color in pipe.colors)
+                {
+                    planned.TryGetValue(color, out int n);
+                    planned[color] = n + track;
+                }
+            }
+
+            var ids = new SortedSet<int>(actual.Keys);
+            ids.UnionWith(planned.Keys);
+
+            if (ids.Count == 0)
+            {
+                Debug.Log("[PixelGroup] 没有找到任何 PixelItem 或管道计划颜色，请先「生成网格」或配置管道 colors。");
                 return;
             }
 
             var config = ColorConfigLocator.Find();
 
-            var ids = new List<int>(counts.Keys);
-            ids.Sort();
-
             int notDivisible = 0;
             foreach (int id in ids)
             {
-                int total = counts[id];
+                actual.TryGetValue(id, out int a);
+                planned.TryGetValue(id, out int p);
+                int total = a + p;
                 int rem = total % 3;
 
                 string label = "颜色 " + id;
@@ -650,10 +668,11 @@ namespace CrowdMatch
                         label += "（" + mat.name + "）";
                 }
 
+                string parts = "实际 " + a + " + 管道计划 " + p;
                 string verdict = rem == 0 ? "✓ 被 3 整除" : "✗ 余 " + rem;
                 if (rem != 0) notDivisible++;
 
-                Debug.Log("[PixelGroup] " + label + "：总数 " + total + "，" + verdict);
+                Debug.Log("[PixelGroup] " + label + "：" + parts + " = 合计 " + total + "，" + verdict);
             }
 
             Debug.Log("[PixelGroup] 统计完成：共 " + ids.Count + " 种颜色，" +
@@ -697,11 +716,15 @@ namespace CrowdMatch
 
             // 导出：图片顶行 = 最前排（gridZ 0），底行 = 后排；左 = 最小 X（gridX 0）。
             // 即图片按 row_col 表格从上到下、从左到右读取（顶行 0_0 0_1 …，下行 1_0 …）。
+            // 墙体/管道占据格导出为透明像素（导入时按 IsWall/IsPipe 忽略）；无像素格留白。
             var tex = SquareGridColorTool.Export(
                 group.columns, group.TotalRows, CellSize,
                 (col, row) =>
                 {
-                    var item = group.GetItem(col, group.TotalRows - 1 - row);
+                    int gridZ = group.TotalRows - 1 - row;
+                    if (group.IsWall(col, gridZ) || group.IsPipe(col, gridZ))
+                        return new Color(0f, 0f, 0f, 0f);
+                    var item = group.GetItem(col, gridZ);
                     return item != null ? (Color?)config.GetColor(item.colorId) : null;
                 });
 
@@ -779,7 +802,13 @@ namespace CrowdMatch
                     continue;
 
                 // 图片顶行 = 最前排（gridZ 0）：把工具按「底行 0」采样的 row 反转到 gridZ
-                var item = group.GetItem(col, group.TotalRows - 1 - row);
+                int gridZ = group.TotalRows - 1 - row;
+
+                // 忽略墙体/管道占据格的颜色（这些位置没有像素，不应被导入颜色覆盖）
+                if (group.IsWall(col, gridZ) || group.IsPipe(col, gridZ))
+                    continue;
+
+                var item = group.GetItem(col, gridZ);
                 if (item == null)
                     continue;
 

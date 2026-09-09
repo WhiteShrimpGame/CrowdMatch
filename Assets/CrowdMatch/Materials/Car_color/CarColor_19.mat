@@ -135,7 +135,7 @@ Material:
     - _ReflectionMapType: 0
     - _ReflectionSmoothness: 1
     - _RenderingMode: 0
-    - _RimMax: 0.55
+    - _RimMax: 0.6
     - _RimMin: 0
     - _ShadowColorLightAtten: 1
     - _SingleIndirectColor: 0
