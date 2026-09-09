@@ -53,6 +53,10 @@ namespace CrowdMatch
         [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
         public string recordOutputDir = "";
 
+        [Header("调试")]
+        [Tooltip("开启后打印每次点击的判定结果（提取中忽略 / 射线未命中 / 无点击体 / 已移出网格 / 无法连通首排 / 命中成功），用于定位「起身时点击不到」")]
+        public bool debugClickLog = true;
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
@@ -357,23 +361,48 @@ namespace CrowdMatch
         {
             // 提取（寻路离开）进行中时暂不响应，保证网格状态一致
             if (crowdBuffer != null && crowdBuffer.IsExtracting)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 忽略点击：提取进行中（crowdBuffer.IsExtracting，上一批匹配像素还在网格内寻路离开）");
                 return;
+            }
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 忽略点击：引用缺失 pixelGroup=" + (pixelGroup != null) +
+                        " gatherPoint=" + (gatherPoint != null) + " Camera.main=" + (Camera.main != null));
                 return;
+            }
 
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, _clickMask))
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 射线未命中 Click 层（鼠标 " + Input.mousePosition +
+                        "；起身中的像素其点击碰撞体随 exposeMoveTarget 上移，可能尚未/已经移出点击位置）");
                 return;
+            }
 
             var listener = hit.collider.GetComponentInParent<PixelClickListener>();
             if (listener == null || listener.pixel == null)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + hit.collider.name + " 但无 PixelClickListener（或 pixel 为空）");
                 return;
+            }
             var item = listener.pixel;
 
             // 只在仍处于网格中时才触发；能否移出改由 ResolveMatch 判定（同色组需能通过空/组内格连通到首排）
             if (pixelGroup.GetItem(item.gridX, item.gridZ) != item)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但已不在网格（grid[" + item.gridX + "," + item.gridZ + "] != item）");
                 return;
+            }
 
+            if (debugClickLog)
+                Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
+                    ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
             ResolveMatch(item);
         }
 
@@ -437,7 +466,12 @@ namespace CrowdMatch
 
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
             if (!CanReachFront(matched))
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
+                        "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
                 return;
+            }
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
