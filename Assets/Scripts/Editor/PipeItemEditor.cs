@@ -56,6 +56,7 @@ namespace CrowdMatch
         private static void CreatePipeFromSelection()
         {
             var pixels = CollectSelectedPixels();
+            SelectionOrderTracker.LogState();
             if (pixels.Count < 2)
             {
                 EditorUtility.DisplayDialog("创建管道", "请至少选中 2 个 PixelItem（首个 = 管道格，其余 = 轨道格）。", "确定");
@@ -131,12 +132,12 @@ namespace CrowdMatch
                 " 格（请在 Inspector 设置 colors）。");
         }
 
-        /// <summary>收集当前选中物体中的 PixelItem（去重）。支持选中 PixelItem 的子物体（向上查找父级组件）。</summary>
+        /// <summary>收集按点选顺序缓存的 GameObject 中的 PixelItem（去重）。支持选中 PixelItem 的子物体（向上查找父级组件）。</summary>
         private static List<PixelItem> CollectSelectedPixels()
         {
             var result = new List<PixelItem>();
             var seen = new HashSet<PixelItem>();
-            foreach (var go in Selection.gameObjects)
+            foreach (var go in SelectionOrderTracker.Ordered)
             {
                 if (go == null)
                     continue;

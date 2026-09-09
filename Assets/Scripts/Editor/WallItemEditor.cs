@@ -46,6 +46,7 @@ namespace CrowdMatch
         private static void CreateWallFromSelection()
         {
             var pixels = CollectSelectedPixels();
+            SelectionOrderTracker.LogState();
             if (pixels.Count < 2)
             {
                 EditorUtility.DisplayDialog("创建墙体", "请至少选中 2 个 PixelItem。", "确定");
@@ -129,12 +130,12 @@ namespace CrowdMatch
                 " 格，移除 " + removed + " 个 Pixel（父物体 " + group.name + "）。");
         }
 
-        /// <summary>收集当前选中物体中的 PixelItem（去重）。支持选中 PixelItem 的子物体（向上查找父级组件）。</summary>
+        /// <summary>收集按点选顺序缓存的 GameObject 中的 PixelItem（去重）。支持选中 PixelItem 的子物体（向上查找父级组件）。</summary>
         private static List<PixelItem> CollectSelectedPixels()
         {
             var result = new List<PixelItem>();
             var seen = new HashSet<PixelItem>();
-            foreach (var go in Selection.gameObjects)
+            foreach (var go in SelectionOrderTracker.Ordered)
             {
                 if (go == null)
                     continue;
