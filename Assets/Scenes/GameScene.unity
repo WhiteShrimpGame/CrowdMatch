@@ -228,20 +228,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
---- !u!114 &890000001
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 112434339}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e2c1a9d0b7f34e5c8a6d1f2e3b4c5d6e, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
-  nextButton: {fileID: 0}
-  prevButton: {fileID: 0}
 --- !u!1 &300283395
 GameObject:
   m_ObjectHideFlags: 0
@@ -346,7 +332,7 @@ MonoBehaviour:
   backDepth: 25
   physicalEntryDepth: 2.8
   radius: 0.25
-  crowdSpeed: 6
+  crowdSpeed: 10
   crowdSpeedRandomRange: 1
   physicalRotateSpeed: 180
   aimOffsetX: 1.5
@@ -357,7 +343,7 @@ MonoBehaviour:
   scaleDelay: 0.2
   wallThickness: 0.1
   wallHeight: 2
-  extractSpeed: 6
+  extractSpeed: 10
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
   releaseRadius: 0.8
@@ -505,7 +491,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   path: {fileID: 1785929099}
   cycleTime: 6
-  speed: 1
+  speed: 1.5
   slotCount: 30
   entryGate: {fileID: 1467064619}
   catchUpEnabled: 1
@@ -797,8 +783,9 @@ MonoBehaviour:
   minRunLength: 4
   maxRunLength: 8
   fillToMultipleOf3: 1
-  pixelPrefab: {fileID: 4974077334147149108, guid: 1a4154a9e973cb6489645085010fb729, type: 3}
+  pixelPrefab: {fileID: 4974077334147149108, guid: 04cb2981992b05b49b540b2987e11453, type: 3}
   wallPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  pipePrefab: {fileID: 100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
 --- !u!4 &882082745
 Transform:
   m_ObjectHideFlags: 0
@@ -814,6 +801,20 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &890000001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 112434339}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e2c1a9d0b7f34e5c8a6d1f2e3b4c5d6e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  nextButton: {fileID: 0}
+  prevButton: {fileID: 0}
 --- !u!1 &963194225
 GameObject:
   m_ObjectHideFlags: 0
@@ -1009,7 +1010,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   containerPrefab: {fileID: 4074727829767371378, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
   columns: 4
-  rows: 50
+  rows: 30
   xSpacing: 2
   zSpacing: 1.2
   pixelGroup: {fileID: 882082744}
@@ -1562,9 +1563,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 5135b1e47e3242249a5d528304f9b85d, type: 3}
-  - {fileID: 4900000, guid: 5449a2927a461f04f8d97efc52b5775d, type: 3}
-  - {fileID: 4900000, guid: fdf741b4628f32b47ab4a5d513a1b809, type: 3}
+  - {fileID: 4900000, guid: 52fea11c77c9ba14d9800223fda64c05, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:

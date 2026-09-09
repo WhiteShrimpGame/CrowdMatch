@@ -14,6 +14,7 @@ namespace CrowdMatch
         public PixelData pixel = new PixelData();
         public ContainerData container = new ContainerData();
         public WallData[] walls = new WallData[0];
+        public PipeData[] pipes = new PipeData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -55,6 +56,17 @@ namespace CrowdMatch
         public class WallData
         {
             public Vector2[] points = new Vector2[0];
+        }
+
+        /// <summary>
+        /// 一个管道：轨迹端点序列 points（网格坐标，points[0] = 管道格，points[1..] = 轨道格），
+        /// 以及每波生成颜色 colors（第 i 波用 colors[i]）。
+        /// </summary>
+        [Serializable]
+        public class PipeData
+        {
+            public Vector2[] points = new Vector2[0];
+            public int[] colors = new int[0];
         }
     }
 
