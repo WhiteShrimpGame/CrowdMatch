@@ -359,13 +359,7 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
-            // 提取（寻路离开）进行中时暂不响应，保证网格状态一致
-            if (crowdBuffer != null && crowdBuffer.IsExtracting)
-            {
-                if (debugClickLog)
-                    Debug.Log("[Click] 忽略点击：提取进行中（crowdBuffer.IsExtracting，上一批匹配像素还在网格内寻路离开）");
-                return;
-            }
+            // 提取进行中仍允许点击：每次匹配作为独立批次，各自独立寻路（组间可穿模），无需等待上一批离场。
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
             {
                 if (debugClickLog)
