@@ -51,6 +51,9 @@ namespace CrowdMatch
 
             [Tooltip("要替换的材质槽位下标（Renderer.materials 数组的 index）")]
             public int materialIndex;
+
+            [Tooltip("默认材质（Awake 时记录，颜色耗尽后恢复）")]
+            [System.NonSerialized] public Material defaultMaterial;
         }
 
         [System.NonSerialized] public PixelGroup group;
@@ -189,6 +192,19 @@ namespace CrowdMatch
         {
             if (waveCountText == null)
                 waveCountText = GetComponentInChildren<Text>(true);
+
+            // 记录每个指示器槽位的默认材质，供颜色耗尽后恢复
+            if (nextColorIndicators != null)
+            {
+                foreach (var ind in nextColorIndicators)
+                {
+                    if (ind == null || ind.renderer == null)
+                        continue;
+                    var mats = ind.renderer.sharedMaterials;
+                    if (mats != null && ind.materialIndex >= 0 && ind.materialIndex < mats.Length)
+                        ind.defaultMaterial = mats[ind.materialIndex];
+                }
+            }
         }
 
         private void Start()
@@ -424,10 +440,22 @@ namespace CrowdMatch
 
         private void UpdateDisplay()
         {
-            if (waveCountText != null)
-                waveCountText.text = Mathf.Max(0, colors.Count - _waveIndex).ToString();
-
             bool hasNext = _waveIndex < colors.Count;
+
+            if (waveCountText != null)
+            {
+                if (hasNext)
+                {
+                    waveCountText.gameObject.SetActive(true);
+                    waveCountText.text = (colors.Count - _waveIndex).ToString();
+                }
+                else
+                {
+                    waveCountText.text = "";
+                    waveCountText.gameObject.SetActive(false);   // 库存耗尽：隐藏剩余波次数字
+                }
+            }
+
             int nextColor = hasNext ? colors[_waveIndex] : -1;
             ApplyNextColor(nextColor);
         }
@@ -444,12 +472,23 @@ namespace CrowdMatch
             {
                 if (ind == null || ind.renderer == null)
                     continue;
-                if (mat == null)
-                    continue;   // 颜色耗尽：不隐藏管道，材质保留最后一波颜色（管道本体保持可见）
-                ind.renderer.gameObject.SetActive(true);
+
                 var mats = ind.renderer.sharedMaterials;
                 if (mats == null || ind.materialIndex < 0 || ind.materialIndex >= mats.Length)
                     continue;
+
+                if (mat == null)
+                {
+                    // 颜色耗尽：恢复默认材质（而非保留最后一波颜色）
+                    if (ind.defaultMaterial != null)
+                    {
+                        mats[ind.materialIndex] = ind.defaultMaterial;
+                        ind.renderer.sharedMaterials = mats;
+                    }
+                    continue;
+                }
+
+                ind.renderer.gameObject.SetActive(true);
                 mats[ind.materialIndex] = mat;
                 ind.renderer.sharedMaterials = mats;
             }

@@ -68,29 +68,74 @@ namespace CrowdMatch
 
         /// <summary>
         /// 校验 record 与关卡是否一致：像素总数一致，且各颜色计数一致。
-        /// 通过返回 null，否则返回错误描述。
+        /// 墙体/管道自身占据的格子不生成 Pixel（Record 也不含），需从网格格数中扣除；
+        /// 管道波次会额外生成像素（轨道格数 × 波次数），需加回。通过返回 null，否则返回错误描述。
         /// </summary>
         public static string Validate(LevelData data, IReadOnlyList<int> seq)
         {
             int columns = Mathf.Max(1, data.pixel.columns);
             int totalRows = Mathf.Max(0, data.pixel.rows) + Mathf.Max(0, data.pixel.tailRows);
-            int pixelTotal = columns * totalRows;
+            int gridCells = columns * totalRows;
+
+            // 收集墙体 + 管道自身占据的格（这些格不生成 Pixel，Record 中也不包含）
+            var skipCells = new HashSet<Vector2Int>();
+            if (data.walls != null)
+                foreach (var w in data.walls)
+                    if (w != null && w.points != null)
+                        WallItem.CollectOccupiedCells(w.points, skipCells);
+            if (data.pipes != null)
+                foreach (var p in data.pipes)
+                    if (p != null && p.points != null && p.points.Length >= 1)
+                        skipCells.Add(PipeItem.GetPipeCell(p.points));
+
+            // 初始像素数 = 网格格数 − 墙/管道格数（仅统计网格范围内的跳过格）
+            int skipInGrid = 0;
+            for (int r = 0; r < totalRows; r++)
+                for (int c = 0; c < columns; c++)
+                    if (skipCells.Contains(new Vector2Int(c, r)))
+                        skipInGrid++;
+            int initialPixels = gridCells - skipInGrid;
+
+            // 管道额外生成的像素数 = Σ 轨道格数 × 波次数
+            int pipePixels = 0;
+            if (data.pipes != null)
+                foreach (var p in data.pipes)
+                    if (p != null && p.points != null && p.points.Length >= 2 && p.colors != null)
+                        pipePixels += PipeItem.CountTrackCells(p.points, columns, totalRows) * p.colors.Length;
+
+            int pixelTotal = initialPixels + pipePixels;
 
             if (seq.Count != pixelTotal)
-                return "Record 像素数(" + seq.Count + ")与关卡像素数(" + pixelTotal + ")不一致。";
-            if (data.pixel.cells == null || data.pixel.cells.Length < pixelTotal)
-                return "关卡像素 cells 数量不足（需要 " + pixelTotal + "）。";
+                return "Record 像素数(" + seq.Count + ")与关卡像素数(" + pixelTotal +
+                    "，含管道生成 " + pipePixels + "，扣除墙/管道格 " + skipInGrid + ")不一致。";
+            if (data.pixel.cells == null || data.pixel.cells.Length < gridCells)
+                return "关卡像素 cells 数量不足（需要 " + gridCells + "）。";
 
             var recordCounts = new Dictionary<int, int>();
             foreach (var c in seq)
                 recordCounts[c] = recordCounts.TryGetValue(c, out int rc) ? rc + 1 : 1;
 
+            // 关卡颜色计数 = 初始像素（跳过墙/管道格）+ 管道计划生成颜色
             var pixelCounts = new Dictionary<int, int>();
-            for (int i = 0; i < pixelTotal; i++)
-            {
-                int c = data.pixel.cells[i];
-                pixelCounts[c] = pixelCounts.TryGetValue(c, out int pc) ? pc + 1 : 1;
-            }
+            for (int r = 0; r < totalRows; r++)
+                for (int c = 0; c < columns; c++)
+                {
+                    if (skipCells.Contains(new Vector2Int(c, r)))
+                        continue;
+                    int color = data.pixel.cells[r * columns + c];
+                    pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + 1 : 1;
+                }
+            if (data.pipes != null)
+                foreach (var p in data.pipes)
+                {
+                    if (p == null || p.points == null || p.points.Length < 2 || p.colors == null)
+                        continue;
+                    int track = PipeItem.CountTrackCells(p.points, columns, totalRows);
+                    if (track <= 0)
+                        continue;
+                    foreach (int color in p.colors)
+                        pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + track : track;
+                }
 
             if (recordCounts.Count != pixelCounts.Count)
                 return "Record 与关卡的颜色种类数不一致（" + recordCounts.Count + " vs " + pixelCounts.Count + "）。";

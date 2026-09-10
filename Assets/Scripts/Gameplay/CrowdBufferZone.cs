@@ -604,7 +604,9 @@ namespace CrowdMatch
             // 提取球必须走到管道轨迹的最前排之前（row 更小）才算真正越过管道，方可离场。
             // 不再考虑像素是否恰好落在某条管道轨迹格上。
             int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
-            if (row >= minTrackRow)
+            // 管道轨迹触及首排（minTrackRow == 0）时，「越过管道（row < 0）」不可能成立，
+            // 放宽为仅按前方无障碍判定离场，避免整批像素死锁（此时由蛇头 WaitUntilCellFree 协调冲突）。
+            if (minTrackRow > 0 && row >= minTrackRow)
                 return false;
 
             for (int r = 0; r < row; r++)
@@ -615,10 +617,10 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>某格是否为障碍：墙体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
+        /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
         private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
         {
-            if (_extractGroup.IsWall(col, row))
+            if (_extractGroup.IsBlocked(col, row))
                 return true;
             var gridItem = _extractGroup.grid[col, row];
             if (gridItem != null && !gridItem.walkableDuringExtraction)
