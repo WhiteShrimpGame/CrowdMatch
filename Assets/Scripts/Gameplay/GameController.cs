@@ -64,6 +64,9 @@ namespace CrowdMatch
         private string _recordFilePath;
         private bool _transitioning;
 
+        /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
+        private int _overflowClickCount;
+
         /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
         private int _clickMask;
 
@@ -278,6 +281,8 @@ namespace CrowdMatch
 
             if (crowdBuffer != null)
                 crowdBuffer.ResetAll();
+
+            _overflowClickCount = 0;
         }
 
         // ===== Record 模式 =====
@@ -370,6 +375,47 @@ namespace CrowdMatch
             }
         }
 
+        /// <summary>当前「传送带 + 已点未进带」的总占用数。</summary>
+        private int CurrentInflight()
+        {
+            int onBelt = conveyorZone != null ? conveyorZone.OccupiedSlots : 0;
+            int pending = crowdBuffer != null ? crowdBuffer.PendingCount : 0;
+            return onBelt + pending;
+        }
+
+        /// <summary>
+        /// 堆积进入限制：当「传送带上的像素 + 已点击但尚未进入传送带的像素」总数达到传送带容量上限后，
+        /// 开始计数玩家点击；累计 2 次后，后续点击直接忽略（返回 false）；总数回落到容量以下则重置计数。
+        /// </summary>
+        private bool PassOverflowClickGate()
+        {
+            if (conveyorZone == null || conveyorZone.belt == null || conveyorZone.TotalSlots <= 0)
+                return true;   // 无传送带，不限制
+
+            int capacity = conveyorZone.TotalSlots;
+            int before = CurrentInflight();
+            int countBefore = _overflowClickCount;
+
+            bool allow;
+            if (before < capacity)
+            {
+                _overflowClickCount = 0;   // 总数低于容量：重置累计次数
+                allow = true;
+            }
+            else
+            {
+                _overflowClickCount++;
+                allow = _overflowClickCount <= 2;   // 已达容量：累计 2 次后，本次（第 3 次起）忽略
+            }
+
+            if (debugClickLog)
+                Debug.Log("[Click] 堆积门槛 前总占用=" + before + "/" + capacity +
+                    " count=" + countBefore + "→" + _overflowClickCount +
+                    (allow ? " → 放行" : " → 忽略"));
+
+            return allow;
+        }
+
         private void HandleClick()
         {
             // 提取进行中仍允许点击：每次匹配作为独立批次，各自独立寻路（组间可穿模），无需等待上一批离场。
@@ -378,6 +424,14 @@ namespace CrowdMatch
                 if (debugClickLog)
                     Debug.Log("[Click] 忽略点击：引用缺失 pixelGroup=" + (pixelGroup != null) +
                         " gatherPoint=" + (gatherPoint != null) + " Camera.main=" + (Camera.main != null));
+                return;
+            }
+
+            // 堆积限制：传送带 + 已点未进带 达容量且已累计两次点击时，忽略本次点击
+            if (!PassOverflowClickGate())
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 堆积限制：已达容量且累计两次点击，忽略本次点击");
                 return;
             }
 
@@ -411,6 +465,11 @@ namespace CrowdMatch
                 Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
                     ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
             ResolveMatch(item);
+
+            if (debugClickLog)
+                Debug.Log("[Click] 堆积门槛 后总占用=" + CurrentInflight() + "/" +
+                    (conveyorZone != null ? conveyorZone.TotalSlots : 0) +
+                    " count=" + _overflowClickCount);
         }
 
         /// <summary>

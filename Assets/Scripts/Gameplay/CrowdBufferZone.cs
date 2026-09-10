@@ -153,6 +153,22 @@ namespace CrowdMatch
         /// <summary>是否正在提取（还有至少一个批次的匹配像素在网格内寻路离开）</summary>
         public bool IsExtracting => _batches.Count > 0;
 
+        /// <summary>当前「已点击但尚未进入传送带」的像素总数（提取中 + 物理阶段等待收集）。供堆积进入限制使用。</summary>
+        public int PendingCount
+        {
+            get
+            {
+                int n = _physical.Count;
+                for (int b = 0; b < _batches.Count; b++)
+                {
+                    var batch = _batches[b];
+                    if (batch != null)
+                        n += batch.extracting.Count;
+                }
+                return n;
+            }
+        }
+
         /// <summary>该格是否被提取中的像素「占用」：有等待停靠的像素，或有正在进入该格的像素。
         /// 仅有正在离开该格（已决定移入下一格）的像素视为不占用。供管道蛇头判断前方格是否可进入。
         /// 独立批次间允许穿模，但蛇头仍需避开所有批次（蛇不是匹配组，不做穿模）。</summary>
