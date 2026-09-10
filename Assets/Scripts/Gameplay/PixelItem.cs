@@ -38,6 +38,10 @@ namespace CrowdMatch
         [Tooltip("点击碰撞体组件（挂在 Click 层的子物体上）；为空时在 Awake 中自动查找子物体")]
         public PixelClickListener listener;
 
+        [Header("描边")]
+        [Tooltip("可点击时显示的白描边 Renderer（头骨上的 Cull Front 白球）；随暴露状态显隐")]
+        public Renderer outlineRenderer;
+
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
@@ -85,6 +89,8 @@ namespace CrowdMatch
             BindClickListener();
             if (exposeMoveTarget != null)
                 _restLocalY = exposeMoveTarget.localPosition.y;
+            if (outlineRenderer != null)
+                outlineRenderer.enabled = false;   // 初始不可点击，描边关闭
         }
 
         /// <summary>查找并绑定点击碰撞体组件，赋值反向引用供点击判定使用。</summary>
@@ -208,8 +214,8 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，并在 exposeMoveDuration 内把 Animator 物体匀速移动到 y=0；
-        /// 退出暴露时关闭 Animator 并停止移动。
+        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，并在 exposeMoveDuration 内把 exposeMoveTarget 匀速移动到 y=0（起身上升）。
+        /// 退出暴露时仅关闭 Animator；上升/坐回动画与状态切换相互独立——正在进行的上升不会被中断，会自然完成到 y=0。
         /// </summary>
         public void SetExposed(bool exposed)
         {
@@ -221,9 +227,12 @@ namespace CrowdMatch
             ApplyExposedState(exposed);
         }
 
-        /// <summary>按暴露状态应用动画：激活/关闭 Animator，并把 exposeMoveTarget 平滑到 y=0 / 停止。</summary>
+        /// <summary>按暴露状态应用动画：激活/关闭 Animator，并把 exposeMoveTarget 平滑到 y=0。
+        /// 退出暴露（false）不打断进行中的上升——上升动画独立于状态切换，保证起身过程一定完成。</summary>
         private void ApplyExposedState(bool exposed)
         {
+            if (outlineRenderer != null)
+                outlineRenderer.enabled = exposed;
             if (exposed)
             {
                 if (animator != null)
@@ -234,11 +243,8 @@ namespace CrowdMatch
             }
             else
             {
-                if (_exposeMove != null)
-                {
-                    StopCoroutine(_exposeMove);
-                    _exposeMove = null;
-                }
+                // 不 StopCoroutine(_exposeMove)：点击离开等状态切换不打断正在进行的上升，让其自然完成到 y=0；
+                // 需要坐回时由 SitDownExposeTarget 显式 StopCoroutine + 启动坐回。
                 if (animator != null)
                     animator.enabled = false;
             }
