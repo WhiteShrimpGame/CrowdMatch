@@ -495,7 +495,7 @@ MonoBehaviour:
   slotCount: 30
   entryGate: {fileID: 1467064619}
   catchUpEnabled: 1
-  catchUpInterval: 0.2
+  catchUpInterval: 0.4
 --- !u!4 &782126358
 Transform:
   m_ObjectHideFlags: 0
@@ -1235,6 +1235,9 @@ MonoBehaviour:
   conveyorZone: {fileID: 1582382721}
   recordMode: 0
   recordOutputDir: 
+  reviveKeepBeltCount: 10
+  overflowPendingLimit: 9
+  debugClickLog: 1
   gatheredItems: []
 --- !u!4 &1669523324
 Transform:
