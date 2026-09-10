@@ -196,11 +196,17 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>失败检测：传送带满，且带上所有像素都无法与前排容器匹配。触发后等待 1.5s 重置当前关。</summary>
-        private void CheckFail()
+        /// <summary>
+        /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排）。
+        /// 判定在「静止且死锁」时成立：传送带满、无小车正在出库/补位/已开启匹配尚未抵达前排、
+        /// 无像素正在上车，且带上所有像素都没有同色可匹配容器。触发后等待 1.5s 重置当前关。
+        /// </summary>
+        public void TryCheckFail()
         {
             if (_transitioning)
                 return;
+            if (recordMode)
+                return;   // Record 模式不判失败（容器不参与吸收）
             if (IsFail())
             {
                 _transitioning = true;
@@ -209,7 +215,7 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>失败判定：传送带占满且每个槽位像素都没有同色非空前排容器。</summary>
+        /// <summary>失败判定：传送带满 + 无出库/补位/上车进行中 + 带满且每个槽位像素都没有同色可匹配容器。</summary>
         private bool IsFail()
         {
             if (conveyorZone == null || conveyorZone.belt == null)
@@ -217,8 +223,16 @@ namespace CrowdMatch
             if (conveyorZone.TotalSlots <= 0)
                 return false;
             if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
-                return false;
+                return false;   // 传送带未满
             if (containerGroup == null)
+                return false;
+
+            // 静止门槛：有车正在出库/补位/已开启匹配尚未抵达前排 → 还有进度，不判失败
+            if (containerGroup.HasPendingFrontTransition())
+                return false;
+
+            // 静止门槛：有像素正在上车（jump 或回退 lerp）→ 还有进度，不判失败
+            if (containerGroup.consumingCount > 0)
                 return false;
 
             var belt = conveyorZone.belt;
@@ -338,8 +352,7 @@ namespace CrowdMatch
 
             if (GameState.IsGameStart)
             {
-                CheckWin();
-                CheckFail();
+                CheckWin();   // 失败判定已改为事件驱动（TryCheckFail），不再每帧检测
             }
 
             if (Input.GetMouseButtonDown(0) && GameState.IsGameStart)

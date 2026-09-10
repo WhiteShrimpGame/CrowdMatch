@@ -80,6 +80,11 @@ namespace CrowdMatch
             }
 
             StartCoroutine(SettleRoutine(pixel, slotIndex));
+
+            // 关键事件点：有小人进入传送带 → 尝试失败判定
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.TryCheckFail();
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
