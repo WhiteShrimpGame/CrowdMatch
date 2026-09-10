@@ -38,6 +38,10 @@ namespace CrowdMatch
         [Tooltip("点击碰撞体组件（挂在 Click 层的子物体上）；为空时在 Awake 中自动查找子物体")]
         public PixelClickListener listener;
 
+        [Header("描边")]
+        [Tooltip("可点击时显示的白描边 Renderer（头骨上的 Cull Front 白球）；随暴露状态显隐")]
+        public Renderer outlineRenderer;
+
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
@@ -85,6 +89,8 @@ namespace CrowdMatch
             BindClickListener();
             if (exposeMoveTarget != null)
                 _restLocalY = exposeMoveTarget.localPosition.y;
+            if (outlineRenderer != null)
+                outlineRenderer.enabled = false;   // 初始不可点击，描边关闭
         }
 
         /// <summary>查找并绑定点击碰撞体组件，赋值反向引用供点击判定使用。</summary>
@@ -225,6 +231,8 @@ namespace CrowdMatch
         /// 退出暴露（false）不打断进行中的上升——上升动画独立于状态切换，保证起身过程一定完成。</summary>
         private void ApplyExposedState(bool exposed)
         {
+            if (outlineRenderer != null)
+                outlineRenderer.enabled = exposed;
             if (exposed)
             {
                 if (animator != null)
