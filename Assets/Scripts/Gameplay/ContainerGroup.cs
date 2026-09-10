@@ -226,6 +226,38 @@ namespace CrowdMatch
             StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
         }
 
+        /// <summary>
+        /// 复活深排上车（gridZ &gt;= maxOpenRows）：像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
+        /// 仍走 Consume 扣容量 → OpenRearLid → consumingCount 计数 → OnPixelConsumed（失败判定 + 出库）完整链路，只是省略 jump。
+        /// gridZ &gt;= maxOpenRows + 1（视野外更严格 1 排）的车完成匹配时，直接原地销毁并瞬间补位，避免后期大量已匹配车开走产生垃圾时间。
+        /// </summary>
+        public void ConsumePixelInstant(PixelItem pixel, ContainerItem container)
+        {
+            if (pixel == null || container == null || container.IsEmpty)
+                return;
+
+            bool isLast = container.Consume();
+            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1;   // 视野外更严格 1 排：完成匹配 → 原地销毁
+            if (isLast)
+                OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
+            consumingCount++;
+
+            int col = container.gridX;
+            System.Action onConsumed = () => OnPixelConsumed(container, col, isLast, destroyInPlace);
+
+            // 原地消失（pop 1.1× → 缩到 0，与开盖同一 tween）后，瞬移到目标车落点出现
+            pixel.transform.DisappearWithPop(() =>
+            {
+                if (pixel == null)
+                    return;
+                bool placed = container != null && container.PlacePixelInstant(pixel);
+                if (!placed)
+                    Destroy(pixel.gameObject);   // 无空闲落点（或车已销毁）：销毁
+                GameData.ClearedPixelCount++;
+                onConsumed();
+            });
+        }
+
         private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast)
         {
             // 新上车表现：有空闲落点时由 ContainerItem 接管（挂落点 → DOLocalJump 到 0 → 弹性缩放），
@@ -256,14 +288,18 @@ namespace CrowdMatch
             onConsumed();
         }
 
-        /// <summary>单个像素上车落定（jump 弹回完成 / 回退 lerp 完成）后的统一回调：递减上车计数 → 事件驱动失败判定 → 耗尽则尝试出库。</summary>
-        private void OnPixelConsumed(ContainerItem container, int col, bool isLast)
+        /// <summary>单个像素上车落定（jump 弹回完成 / 回退 lerp 完成）后的统一回调：递减上车计数 → 事件驱动失败判定 → 耗尽则出库或深排原地销毁。</summary>
+        private void OnPixelConsumed(ContainerItem container, int col, bool isLast, bool destroyInPlace = false)
         {
             consumingCount = Mathf.Max(0, consumingCount - 1);
             var gc = GameController.Instance;
             if (gc != null)
                 gc.TryCheckFail();
-            if (isLast)
+            if (!isLast)
+                return;
+            if (destroyInPlace)
+                DestroyContainerInPlace(container);   // 视野外深排车：原地销毁 + 瞬间补位
+            else
                 TryExitIfAtFront(container, col);
         }
 
@@ -303,6 +339,37 @@ namespace CrowdMatch
             if (grid == null || grid[col, 0] != item)
                 return;   // 不在前排（或已开始出库）
             StartContainerExit(item, col);
+        }
+
+        /// <summary>
+        /// 复活深排车完成匹配：直接原地销毁（连同已上车的乘客像素，均已计入 ClearedPixelCount），
+        /// 后车瞬间补位（teleport，无动画）。用于玩家视野外（gridZ >= maxOpenRows + 1）的车，
+        /// 避免后期大量已匹配的车逐个开走出库产生垃圾时间。
+        /// </summary>
+        private void DestroyContainerInPlace(ContainerItem item)
+        {
+            if (item == null)
+                return;
+            int col = item.gridX;
+            int row = item.gridZ;
+            if (grid == null || !IsInRange(col, row) || grid[col, row] != item)
+                return;   // 已被移走 / 已销毁，幂等兜底
+
+            grid[col, row] = null;
+            Destroy(item.gameObject);   // 车 + 乘客像素一并销毁（乘客已计入 ClearedPixelCount）
+
+            // 后车瞬间补位（teleport，无动画）：每车向上移一格，与 RefillColumn 同构（保留空格）
+            for (int r = row + 1; r < rows; r++)
+            {
+                var rear = grid[col, r];
+                if (rear == null)
+                    continue;
+                int newRow = r - 1;
+                rear.gridZ = newRow;
+                grid[col, newRow] = rear;
+                grid[col, r] = null;
+                rear.transform.localPosition = GetLocalPosition(col, newRow);
+            }
         }
 
         /// <summary>
@@ -423,10 +490,11 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 是否存在「已开启匹配但尚未抵达前排」的车（含正在补位移动的车）。
-        /// 判定 = 存在 isRefilling 的车，或存在「非前排且盖子已打开」的车。
+        /// 是否存在「已开启匹配且即将抵达前排」的车（含正在补位移动的车）。
+        /// 判定 = 存在 isRefilling 的车，或存在「非前排、盖子已打开、且前方所有车都已清空」的车。
         /// 说明：RefillColumn 在补位开始时就把 gridZ 同步置 0，而 lidOpened 在 ConsumePixel（OpenRearLid）时就已锁存，
         /// 因此该条件在整个「上车 → 弹回 → 出库动画 → 补位移动」区间内恒为 true，直到车真正落定前排才释放，杜绝空白时间窗。
+        /// 「前方已清空」约束用于排除复活直接给「前方仍有非空车」的后排车开盖的情况——那种车并非即将补位，不算过渡中。
         /// </summary>
         public bool HasPendingFrontTransition()
         {
@@ -438,10 +506,73 @@ namespace CrowdMatch
                         continue;
                     if (it.isRefilling)
                         return true;
-                    if (row >= 1 && it.lidOpened)
+                    if (row >= 1 && it.lidOpened && IsFrontCleared(col, row))
                         return true;
                 }
             return false;
+        }
+
+        /// <summary>该格前方（row 更小）所有车是否都已为空（含 null），即该格即将被补位到前排。</summary>
+        private bool IsFrontCleared(int col, int row)
+        {
+            for (int r = 0; r < row; r++)
+            {
+                var f = GetItem(col, r);
+                if (f != null && !f.IsEmpty)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 复活：把一批像素按颜色直接匹配到车（非空、非补位中），
+        /// 优先前排（gridZ 小，含第 0 排）、同排优先列小。复用 ConsumePixel（扣容量 → 跳车 → 出库链路），
+        /// 有车被匹配即播放开盖 tween（OpenLid，幂等）。返回未找到同色车的像素。
+        /// 说明：失败仅保证「传送带上的像素不匹配」，缓冲区/带溢出里仍可能有匹配前排车的颜色，
+        /// 因此必须优先补第 0 排车，否则会把这类像素误判为无车可匹配而销毁，留下被掏空的前排车堵死整列。
+        /// </summary>
+        public List<PixelItem> MatchPixelsToCars(List<PixelItem> pixels)
+        {
+            var unmatched = new List<PixelItem>();
+            if (pixels == null)
+                return unmatched;
+
+            for (int i = 0; i < pixels.Count; i++)
+            {
+                var pixel = pixels[i];
+                if (pixel == null)
+                    continue;
+
+                var car = FindCarForColor(pixel.colorId);
+                if (car == null)
+                {
+                    unmatched.Add(pixel);
+                    continue;
+                }
+
+                car.OpenLid();              // 有车被匹配 → 播放开盖 tween（幂等）
+                if (car.gridZ < maxOpenRows)
+                    ConsumePixel(pixel, car);        // 前 maxOpenRows 排：复用正常 jump 上车
+                else
+                    ConsumePixelInstant(pixel, car); // 更后排：原地消失 → 瞬移到目标车落点出现
+            }
+            return unmatched;
+        }
+
+        /// <summary>从全排（gridZ 0..rows-1）按「前排优先、同排列小优先」找第一个同色、非空、非补位中的车；无则 null。</summary>
+        private ContainerItem FindCarForColor(int colorId)
+        {
+            for (int row = 0; row < rows; row++)
+                for (int col = 0; col < columns; col++)
+                {
+                    var it = GetItem(col, row);
+                    if (it == null || it.IsEmpty || it.isRefilling)
+                        continue;
+                    if (it.colorId != colorId)
+                        continue;
+                    return it;
+                }
+            return null;
         }
     }
 }

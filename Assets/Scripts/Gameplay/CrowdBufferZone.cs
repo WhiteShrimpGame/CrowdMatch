@@ -308,6 +308,47 @@ namespace CrowdMatch
             _lastReleaseTime = float.NegativeInfinity;
         }
 
+        /// <summary>
+        /// 复活用：取出缓冲区所有「已点击但尚未进入传送带」的像素（提取中 + 物理阶段）并清空缓冲区。
+        /// 不销毁像素；物理阶段的像素解除物理约束。返回像素列表（保持世界位置），供调用方直接匹配到后排车。
+        /// </summary>
+        public List<PixelItem> DrainAllPixels()
+        {
+            var all = new List<PixelItem>();
+
+            // 提取中批次（网格寻路 / 移向入口边）
+            for (int b = 0; b < _batches.Count; b++)
+            {
+                var batch = _batches[b];
+                for (int i = 0; i < batch.extracting.Count; i++)
+                {
+                    var st = batch.extracting[i];
+                    if (st != null && st.item != null)
+                        all.Add(st.item);
+                }
+            }
+            _batches.Clear();
+
+            // 物理阶段（已附加刚体）：解除物理约束后加入
+            for (int i = 0; i < _physical.Count; i++)
+            {
+                var p = _physical[i];
+                if (p != null)
+                {
+                    DetachPhysics(p);
+                    all.Add(p);
+                }
+            }
+            _physical.Clear();
+
+            // 清理管道蛇形可通行标记与提取上下文（需在置空 _extractGroup 之前调用）
+            ClearExtractionWalkableFlags();
+            _extractGroup = null;
+            _lastReleaseTime = float.NegativeInfinity;
+
+            return all;
+        }
+
         private void Update()
         {
             StepExtracting();
