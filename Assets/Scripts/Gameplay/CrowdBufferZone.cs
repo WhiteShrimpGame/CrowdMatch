@@ -128,36 +128,63 @@ namespace CrowdMatch
             public bool resolved;               // 本 tick 是否已确定（移动或退出）
         }
 
-        /// <summary>提取阶段的像素（保持前到后顺序）</summary>
-        private readonly List<ExtractState> _extracting = new List<ExtractState>();
+        /// <summary>一次匹配的一组像素 = 一个独立提取批次。各组独立寻路、独立占用表，组间允许穿模。</summary>
+        private class Batch
+        {
+            public readonly List<ExtractState> extracting = new List<ExtractState>();
+            public bool[,] matchedOccupied;   // 本批尚未离开的匹配像素占用的格（每次 sweep 原子更新）
+            public float tickTimer;           // 本批的 sweep 时间片计时器
+        }
 
-        /// <summary>提取期间引用的 PixelGroup 及其网格占用表</summary>
+        /// <summary>提取中的批次（每次匹配一组 = 一个独立批次）</summary>
+        private readonly List<Batch> _batches = new List<Batch>();
+
+        /// <summary>提取期间引用的 PixelGroup（唯一，所有批次共享）</summary>
         private PixelGroup _extractGroup;
-        private bool[,] _matchedOccupied;   // 尚未离开的匹配像素占用的格（每次 sweep 原子更新）
 
-        /// <summary>并行 sweep 的时间片（一个 tick 移动一格，时长 = 格距 / 速度，动画与逻辑同步）</summary>
+        /// <summary>并行 sweep 的时间片（一个 tick 移动一格，时长 = 格距 / 速度，动画与逻辑同步；所有批次共享）</summary>
         private float _extractTickInterval;
-        private float _extractTickTimer;
 
         /// <summary>物理阶段（已附加刚体）的像素</summary>
         private readonly List<PixelItem> _physical = new List<PixelItem>();
 
         private float _lastReleaseTime = float.NegativeInfinity;
 
-        /// <summary>是否正在提取（还有匹配像素在网格内寻路离开）</summary>
-        public bool IsExtracting => _extracting.Count > 0;
+        /// <summary>是否正在提取（还有至少一个批次的匹配像素在网格内寻路离开）</summary>
+        public bool IsExtracting => _batches.Count > 0;
+
+        /// <summary>当前「已点击但尚未进入传送带」的像素总数（提取中 + 物理阶段等待收集）。供堆积进入限制使用。</summary>
+        public int PendingCount
+        {
+            get
+            {
+                int n = _physical.Count;
+                for (int b = 0; b < _batches.Count; b++)
+                {
+                    var batch = _batches[b];
+                    if (batch != null)
+                        n += batch.extracting.Count;
+                }
+                return n;
+            }
+        }
 
         /// <summary>该格是否被提取中的像素「占用」：有等待停靠的像素，或有正在进入该格的像素。
-        /// 仅有正在离开该格（已决定移入下一格）的像素视为不占用。供管道蛇头判断前方格是否可进入。</summary>
+        /// 仅有正在离开该格（已决定移入下一格）的像素视为不占用。供管道蛇头判断前方格是否可进入。
+        /// 独立批次间允许穿模，但蛇头仍需避开所有批次（蛇不是匹配组，不做穿模）。</summary>
         public bool IsExtractingOccupied(int col, int row)
         {
-            for (int i = 0; i < _extracting.Count; i++)
+            for (int b = 0; b < _batches.Count; b++)
             {
-                var st = _extracting[i];
-                if (st == null || st.exiting)
-                    continue;
-                if (st.col == col && st.row == row)
-                    return true;
+                var batch = _batches[b];
+                for (int i = 0; i < batch.extracting.Count; i++)
+                {
+                    var st = batch.extracting[i];
+                    if (st == null || st.exiting)
+                        continue;
+                    if (st.col == col && st.row == row)
+                        return true;
+                }
             }
             return false;
         }
@@ -167,28 +194,33 @@ namespace CrowdMatch
         public string DescribeExtraction()
         {
             var sb = new System.Text.StringBuilder();
-            sb.Append($"寻路块 n={_extracting.Count}");
-            for (int i = 0; i < _extracting.Count; i++)
+            sb.Append($"批次 n={_batches.Count}");
+            for (int b = 0; b < _batches.Count; b++)
             {
-                var st = _extracting[i];
-                if (st == null)
-                    continue;
-                string name = st.item != null ? st.item.name : "null";
-                string state;
-                if (st.exiting)
+                var batch = _batches[b];
+                sb.Append($" | 批次#{b} 寻路块 n={batch.extracting.Count}");
+                for (int i = 0; i < batch.extracting.Count; i++)
                 {
-                    state = $"离场({st.col},{st.row})";
+                    var st = batch.extracting[i];
+                    if (st == null)
+                        continue;
+                    string name = st.item != null ? st.item.name : "null";
+                    string state;
+                    if (st.exiting)
+                    {
+                        state = $"离场({st.col},{st.row})";
+                    }
+                    else if (st.moving)
+                    {
+                        state = $"离开({st.fromCol},{st.fromRow})->进入({st.col},{st.row})";
+                    }
+                    else
+                    {
+                        string target = st.pendingNext.x < 0 ? "停" : $"->({st.pendingNext.x},{st.pendingNext.y})";
+                        state = $"停({st.col},{st.row}){target}";
+                    }
+                    sb.Append($" | #{i} {name} {state} wait={st.waitCount}");
                 }
-                else if (st.moving)
-                {
-                    state = $"离开({st.fromCol},{st.fromRow})->进入({st.col},{st.row})";
-                }
-                else
-                {
-                    string target = st.pendingNext.x < 0 ? "停" : $"->({st.pendingNext.x},{st.pendingNext.y})";
-                    state = $"停({st.col},{st.row}){target}";
-                }
-                sb.Append($" | #{i} {name} {state} wait={st.waitCount}");
             }
             return sb.ToString();
         }
@@ -216,9 +248,11 @@ namespace CrowdMatch
                 return;
 
             _extractGroup = group;
-            _matchedOccupied = new bool[group.columns, group.TotalRows];
             _extractTickInterval = group.CellSizeZ / Mathf.Max(0.0001f, extractSpeed);
-            _extractTickTimer = 0f;
+
+            var batch = new Batch();
+            batch.matchedOccupied = new bool[group.columns, group.TotalRows];
+            batch.tickTimer = 0f;
 
             foreach (var item in matched)
             {
@@ -233,25 +267,35 @@ namespace CrowdMatch
                 if (!group.IsInRange(item.gridX, item.gridZ))
                     continue;
 
-                _matchedOccupied[item.gridX, item.gridZ] = true;
-                _extracting.Add(new ExtractState
+                batch.matchedOccupied[item.gridX, item.gridZ] = true;
+                batch.extracting.Add(new ExtractState
                 {
                     item = item,
                     col = item.gridX,
                     row = item.gridZ,
                 });
             }
+
+            // 防御：整批像素都不在网格范围内（应罕见），则不加入批次
+            if (batch.extracting.Count == 0)
+                return;
+
+            _batches.Add(batch);
         }
 
         /// <summary>清空缓冲区状态并销毁提取中 / 物理阶段的像素（供重载关卡时清理）。</summary>
         public void ResetAll()
         {
-            foreach (var st in _extracting)
+            for (int b = 0; b < _batches.Count; b++)
             {
-                if (st != null && st.item != null)
-                    Destroy(st.item.gameObject);
+                var batch = _batches[b];
+                foreach (var st in batch.extracting)
+                {
+                    if (st != null && st.item != null)
+                        Destroy(st.item.gameObject);
+                }
             }
-            _extracting.Clear();
+            _batches.Clear();
 
             foreach (var p in _physical)
             {
@@ -261,7 +305,6 @@ namespace CrowdMatch
             _physical.Clear();
 
             _extractGroup = null;
-            _matchedOccupied = null;
             _lastReleaseTime = float.NegativeInfinity;
         }
 
@@ -321,101 +364,113 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>提取阶段：推进退出动画、网格内平滑动画，并按 tick 触发并行 sweep。</summary>
+        /// <summary>提取阶段：推进退出动画、网格内平滑动画，并按 tick 触发并行 sweep。
+        /// 每个批次独立推进：各自的退出移动、各自的网格动画、各自的 sweep 节拍，互不阻塞（组间穿模）。</summary>
         private void StepExtracting()
         {
-            if (_extracting.Count == 0)
+            if (_batches.Count == 0)
                 return;
 
             float dt = Time.deltaTime;
 
             RefreshGeometry(out Vector3 entrance, out _, out Vector3 axis, out Vector3 perp, out _);
 
-            // 1. 已离开网格的像素：连续匀速移向入口边落位点；同一列排队（前不追尾），
-            //    一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
-            var exiting = new List<ExtractState>(_extracting.Count);
-            for (int i = 0; i < _extracting.Count; i++)
+            for (int b = _batches.Count - 1; b >= 0; b--)
             {
-                var st = _extracting[i];
-                if (!st.exiting)
-                    continue;
+                var batch = _batches[b];
 
-                if (st.item == null)
+                // 1. 已离开网格的像素：连续匀速移向入口边落位点；同一列排队（前不追尾），
+                //    一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
+                var exiting = new List<ExtractState>(batch.extracting.Count);
+                for (int i = 0; i < batch.extracting.Count; i++)
                 {
-                    _extracting.RemoveAt(i);
-                    i--;
-                    continue;
-                }
-                exiting.Add(st);
-            }
+                    var st = batch.extracting[i];
+                    if (!st.exiting)
+                        continue;
 
-            foreach (var st in exiting)
-            {
-                Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
-                Vector3 moveTarget = ApplyEntryQueue(st, target, entrance, axis, perp, exiting);
-                MoveToward(st, moveTarget);
-
-                bool reachedTarget = XZDistance(st.item.transform.position, target) <= ArriveEpsilon;
-                bool enteredRange = physicalEntryDepth > 0f
-                    && Vector3.Dot(st.item.transform.position - entrance, axis) >= -physicalEntryDepth;
-                if (reachedTarget || enteredRange)
-                {
-                    _extracting.Remove(st);
-                    EnterPhysical(st.item);
-                }
-            }
-
-            // 2. 网格内移动动画推进（格子到格子平滑插值，时长 = tick 间隔）
-            for (int i = 0; i < _extracting.Count; i++)
-            {
-                var st = _extracting[i];
-                if (st.exiting || !st.moving)
-                    continue;
-                if (st.item == null)
-                {
-                    _extracting.RemoveAt(i);
-                    i--;
-                    continue;
+                    if (st.item == null)
+                    {
+                        batch.extracting.RemoveAt(i);
+                        i--;
+                        continue;
+                    }
+                    exiting.Add(st);
                 }
 
-                st.animT += dt / _extractTickInterval;
-                if (st.animT >= 1f)
+                foreach (var st in exiting)
                 {
-                    st.animT = 1f;
-                    st.moving = false;
+                    Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
+                    Vector3 moveTarget = ApplyEntryQueue(st, target, entrance, axis, perp, exiting);
+                    MoveToward(st, moveTarget);
+
+                    bool reachedTarget = XZDistance(st.item.transform.position, target) <= ArriveEpsilon;
+                    bool enteredRange = physicalEntryDepth > 0f
+                        && Vector3.Dot(st.item.transform.position - entrance, axis) >= -physicalEntryDepth;
+                    if (reachedTarget || enteredRange)
+                    {
+                        batch.extracting.Remove(st);
+                        EnterPhysical(st.item);
+                    }
                 }
-                st.item.transform.position = Vector3.Lerp(st.animFrom, st.animTo, st.animT);
 
-                // 网格内移动：z 正方向匀速朝向移动方向（animFrom → animTo）
-                RotateToward(st.item, st.animTo - st.animFrom);
+                // 2. 网格内移动动画推进（格子到格子平滑插值，时长 = tick 间隔）
+                for (int i = 0; i < batch.extracting.Count; i++)
+                {
+                    var st = batch.extracting[i];
+                    if (st.exiting || !st.moving)
+                        continue;
+                    if (st.item == null)
+                    {
+                        batch.extracting.RemoveAt(i);
+                        i--;
+                        continue;
+                    }
+
+                    st.animT += dt / _extractTickInterval;
+                    if (st.animT >= 1f)
+                    {
+                        st.animT = 1f;
+                        st.moving = false;
+                    }
+                    st.item.transform.position = Vector3.Lerp(st.animFrom, st.animTo, st.animT);
+
+                    // 网格内移动：z 正方向匀速朝向移动方向（animFrom → animTo）
+                    RotateToward(st.item, st.animTo - st.animFrom);
+                }
+
+                // 本批像素已全部离开网格 / 进入物理 → 移除批次，不再 sweep
+                if (batch.extracting.Count == 0)
+                {
+                    _batches.RemoveAt(b);
+                    continue;
+                }
+
+                // 3. 整体步进：仅当本批所有网格内移动动画都已结束（无 moving 像素）时才执行下一次并行 sweep。
+                //    保证状态上"完成上一步所有移动 → 才检查/执行下一步"，画面追平逻辑，避免视觉重合。
+                batch.tickTimer += dt;
+                if (batch.tickTimer >= _extractTickInterval && !HasMovingPixel(batch))
+                {
+                    // 动画与计时器同步归零：动画才是真正的节拍器（每段恰 interval 秒），
+                    // 用减法会把手门槛阻塞期间累积的超时带进下一周期，导致余量逐 tick 翻倍、推进变慢。
+                    batch.tickTimer = 0f;
+                    SweepOnce(batch);
+                }
             }
 
-            // 3. 整体步进：仅当上一波所有网格内移动动画都已结束（无 moving 像素）时才执行下一次并行 sweep。
-            //    保证状态上"完成上一步所有移动 → 才检查/执行下一步"，画面追平逻辑，避免视觉重合。
-            _extractTickTimer += dt;
-            if (_extractTickTimer >= _extractTickInterval && !HasMovingPixel())
-            {
-                // 动画与计时器同步归零：动画才是真正的节拍器（每段恰 interval 秒），
-                // 用减法会把手门槛阻塞期间累积的超时带进下一周期，导致余量逐 tick 翻倍、推进变慢。
-                _extractTickTimer = 0f;
-                SweepOnce();
-            }
-
-            // 4. 全部离开 → 清理
-            if (_extracting.Count == 0)
+            // 4. 全部批次离开 → 清理管道蛇形可通行标记
+            if (_batches.Count == 0)
             {
                 ClearExtractionWalkableFlags();
                 _extractGroup = null;
-                _matchedOccupied = null;
             }
         }
 
-        /// <summary>网格内是否仍有像素在播放格子到格子的移动动画（用于在动画结束后才触发下一次 sweep）。</summary>
-        private bool HasMovingPixel()
+        /// <summary>本批网格内是否仍有像素在播放格子到格子的移动动画（用于在动画结束后才触发下一次 sweep）。</summary>
+        private bool HasMovingPixel(Batch batch)
         {
-            for (int i = 0; i < _extracting.Count; i++)
+            for (int i = 0; i < batch.extracting.Count; i++)
             {
-                var st = _extracting[i];
+                var st = batch.extracting[i];
                 if (st != null && !st.exiting && st.moving)
                     return true;
             }
@@ -429,13 +484,13 @@ namespace CrowdMatch
         /// 高 wait 者必胜，从根上避免"高 wait 像素因排在前、被后腾出的空格旁的低 wait 像素挤掉"的饿死问题。
         /// 一格只被填一次（claimed 栅栏）、一像素只动一次（resolved 栅栏），结构性保证"一个空格只被一个占用"。
         /// </summary>
-        private void SweepOnce()
+        private void SweepOnce(Batch batch)
         {
             int cols = _extractGroup.columns;
             int rows = _extractGroup.TotalRows;
 
             // 重置本 tick 决策
-            foreach (var st in _extracting)
+            foreach (var st in batch.extracting)
             {
                 st.pendingExit = false;
                 st.pendingNext = new Vector2Int(-1, -1);
@@ -446,10 +501,10 @@ namespace CrowdMatch
             // 它只表达"该往哪走"的方向信息，不受本 tick 腾出/抢占影响，故每个 sweep 算一次即可。
             int[,] dist = ComputeExitDistance(cols, rows);
 
-            // 网格内像素：位置查找表（快照，逐 sweep 重建，与 _matchedOccupied 一致）+ 参与决策列表
+            // 网格内像素：位置查找表（快照，逐 sweep 重建，与 matchedOccupied 一致）+ 参与决策列表
             var stateAt = new ExtractState[cols, rows];
             var seeds = new List<ExtractState>();
-            foreach (var st in _extracting)
+            foreach (var st in batch.extracting)
             {
                 if (st.item == null || st.exiting)
                     continue;
@@ -475,7 +530,7 @@ namespace CrowdMatch
             });
             foreach (var st in seeds)
             {
-                if (CanExit(st.col, st.row, vacated, claimed))
+                if (CanExit(st.col, st.row, vacated, claimed, batch.matchedOccupied))
                 {
                     exits.Add(st);
                     st.resolved = true;
@@ -507,7 +562,7 @@ namespace CrowdMatch
             var frontier = new List<Vector2Int>();
             for (int c = 0; c < cols; c++)
                 for (int r = 0; r < rows; r++)
-                    if (!IsObstacle(c, r, vacated, claimed))
+                    if (!IsObstacle(c, r, vacated, claimed, batch.matchedOccupied))
                         frontier.Add(new Vector2Int(c, r));
 
             // 步骤 1..N：逐层传播 —— 每个可用格从相邻像素里挑 wait 最高者填入（空格找像素）。
@@ -560,7 +615,7 @@ namespace CrowdMatch
             }
 
             // 未解决的球：等待计数 +1（公平性：被挡得越久，下次越优先）
-            foreach (var st in _extracting)
+            foreach (var st in batch.extracting)
             {
                 if (st.item == null || st.exiting || st.resolved)
                     continue;
@@ -570,15 +625,15 @@ namespace CrowdMatch
             // 原子更新占用表 + 触发动画
             foreach (var st in exits)
             {
-                _matchedOccupied[st.col, st.row] = false;
+                batch.matchedOccupied[st.col, st.row] = false;
                 st.waitCount = 0;
                 st.moving = false;
                 st.exiting = true;
             }
             foreach (var st in movers)
             {
-                _matchedOccupied[st.col, st.row] = false;
-                _matchedOccupied[st.pendingNext.x, st.pendingNext.y] = true;
+                batch.matchedOccupied[st.col, st.row] = false;
+                batch.matchedOccupied[st.pendingNext.x, st.pendingNext.y] = true;
                 StartCellMove(st, st.pendingNext);
                 st.col = st.pendingNext.x;
                 st.row = st.pendingNext.y;
@@ -598,7 +653,7 @@ namespace CrowdMatch
         }
 
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
-        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed)
+        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied)
         {
             // 只有 row 小于「正在释放管道」轨迹占据的 row 最小值时才离场：
             // 提取球必须走到管道轨迹的最前排之前（row 更小）才算真正越过管道，方可离场。
@@ -611,14 +666,14 @@ namespace CrowdMatch
 
             for (int r = 0; r < row; r++)
             {
-                if (IsObstacle(col, r, vacated, claimed))
+                if (IsObstacle(col, r, vacated, claimed, matchedOccupied))
                     return false;
             }
             return true;
         }
 
-        /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的匹配球</summary>
-        private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed)
+        /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的本批匹配球</summary>
+        private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied)
         {
             if (_extractGroup.IsBlocked(col, row))
                 return true;
@@ -627,7 +682,7 @@ namespace CrowdMatch
                 return true;
             if (claimed[col, row])
                 return true;
-            if (_matchedOccupied[col, row] && !vacated[col, row])
+            if (matchedOccupied[col, row] && !vacated[col, row])
                 return true;
             return false;
         }

@@ -54,6 +54,9 @@ namespace CrowdMatch
         /// <summary>运行时网格 [column, row]，row 0 为最前排</summary>
         [System.NonSerialized] public ContainerItem[,] grid;
 
+        /// <summary>正在上车（jump 或回退 lerp）尚未落定的像素计数。失败判定用它做「静止门槛」。</summary>
+        [System.NonSerialized] public int consumingCount;
+
         private void Start()
         {
             RebuildGrid();
@@ -219,14 +222,16 @@ namespace CrowdMatch
             bool isLast = container.Consume();
             if (isLast)
                 OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
+            consumingCount++;
             StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
         }
 
         private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast)
         {
             // 新上车表现：有空闲落点时由 ContainerItem 接管（挂落点 → DOLocalJump 到 0 → 弹性缩放），
-            // 最后一个上车像素弹回完成后触发出库；无空闲落点则回退到下面的旧 Lerp。
-            if (container != null && container.TryBoardPixel(pixel, isLast ? () => TryExitIfAtFront(container, col) : null))
+            // 每个上车像素弹回完成后触发 OnPixelConsumed（失败判定 + 出库）；无空闲落点则回退到下面的旧 Lerp。
+            System.Action onConsumed = () => OnPixelConsumed(container, col, isLast);
+            if (container != null && container.TryBoardPixel(pixel, onConsumed))
                 yield break;
 
             Vector3 start = pixel.transform.position;
@@ -248,8 +253,27 @@ namespace CrowdMatch
             GameData.ClearedPixelCount++;
             Destroy(pixel.gameObject);
 
+            onConsumed();
+        }
+
+        /// <summary>单个像素上车落定（jump 弹回完成 / 回退 lerp 完成）后的统一回调：递减上车计数 → 事件驱动失败判定 → 耗尽则尝试出库。</summary>
+        private void OnPixelConsumed(ContainerItem container, int col, bool isLast)
+        {
+            consumingCount = Mathf.Max(0, consumingCount - 1);
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.TryCheckFail();
             if (isLast)
-                TryExitIfAtFront(container, col);   // 前排且耗尽才出库；后排先等补位到前排
+                TryExitIfAtFront(container, col);
+        }
+
+        /// <summary>某车补位到新位置（roll 或 lerp 完成）后的统一回调：事件驱动失败判定 → 若已在前排且耗尽则尝试出库。</summary>
+        private void OnCarArrivedFront(ContainerItem item, int col)
+        {
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.TryCheckFail();
+            TryExitIfAtFront(item, col);
         }
 
         /// <summary>
@@ -320,7 +344,7 @@ namespace CrowdMatch
             if (item.TryStartRefillRoll(target, refillSpeed, () =>
             {
                 item.isRefilling = false;
-                TryExitIfAtFront(item, col);
+                OnCarArrivedFront(item, col);
             }))
                 yield break;
 
@@ -341,12 +365,13 @@ namespace CrowdMatch
             item.isRefilling = false;
 
             // 补位到前排后，若该车已在后方等满（容量耗尽），立即启动出库
-            TryExitIfAtFront(item, col);
+            OnCarArrivedFront(item, col);
         }
 
         /// <summary>清空所有 ContainerItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
         public void ClearContainers()
         {
+            consumingCount = 0;
             var items = GetComponentsInChildren<ContainerItem>();
             for (int i = items.Length - 1; i >= 0; i--)
             {
@@ -394,6 +419,28 @@ namespace CrowdMatch
                 if (FindMatchableInColumn(col, colorId) != null)
                     return true;
             }
+            return false;
+        }
+
+        /// <summary>
+        /// 是否存在「已开启匹配但尚未抵达前排」的车（含正在补位移动的车）。
+        /// 判定 = 存在 isRefilling 的车，或存在「非前排且盖子已打开」的车。
+        /// 说明：RefillColumn 在补位开始时就把 gridZ 同步置 0，而 lidOpened 在 ConsumePixel（OpenRearLid）时就已锁存，
+        /// 因此该条件在整个「上车 → 弹回 → 出库动画 → 补位移动」区间内恒为 true，直到车真正落定前排才释放，杜绝空白时间窗。
+        /// </summary>
+        public bool HasPendingFrontTransition()
+        {
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    var it = grid[col, row];
+                    if (it == null)
+                        continue;
+                    if (it.isRefilling)
+                        return true;
+                    if (row >= 1 && it.lidOpened)
+                        return true;
+                }
             return false;
         }
     }

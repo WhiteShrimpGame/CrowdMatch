@@ -258,9 +258,9 @@ namespace CrowdMatch
 
         /// <summary>
         /// 尝试上车：选一个空闲落点、DOLocalJump 到 0 点、随后触发弹性缩放。
-        /// 无空闲落点返回 false（调用方回退旧 Lerp）。onLastComplete 在「最后一个上车像素的弹性归位」后回调（供出库用）。
+        /// 无空闲落点返回 false（调用方回退旧 Lerp）。onBoarded 在「每个上车像素的弹性归位」后回调（供失败判定与出库用）。
         /// </summary>
-        public bool TryBoardPixel(PixelItem pixel, Action onLastComplete)
+        public bool TryBoardPixel(PixelItem pixel, Action onBoarded)
         {
             if (pixel == null)
                 return false;
@@ -268,7 +268,7 @@ namespace CrowdMatch
             if (pos == null)
                 return false;   // 无空闲落点，回退旧处理
             _boardingPixels.Add(pixel);   // 上车中（未落定）：侧倾时逐帧锁定其世界角度，避免侧倾旋转偏移跳跃表现
-            StartCoroutine(BoardRoutine(pixel, pos, onLastComplete));
+            StartCoroutine(BoardRoutine(pixel, pos, onBoarded));
             return true;
         }
 
@@ -285,7 +285,7 @@ namespace CrowdMatch
             return null;
         }
 
-        private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onLastComplete)
+        private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onBoarded)
         {
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
 
@@ -310,7 +310,7 @@ namespace CrowdMatch
             PlayBoardElastic();                 // 触发弹性（叠加规则见 PlayBoardElastic）
             yield return WaitForElasticIdle();  // 等弹性归位
 
-            onLastComplete?.Invoke();
+            onBoarded?.Invoke();
         }
 
         /// <summary>弹性缩放实际作用的 scale（有弹性轴读/写弹性轴，否则退回车身 localScale）。</summary>
