@@ -39,6 +39,12 @@ namespace CrowdMatch
         [Tooltip("槽位格子 Prefab（可选）。为空则不显示格子。初始化时按 slotCount 实例化，沿轨迹按固定等距相位循环；格子不随追击相位平移，保持槽位原始排布稳定")]
         public GameObject cellPrefab;
 
+        [Tooltip("格子相对轨迹的 Y 偏移（世界单位）。轨迹定位在 y=0，正值抬高格子")]
+        public float cellYOffset = 0f;
+
+        [Tooltip("是否锁定格子的 Y 旋转（偏航归零，只保留轨迹俯仰/侧倾）。有方向性的格子常需锁 Y 保持朝向稳定")]
+        public bool lockCellYRotation = false;
+
         /// <summary>槽位数组，null 表示空槽。/ Slot array, null = empty.</summary>
         private IConveyorItem[] slots;
 
@@ -278,8 +284,14 @@ namespace CrowdMatch
 
                 // 固定相位：格子始终待在初始等距槽位处，不跟随追击相位平移
                 float samplePhase = (offset + (float)i / slotCount) % 1f;
-                cells[i].position = path.GetGlobalPosition(samplePhase * totalLength);
-                cells[i].rotation = Quaternion.Euler(path.GetGlobalEulerAngles(samplePhase * totalLength));
+                Vector3 cellPos = path.GetGlobalPosition(samplePhase * totalLength);
+                cellPos.y += cellYOffset;
+                cells[i].position = cellPos;
+
+                Vector3 cellEuler = path.GetGlobalEulerAngles(samplePhase * totalLength);
+                if (lockCellYRotation)
+                    cellEuler.y = 0f;   // 锁 Y 旋转：偏航归零，只保留轨迹俯仰/侧倾
+                cells[i].rotation = Quaternion.Euler(cellEuler);
             }
         }
 
