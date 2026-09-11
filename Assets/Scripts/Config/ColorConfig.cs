@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -18,6 +19,12 @@ namespace CrowdMatch
         [Tooltip("车内部材质，按颜色 ID 索引（用于 ContainerItem 替换项中的「车内部材质」）")]
         public Material[] interiorMaterials = new Material[0];
 
+        [Tooltip("按颜色 ID 索引的字体颜色（用于管道剩余波次数字等 UI 文本）")]
+        public List<Color> textColors = new List<Color>();
+
+        [Tooltip("按颜色 ID 索引的字体描边颜色（用于管道剩余波次数字等 UI 文本描边）")]
+        public List<Color> textOutlineColors = new List<Color>();
+
         /// <summary>材质数量（即颜色总数）</summary>
         public int Count => materials != null ? materials.Length : 0;
 
@@ -35,6 +42,19 @@ namespace CrowdMatch
         {
             var mat = GetMaterial(colorId);
             return mat != null ? mat.color : Color.magenta;
+        }
+
+        /// <summary>根据颜色 ID 返回字体颜色，越界返回白色</summary>
+        public Color GetTextColor(int colorId) => GetColorFrom(textColors, colorId, Color.white);
+
+        /// <summary>根据颜色 ID 返回字体描边颜色，越界返回黑色</summary>
+        public Color GetTextOutlineColor(int colorId) => GetColorFrom(textOutlineColors, colorId, Color.black);
+
+        private static Color GetColorFrom(List<Color> arr, int colorId, Color fallback)
+        {
+            if (arr == null || colorId < 0 || colorId >= arr.Count)
+                return fallback;
+            return arr[colorId];
         }
 
         private static Material GetMaterialFrom(Material[] arr, int colorId)

@@ -493,9 +493,12 @@ MonoBehaviour:
   cycleTime: 6
   speed: 1.5
   slotCount: 30
+  cellPrefab: {fileID: 2575043199601490989, guid: 32373529656aa3345b2cc74fbe01d607, type: 3}
+  cellYOffset: 0.12
+  lockCellYRotation: 0
   entryGate: {fileID: 1467064619}
   catchUpEnabled: 1
-  catchUpInterval: 0.2
+  catchUpInterval: 0.4
 --- !u!4 &782126358
 Transform:
   m_ObjectHideFlags: 0
@@ -784,8 +787,14 @@ MonoBehaviour:
   maxRunLength: 8
   fillToMultipleOf3: 1
   pixelPrefab: {fileID: 4974077334147149108, guid: 04cb2981992b05b49b540b2987e11453, type: 3}
-  wallPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  wallCornerPrefab: {fileID: 5140324378455301464, guid: 29c70f9e4f8c4f342b4fce2f133f6ae7, type: 3}
+  wallEdgePrefab: {fileID: 8348510600567084498, guid: 4907a9683a5c19646856c948023faf26, type: 3}
+  wallEndPrefab: {fileID: 1259992199522606913, guid: d76de89cd46056749b9cb5a5d460796c, type: 3}
+  wallSinglePrefab: {fileID: 3046988623496833886, guid: 9dc31b516109b7d448491e4adef104db, type: 3}
   pipePrefab: {fileID: 100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+  boxCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  boxEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  boxCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
 --- !u!4 &882082745
 Transform:
   m_ObjectHideFlags: 0
@@ -1235,6 +1244,9 @@ MonoBehaviour:
   conveyorZone: {fileID: 1582382721}
   recordMode: 0
   recordOutputDir: 
+  reviveKeepBeltCount: 10
+  overflowPendingLimit: 9
+  debugClickLog: 1
   gatheredItems: []
 --- !u!4 &1669523324
 Transform:

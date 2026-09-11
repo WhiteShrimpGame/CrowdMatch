@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -80,6 +81,11 @@ namespace CrowdMatch
             }
 
             StartCoroutine(SettleRoutine(pixel, slotIndex));
+
+            // 关键事件点：有小人进入传送带 → 尝试失败判定
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.TryCheckFail();
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
@@ -195,6 +201,33 @@ namespace CrowdMatch
                 belt.ClearSlot(i);
                 Destroy(pixel.gameObject);
             }
+        }
+
+        /// <summary>
+        /// 复活用：保留前 keepCount 个占用槽位的像素，其余槽位取下（解绑 carrier、保持世界位置）并返回。
+        /// 返回的像素已无父物体，供调用方直接匹配到后排车。
+        /// </summary>
+        public List<PixelItem> DrainBeltKeep(int keepCount)
+        {
+            var removed = new List<PixelItem>();
+            if (belt == null)
+                return removed;
+
+            var occupied = new List<int>();
+            for (int i = 0; i < belt.slotCount; i++)
+                if (belt.GetItem(i) != null)
+                    occupied.Add(i);
+
+            int keep = Mathf.Clamp(keepCount, 0, occupied.Count);
+            for (int k = keep; k < occupied.Count; k++)
+            {
+                int slot = occupied[k];
+                var pixel = belt.GetItem(slot) as PixelItem;
+                if (pixel != null)
+                    removed.Add(pixel);
+                belt.ClearSlot(slot);
+            }
+            return removed;
         }
     }
 }

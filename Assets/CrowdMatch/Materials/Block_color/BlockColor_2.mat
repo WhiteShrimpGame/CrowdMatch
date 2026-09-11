@@ -123,7 +123,7 @@ Material:
     - _OutlinePixelSizeType: 1
     - _OutlineTextureLOD: 5
     - _OutlineTextureType: 0
-    - _OutlineWidth: 3
+    - _OutlineWidth: 4
     - _Parallax: 0.02
     - _RampBands: 4
     - _RampBandsSmoothing: 0.1
@@ -136,14 +136,14 @@ Material:
     - _ReflectionMapType: 0
     - _ReflectionSmoothness: 1
     - _RenderingMode: 0
-    - _RimMax: 0
-    - _RimMin: 0.02
+    - _RimMax: 0.25
+    - _RimMin: 0.73
     - _ShadowColorLightAtten: 1
     - _SingleIndirectColor: 0
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SpecularMapType: 0
-    - _SpecularRoughness: 0.12
+    - _SpecularRoughness: 0.08
     - _SpecularToonSize: 0.033
     - _SpecularToonSmoothness: 0.747
     - _SpecularType: 0
@@ -170,7 +170,7 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _HColor: {r: 1, g: 1, b: 1, a: 1}
     - _MatCapColor: {r: 1, g: 0.58766544, b: 0.27843142, a: 1}
-    - _OutlineColor: {r: 0.3773585, g: 0.25508657, b: 0, a: 1}
+    - _OutlineColor: {r: 1, g: 1, b: 1, a: 1}
     - _ReflectionColor: {r: 1, g: 0.69823784, b: 0.47450978, a: 1}
     - _RimColor: {r: 0.509434, g: 0.509434, b: 0.509434, a: 0.5}
     - _SColor: {r: 0, g: 0, b: 0, a: 1}

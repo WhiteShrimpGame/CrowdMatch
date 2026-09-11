@@ -11,7 +11,7 @@ namespace CrowdMatch
     /// 轨迹端点使用网格坐标（Vector2：x = 列 col，y = 行 row），首点为管道自身所在格；
     /// 轨道 = 折线经过的所有格（去首点、含各段中间格），像素布满整条路径而非仅端点。
     /// 开局不立即生成：当轨道格上的像素全部移走后，管道生成下一波（colors[waveIndex]）；
-    /// 每个像素从管道格以 scale=0 生成，沿轨道蛇形前进并平滑缩放到 unitSize；colors 耗尽后停止。
+    /// 每个像素从管道格以 scale=0 生成，y 从 Body Mesh 高度 InQuad 降到标准高度，沿轨道蛇形前进并平滑缩放到 unitSize；colors 耗尽后停止。
     /// </summary>
     public class PipeItem : MonoBehaviour
     {
@@ -37,8 +37,17 @@ namespace CrowdMatch
         public bool pauseOnLog = false;
 
         [Header("显示")]
+        [Tooltip("管道本体网格 Transform（其本地 +Z 将朝向 points[0]→points[1] 方向）；留空自动取子物体首个带 MeshFilter 的物体")]
+        public Transform bodyMesh;
+
+        [Tooltip("颜色耗尽（无剩余波次）时隐藏「下一颜色指示器」的 mesh 物体（仅当存在颜色 mesh 时生效）")]
+        public bool hideColorMeshWhenEmpty;
+
         [Tooltip("剩余波次数字（UI Text，留空自动从子物体查找）")]
         public Text waveCountText;
+
+        [Tooltip("勾选后，剩余波次数字按 ColorConfig 的字体颜色 / 描边颜色显示（按下一波颜色 ID 索引）")]
+        public bool useConfigTextColor;
 
         [Tooltip("显示下一颜色的 Renderer + 材质槽位列表；空则不显示")]
         public List<NextColorIndicator> nextColorIndicators = new List<NextColorIndicator>();
@@ -211,8 +220,18 @@ namespace CrowdMatch
         {
             if (!Application.isPlaying)
                 return;
-            UpdateDisplay();
+            OrientBody();
+            ApplyNextColorForWave();
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            // 编辑器里改 points 后实时刷新朝向（Play 模式交给 Start，避免运行时误触）
+            if (!Application.isPlaying)
+                OrientBody();
+        }
+#endif
 
         private void Update()
         {
@@ -290,12 +309,12 @@ namespace CrowdMatch
         {
             _spawning = true;
             _waveIndex++;
-            UpdateDisplay();
 
             var track = TrackCells();
             int n = track.Count;
             if (n == 0)
             {
+                ApplyNextColorForWave();   // 无轨道：立即切换下一颜色材质（或隐藏）
                 snakeCells.Clear();
                 _spawning = false;
                 yield break;
@@ -339,6 +358,8 @@ namespace CrowdMatch
                 yield return WaitUntilCellFree(path[s - 1], headDest, s);
 
                 int launched = Mathf.Min(s, items.Count);
+                if (s == items.Count)   // 最后一个 pixel 开始释放：此时切换下一颜色材质（含耗尽隐藏颜色 mesh）
+                    ApplyNextColorForWave();
                 int active = launched;
                 for (int p = 0; p < launched; p++)
                 {
@@ -394,7 +415,10 @@ namespace CrowdMatch
             return item;
         }
 
-        /// <summary>单个像素做一次格子到格子的平滑移动；首段（自管道格出发）同时 scale 0 → unitSize。</summary>
+        /// <summary>
+        /// 单个像素做一次格子到格子的平滑移动；首段（自管道格出发）同时 scale 0 → unitSize，
+        /// 且 y 从 Body Mesh 高度 InQuad 降到标准 y（0）。
+        /// </summary>
         private IEnumerator MoveCell(PixelItem item, Vector2Int fromCell, Vector2Int toCell, float dur, Action onDone)
         {
             var g = Group;
@@ -407,6 +431,15 @@ namespace CrowdMatch
             Vector3 from = g.GetLocalPosition(fromCell.x, fromCell.y);
             Vector3 to = g.GetLocalPosition(toCell.x, toCell.y);
             bool firstSegment = fromCell == GetPipeCell(points);
+
+            // 首段：像素自 Body Mesh 的高度出发（scale=0 时不可见），随前进 InQuad 降到标准 y=0。
+            float spawnY = 0f;
+            if (firstSegment)
+            {
+                spawnY = GetBodyMeshLocalY();
+                if (item.transform != null)
+                    item.transform.localPosition = new Vector3(from.x, spawnY, from.z);
+            }
 
             float t = 0f;
             while (t < dur)
@@ -424,9 +457,14 @@ namespace CrowdMatch
                 }
                 t += Time.deltaTime;
                 float k = Mathf.Clamp01(t / dur);
-                item.transform.localPosition = Vector3.Lerp(from, to, k);
+
+                Vector3 pos = Vector3.Lerp(from, to, k);
                 if (firstSegment)
+                {
+                    pos.y = spawnY * (1f - k * k);              // InQuad：自 spawnY 平滑降到 0
                     item.transform.localScale = Vector3.one * g.unitSize * k;
+                }
+                item.transform.localPosition = pos;
                 yield return null;
             }
 
@@ -436,6 +474,64 @@ namespace CrowdMatch
                 item.transform.localScale = Vector3.one * g.unitSize;
             }
             onDone?.Invoke();
+        }
+
+        /// <summary>
+        /// 把管道本体网格的本地 +Z 转向 points[0]→points[1] 的方向（世界方向换算到其父物体局部空间）。
+        /// bodyMesh 留空时自动取子物体首个带 MeshFilter 的物体（排除「下一颜色指示器」的 Renderer）。
+        /// </summary>
+        public void OrientBody()
+        {
+            var g = Group;
+            if (g == null || points == null || points.Count < 2)
+                return;
+
+            Transform target = bodyMesh != null ? bodyMesh : FindBodyMesh();
+            if (target == null)
+                return;
+
+            Vector2Int ca = ToCell(points[0]);
+            Vector2Int cb = ToCell(points[1]);
+            Vector3 worldDir = g.GetWorldPosition(cb.x, cb.y) - g.GetWorldPosition(ca.x, ca.y);
+            if (worldDir.sqrMagnitude < 0.0001f)
+                return;
+
+            Vector3 localDir = target.parent != null ? target.parent.InverseTransformDirection(worldDir) : worldDir;
+            target.localRotation = Quaternion.LookRotation(localDir.normalized);
+        }
+
+        private Transform FindBodyMesh()
+        {
+            foreach (var f in GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (f == null || f.transform == transform)
+                    continue;
+                bool isIndicator = false;
+                if (nextColorIndicators != null)
+                {
+                    foreach (var ind in nextColorIndicators)
+                    {
+                        if (ind != null && ind.renderer != null && ind.renderer.transform == f.transform)
+                        { isIndicator = true; break; }
+                    }
+                }
+                if (isIndicator)
+                    continue;
+                return f.transform;
+            }
+            return null;
+        }
+
+        /// <summary>Body Mesh 在 PixelGroup 局部空间下的 Y（像素自管道生成的初始高度）；无 Body Mesh 时返回 0。</summary>
+        private float GetBodyMeshLocalY()
+        {
+            var g = Group;
+            if (g == null)
+                return 0f;
+            var body = bodyMesh != null ? bodyMesh : FindBodyMesh();
+            if (body == null)
+                return 0f;
+            return g.transform.InverseTransformPoint(body.position).y;
         }
 
         private void UpdateDisplay()
@@ -448,6 +544,7 @@ namespace CrowdMatch
                 {
                     waveCountText.gameObject.SetActive(true);
                     waveCountText.text = (colors.Count - _waveIndex).ToString();
+                    ApplyTextColor(colors[_waveIndex]);
                 }
                 else
                 {
@@ -456,8 +553,33 @@ namespace CrowdMatch
                 }
             }
 
+        }
+
+        /// <summary>最后一个 pixel 开始释放时的统一处理：更新剩余波次数字（含字色/描边与隐藏）+ 切换下一颜色材质（耗尽隐藏颜色 mesh）。</summary>
+        private void ApplyNextColorForWave()
+        {
+            UpdateDisplay();
+            bool hasNext = _waveIndex < colors.Count;
             int nextColor = hasNext ? colors[_waveIndex] : -1;
             ApplyNextColor(nextColor);
+        }
+
+        /// <summary>按颜色 ID 应用剩余波次数字的字体颜色与描边颜色（useConfigTextColor 勾选时）。</summary>
+        private void ApplyTextColor(int colorId)
+        {
+            if (!useConfigTextColor || waveCountText == null)
+                return;
+
+            var config = GameManager.Instance != null ? GameManager.Instance.colorConfig : null;
+            if (config == null)
+                return;
+
+            waveCountText.color = config.GetTextColor(colorId);
+
+            var outline = waveCountText.GetComponent<Outline>();
+            if (outline == null)
+                outline = waveCountText.gameObject.AddComponent<Outline>();
+            outline.effectColor = config.GetTextOutlineColor(colorId);
         }
 
         private void ApplyNextColor(int colorId)
@@ -485,6 +607,9 @@ namespace CrowdMatch
                         mats[ind.materialIndex] = ind.defaultMaterial;
                         ind.renderer.sharedMaterials = mats;
                     }
+                    // 可选：耗尽时隐藏颜色 mesh（不留上一波颜色视觉）
+                    if (hideColorMeshWhenEmpty)
+                        ind.renderer.gameObject.SetActive(false);
                     continue;
                 }
 
