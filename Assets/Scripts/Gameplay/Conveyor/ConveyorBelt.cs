@@ -36,8 +36,14 @@ namespace CrowdMatch
         [Tooltip("等距槽位数量（= 传送带总容量）/ Number of evenly-spaced slots (= total capacity)")]
         public int slotCount = 12;
 
+        [Tooltip("槽位格子 Prefab（可选）。为空则不显示格子。初始化时按 slotCount 实例化，沿轨迹按固定等距相位循环；格子不随追击相位平移，保持槽位原始排布稳定")]
+        public GameObject cellPrefab;
+
         /// <summary>槽位数组，null 表示空槽。/ Slot array, null = empty.</summary>
         private IConveyorItem[] slots;
+
+        /// <summary>每个槽位的格子（belt 子物体）。每帧按固定相位 i/slotCount 定位，与乘员/追击解耦。</summary>
+        private Transform[] cells;
 
         /// <summary>每个槽位的承载物（belt 子物体，scale=1）。传送带每帧写其世界位置，乘员作为其子物体被带着走。</summary>
         private Transform[] carriers;
@@ -111,6 +117,7 @@ namespace CrowdMatch
         {
             slots = new IConveyorItem[slotCount];
             CreateCarriers();
+            CreateCells();
             if (path != null)
             {
                 path.InitializePaths();
@@ -149,6 +156,30 @@ namespace CrowdMatch
             }
         }
 
+        /// <summary>创建每个槽位的格子（清理旧的，避免重复 Initialize 时堆积）。格子为 belt 子物体，独立于 carrier。</summary>
+        private void CreateCells()
+        {
+            if (cells != null)
+            {
+                for (int i = 0; i < cells.Length; i++)
+                {
+                    if (cells[i] != null)
+                        Destroy(cells[i].gameObject);
+                }
+            }
+
+            cells = new Transform[slotCount];
+            if (cellPrefab == null)
+                return;
+
+            for (int i = 0; i < slotCount; i++)
+            {
+                var go = Instantiate(cellPrefab, transform, false);
+                go.name = "Cell_" + i;
+                cells[i] = go.transform;
+            }
+        }
+
         private void Start()
         {
             if (!_initialized)
@@ -166,6 +197,7 @@ namespace CrowdMatch
 
             Advance();
             ApplyPositions();
+            ApplyCellPositions();
             AdvanceCatchUp();
             CheckLeave();
         }
@@ -217,6 +249,37 @@ namespace CrowdMatch
                     }
                 }
                 _prevSlotX[i] = currX;
+            }
+        }
+
+        /// <summary>
+        /// 把每个槽位的格子定位到轨迹对应位置（固定等距相位 i/slotCount）。
+        /// 格子与乘员解耦：始终按初始等距相位循环，不随追击（_slotPhase 平移）而移动，
+        /// 从而在画面上保持槽位原始排布稳定；追击结束后乘员回到格子上，与格子自然对齐。
+        /// Positions each slot's visual cell on the path using the fixed evenly-spaced phase i/slotCount.
+        /// Cells are decoupled from occupants: they loop at the initial even spacing and never follow
+        /// catch-up phase shifts, so the slot layout stays stable on screen.
+        /// </summary>
+        private void ApplyCellPositions()
+        {
+            if (cells == null || cells.Length == 0)
+            {
+                return;
+            }
+
+            float totalLength = path.GetTotalPathLength();
+
+            for (int i = 0; i < cells.Length; i++)
+            {
+                if (cells[i] == null)
+                {
+                    continue;
+                }
+
+                // 固定相位：格子始终待在初始等距槽位处，不跟随追击相位平移
+                float samplePhase = (offset + (float)i / slotCount) % 1f;
+                cells[i].position = path.GetGlobalPosition(samplePhase * totalLength);
+                cells[i].rotation = Quaternion.Euler(path.GetGlobalEulerAngles(samplePhase * totalLength));
             }
         }
 
