@@ -46,6 +46,9 @@ namespace CrowdMatch
         [Tooltip("剩余波次数字（UI Text，留空自动从子物体查找）")]
         public Text waveCountText;
 
+        [Tooltip("勾选后，剩余波次数字按 ColorConfig 的字体颜色 / 描边颜色显示（按下一波颜色 ID 索引）")]
+        public bool useConfigTextColor;
+
         [Tooltip("显示下一颜色的 Renderer + 材质槽位列表；空则不显示")]
         public List<NextColorIndicator> nextColorIndicators = new List<NextColorIndicator>();
 
@@ -218,7 +221,7 @@ namespace CrowdMatch
             if (!Application.isPlaying)
                 return;
             OrientBody();
-            UpdateDisplay();
+            ApplyNextColorForWave();
         }
 
 #if UNITY_EDITOR
@@ -306,12 +309,12 @@ namespace CrowdMatch
         {
             _spawning = true;
             _waveIndex++;
-            UpdateDisplay();
 
             var track = TrackCells();
             int n = track.Count;
             if (n == 0)
             {
+                ApplyNextColorForWave();   // 无轨道：立即切换下一颜色材质（或隐藏）
                 snakeCells.Clear();
                 _spawning = false;
                 yield break;
@@ -355,6 +358,8 @@ namespace CrowdMatch
                 yield return WaitUntilCellFree(path[s - 1], headDest, s);
 
                 int launched = Mathf.Min(s, items.Count);
+                if (s == items.Count)   // 最后一个 pixel 开始释放：此时切换下一颜色材质（含耗尽隐藏颜色 mesh）
+                    ApplyNextColorForWave();
                 int active = launched;
                 for (int p = 0; p < launched; p++)
                 {
@@ -539,6 +544,7 @@ namespace CrowdMatch
                 {
                     waveCountText.gameObject.SetActive(true);
                     waveCountText.text = (colors.Count - _waveIndex).ToString();
+                    ApplyTextColor(colors[_waveIndex]);
                 }
                 else
                 {
@@ -547,8 +553,33 @@ namespace CrowdMatch
                 }
             }
 
+        }
+
+        /// <summary>最后一个 pixel 开始释放时的统一处理：更新剩余波次数字（含字色/描边与隐藏）+ 切换下一颜色材质（耗尽隐藏颜色 mesh）。</summary>
+        private void ApplyNextColorForWave()
+        {
+            UpdateDisplay();
+            bool hasNext = _waveIndex < colors.Count;
             int nextColor = hasNext ? colors[_waveIndex] : -1;
             ApplyNextColor(nextColor);
+        }
+
+        /// <summary>按颜色 ID 应用剩余波次数字的字体颜色与描边颜色（useConfigTextColor 勾选时）。</summary>
+        private void ApplyTextColor(int colorId)
+        {
+            if (!useConfigTextColor || waveCountText == null)
+                return;
+
+            var config = GameManager.Instance != null ? GameManager.Instance.colorConfig : null;
+            if (config == null)
+                return;
+
+            waveCountText.color = config.GetTextColor(colorId);
+
+            var outline = waveCountText.GetComponent<Outline>();
+            if (outline == null)
+                outline = waveCountText.gameObject.AddComponent<Outline>();
+            outline.effectColor = config.GetTextOutlineColor(colorId);
         }
 
         private void ApplyNextColor(int colorId)
