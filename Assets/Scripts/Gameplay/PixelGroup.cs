@@ -47,8 +47,17 @@ namespace CrowdMatch
         [Tooltip("PixelItem 预制体模板（Block），需自带 PixelItem 组件并配置好 renderers 列表")]
         public GameObject pixelPrefab;
 
-        [Tooltip("墙体像素块预制体模板（每个被墙体占据的格子会生成一个，作为 WallItem 的子物体，用于运行时可视化）")]
-        public GameObject wallPrefab;
+        [Tooltip("墙体角格预制体（占一格，转角处，可视觉溢出边界）")]
+        public GameObject wallCornerPrefab;
+
+        [Tooltip("墙体边格预制体（占一格，直段中间，可视觉溢出边界）")]
+        public GameObject wallEdgePrefab;
+
+        [Tooltip("墙体端点预制体（占一格，墙的端点，可视觉溢出边界）")]
+        public GameObject wallEndPrefab;
+
+        [Tooltip("墙体独立 1×1 预制体（占一格，无相邻墙格，可视觉溢出边界）")]
+        public GameObject wallSinglePrefab;
 
         [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
         public GameObject pipePrefab;
@@ -469,25 +478,36 @@ namespace CrowdMatch
             pipes = new List<PipeItem>();
         }
 
-        /// <summary>清空所有 BoxItem 及其隐藏 Pixel（供关卡重载时重建箱子）。隐藏 Pixel 是 PixelGroup 子物体，需单独销毁。</summary>
+        /// <summary>
+        /// 清空所有 BoxItem 及其隐藏 Pixel（供关卡重载时重建箱子）。
+        /// 隐藏 Pixel 是 PixelGroup 的子物体（gridX=gridZ=-1 且 inactive），hiddenPixels 列表在域重载后会清空，
+        /// 因此不依赖 b.hiddenPixels，而是按哨兵坐标扫描销毁所有隐藏 Pixel。
+        /// </summary>
         public void ClearBoxes()
         {
+            // 1. 先销毁所有隐藏 Pixel（哨兵坐标 gridX==-1 && gridZ==-1，inactive）。用 includeInactive 才能捡到。
+            var pixels = GetComponentsInChildren<PixelItem>(true);
+            for (int i = pixels.Length - 1; i >= 0; i--)
+            {
+                var p = pixels[i];
+                if (p == null)
+                    continue;
+                if (p.gridX != -1 || p.gridZ != -1)
+                    continue;
+                p.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(p.gameObject);
+                else
+                    DestroyImmediate(p.gameObject);
+            }
+
+            // 2. 再销毁所有箱子（视觉部件是箱子的子物体，随箱子一并销毁）。
             var items = GetComponentsInChildren<BoxItem>();
             for (int i = items.Length - 1; i >= 0; i--)
             {
                 var b = items[i];
                 if (b == null)
                     continue;
-                foreach (var p in b.hiddenPixels)
-                {
-                    if (p == null)
-                        continue;
-                    p.transform.SetParent(null, true);
-                    if (Application.isPlaying)
-                        Destroy(p.gameObject);
-                    else
-                        DestroyImmediate(p.gameObject);
-                }
                 b.transform.SetParent(null, true);
                 if (Application.isPlaying)
                     Destroy(b.gameObject);
@@ -501,35 +521,17 @@ namespace CrowdMatch
 
         /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
-        /// 并在其占据的每个网格格上生成 wallPrefab 像素块作为子物体（运行时可视化）。
+        /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
         /// </summary>
         public WallItem SpawnWall(IList<Vector2> points)
         {
-            if (wallPrefab == null)
-            {
-                Debug.LogError("[PixelGroup] wallPrefab 为空，无法生成墙体像素块（请挂 Block 预制体，用于填充墙体占据的格子）。");
-                return null;
-            }
-
             var go = new GameObject("Wall_" + (transform.childCount + 1));
             go.transform.SetParent(transform, false);
             go.transform.localPosition = Vector3.zero;
 
             var wall = go.AddComponent<WallItem>();
             wall.points = new List<Vector2>(points);
-
-            // 在墙体占据的每个格子上生成像素块作为子物体（运行时可视化）
-            foreach (var cell in wall.EnumerateOccupiedCells())
-            {
-                if (!IsInRange(cell.x, cell.y))
-                    continue;
-                var block = Instantiate(wallPrefab);
-                block.name = "WallBlock_" + cell.y + "_" + cell.x;
-                block.transform.SetParent(go.transform, false);
-                block.transform.localPosition = GetLocalPosition(cell.x, cell.y);
-                block.transform.localScale = Vector3.one * unitSize;
-            }
-
+            wall.BuildVisual(this);
             return wall;
         }
 
