@@ -285,6 +285,26 @@ namespace CrowdMatch
             return null;
         }
 
+        /// <summary>
+        /// 瞬移上车（无 jump）：选空闲落点，把像素挂到落点 0 点、复位姿态并作为乘客保留。
+        /// 用于复活深排匹配——像素已通过 DisappearWithPop 原地消失，这里只需「出现在目标位置」。
+        /// 无空闲落点返回 false（调用方销毁像素并计数）。
+        /// </summary>
+        public bool PlacePixelInstant(PixelItem pixel)
+        {
+            if (pixel == null)
+                return false;
+            var pos = AcquireFreePos();
+            if (pos == null)
+                return false;   // 无空闲落点，调用方销毁
+            pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
+            pixel.transform.localPosition = Vector3.zero;
+            pixel.transform.localRotation = Quaternion.identity;
+            pixel.SetWalking(false);            // 落定即 Idle（同 BoardRoutine）
+            pixel.SitDownExposeTarget();
+            return true;
+        }
+
         private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onBoarded)
         {
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）

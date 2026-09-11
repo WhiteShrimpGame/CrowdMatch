@@ -53,15 +53,16 @@ namespace CrowdMatch
                 return;
             if (pixelGroup != null)
             {
-                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, colorConfig);
+                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, colorConfig);
                 ApplyWalls(pixelGroup, data.walls);
                 ApplyPipes(pixelGroup, data.pipes);
+                ApplyBoxes(pixelGroup, data.boxes, colorConfig);
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -98,6 +99,21 @@ namespace CrowdMatch
                     if (p == null || p.points == null || p.points.Length < 1)
                         continue;
                     skipCells.Add(PipeItem.GetPipeCell(p.points));
+                }
+            }
+            if (boxes != null)
+            {
+                foreach (var b in boxes)
+                {
+                    if (b == null)
+                        continue;
+                    int cmin = Mathf.Max(0, Mathf.Min(b.colMin, b.colMax));
+                    int cmax = Mathf.Min(columns - 1, Mathf.Max(b.colMin, b.colMax));
+                    int rmin = Mathf.Max(0, Mathf.Min(b.rowMin, b.rowMax));
+                    int rmax = Mathf.Min(totalRows - 1, Mathf.Max(b.rowMin, b.rowMax));
+                    for (int r = rmin; r <= rmax; r++)
+                        for (int c = cmin; c <= cmax; c++)
+                            skipCells.Add(new Vector2Int(c, r));
                 }
             }
 
@@ -163,6 +179,32 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>
+        private static void ApplyBoxes(PixelGroup pg, LevelData.BoxData[] boxes, ColorConfig config)
+        {
+            pg.ClearBoxes();
+
+            if (boxes == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var b in boxes)
+            {
+                if (b == null)
+                    continue;
+                if (pg.SpawnBox(b, config) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个箱子。");
         }
 
         private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)

@@ -53,6 +53,14 @@ namespace CrowdMatch
         [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
         public string recordOutputDir = "";
 
+        [Header("复活")]
+        [Tooltip("复活时在传送带上保留的像素数量（其余溢出像素直接匹配后排车）")]
+        public int reviveKeepBeltCount = 10;
+
+        [Header("堆积")]
+        [Tooltip("堆积进入限制：累计 2 次后，未进传送带球数小于等于此值仍放行点击")]
+        public int overflowPendingLimit = 9;
+
         [Header("调试")]
         [Tooltip("开启后打印每次点击的判定结果（提取中忽略 / 射线未命中 / 无点击体 / 已移出网格 / 无法连通首排 / 命中成功），用于定位「起身时点击不到」")]
         public bool debugClickLog = true;
@@ -152,7 +160,7 @@ namespace CrowdMatch
             InitLevel(GameData.CurrentLevel);
         }
 
-        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem）。</summary>
+        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem，含箱子尚未释放的隐藏 Pixel）。</summary>
         private int CountPixels()
         {
             if (pixelGroup == null)
@@ -162,6 +170,12 @@ namespace CrowdMatch
             {
                 if (it != null && pixelGroup.IsInRange(it.gridX, it.gridZ))
                     n++;
+            }
+            // 箱子隐藏 Pixel 采用 active=false，GetComponentsInChildren 默认扫不到，需显式累加
+            foreach (var box in pixelGroup.GetComponentsInChildren<BoxItem>())
+            {
+                if (box != null)
+                    n += box.hiddenPixels.Count;
             }
             return n;
         }
@@ -202,7 +216,7 @@ namespace CrowdMatch
         /// <summary>
         /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排）。
         /// 判定在「静止且死锁」时成立：传送带满、无小车正在出库/补位/已开启匹配尚未抵达前排、
-        /// 无像素正在上车，且带上所有像素都没有同色可匹配容器。触发后等待 1.5s 重置当前关。
+        /// 无像素正在上车，且带上所有像素都没有同色可匹配容器。触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
         /// </summary>
         public void TryCheckFail()
         {
@@ -214,7 +228,7 @@ namespace CrowdMatch
             {
                 _transitioning = true;
                 GameState.GameFail();
-                Invoke(nameof(DoGameFail), 1.5f);
+                Invoke(nameof(DoRevive), 1.5f);
             }
         }
 
@@ -238,6 +252,10 @@ namespace CrowdMatch
             if (containerGroup.consumingCount > 0)
                 return false;
 
+            // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
+            if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
+                return false;
+
             var belt = conveyorZone.belt;
             for (int i = 0; i < belt.slotCount; i++)
             {
@@ -257,11 +275,48 @@ namespace CrowdMatch
                 gm.GameWin();
         }
 
-        private void DoGameFail()
+        /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
+        private void DoRevive()
         {
-            var gm = GameManager.Instance;
-            if (gm != null)
-                gm.GameFail();
+            Revive();
+            GameState.GameStart();   // 复活后回到游玩态，继续本关
+            _transitioning = false;
+        }
+
+        /// <summary>
+        /// 复活：保留 reviveKeepBeltCount 个像素在传送带上，其余像素（传送带溢出 + 缓冲区全部，含未上传送带的）
+        /// 直接匹配后排车（优先前排、同排列小）。无同色后排车的像素销毁并计入已清除，保持胜负计数一致。
+        /// </summary>
+        private void Revive()
+        {
+            if (conveyorZone == null || containerGroup == null)
+                return;
+
+            _overflowClickCount = 0;   // 复活清空堆积点击计数
+
+            // 1. 收集溢出像素：传送带溢出（保留 reviveKeepBeltCount 个）+ 缓冲区全部（含未上传送带的）
+            var overflow = new List<PixelItem>();
+            overflow.AddRange(conveyorZone.DrainBeltKeep(reviveKeepBeltCount));
+            if (crowdBuffer != null)
+                overflow.AddRange(crowdBuffer.DrainAllPixels());
+
+            // 2. 按颜色匹配车（前排优先，开盖 tween + 正常跳车）
+            var unmatched = containerGroup.MatchPixelsToCars(overflow);
+
+            // 3. 无同色后排车的像素：销毁并计入已清除
+            for (int i = 0; i < unmatched.Count; i++)
+            {
+                var p = unmatched[i];
+                if (p == null)
+                    continue;
+                GameData.ClearedPixelCount++;
+                Destroy(p.gameObject);
+            }
+
+            if (debugClickLog)
+                Debug.Log("[复活] 溢出=" + overflow.Count +
+                    " 已匹配后排=" + (overflow.Count - unmatched.Count) +
+                    " 无同色车销毁=" + unmatched.Count);
         }
 
         /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
@@ -385,7 +440,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 堆积进入限制：当「传送带上的像素 + 已点击但尚未进入传送带的像素」总数达到传送带容量上限后，
-        /// 开始计数玩家点击；累计 2 次后，后续点击直接忽略（返回 false）；总数回落到容量以下则重置计数。
+        /// 开始计数被放行的点击；累计 2 次后，若未进传送带球数 &lt;= 9 仍放行，否则阻止（被阻止的点击不计入）；
+        /// 总数回落到容量以下则重置计数。
         /// </summary>
         private bool PassOverflowClickGate()
         {
@@ -402,10 +458,16 @@ namespace CrowdMatch
                 _overflowClickCount = 0;   // 总数低于容量：重置累计次数
                 allow = true;
             }
+            else if (_overflowClickCount < 2)
+            {
+                _overflowClickCount++;   // 放行的堆积点击才计数（最多累计 2 次）
+                allow = true;
+            }
             else
             {
-                _overflowClickCount++;
-                allow = _overflowClickCount <= 2;   // 已达容量：累计 2 次后，本次（第 3 次起）忽略
+                // 次数已达 2：未进传送带球数 <= overflowPendingLimit 仍放行，否则阻止
+                int pending = crowdBuffer != null ? crowdBuffer.PendingCount : 0;
+                allow = pending <= overflowPendingLimit;
             }
 
             if (debugClickLog)
@@ -565,6 +627,9 @@ namespace CrowdMatch
 
             // 移除后刷新剩余像素的暴露（可点击）状态
             pixelGroup.RefreshExposed();
+
+            // 匹配移除后，检查并尝试开箱（箱子隐藏 Pixel 可能因此释放并再触发一次暴露刷新）
+            pixelGroup.TryOpenBoxes();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
