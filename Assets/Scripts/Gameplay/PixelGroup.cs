@@ -53,6 +53,15 @@ namespace CrowdMatch
         [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
         public GameObject pipePrefab;
 
+        [Tooltip("箱子角格预制体（占一格，可视觉溢出边界）")]
+        public GameObject boxCornerPrefab;
+
+        [Tooltip("箱子边格预制体（占一格，可视觉溢出边界）")]
+        public GameObject boxEdgePrefab;
+
+        [Tooltip("箱子中心格预制体（占一格，可视觉溢出边界）")]
+        public GameObject boxCenterPrefab;
+
         /// <summary>运行时网格 [column, row]，row 0 为最前排（+Z），row = TotalRows-1 为后排（-Z，含尾部）</summary>
         [System.NonSerialized] public PixelItem[,] grid;
 
@@ -62,8 +71,17 @@ namespace CrowdMatch
         /// <summary>管道占用表 [column, row]：true = 该格被 PipeItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] pipeGrid;
 
+        /// <summary>箱子占用表 [column, row]：true = 该格被未开箱的 BoxItem 占据（作为障碍参与暴露与寻路）。</summary>
+        [System.NonSerialized] public bool[,] boxGrid;
+
         /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
+
+        /// <summary>运行时收集到的所有箱子（重建 grid 时刷新；含已开箱的，用 opened 区分）。</summary>
+        [System.NonSerialized] public List<BoxItem> boxes = new List<BoxItem>();
+
+        /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
+        [System.NonSerialized] public int releasingBoxesCount;
 
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
@@ -85,7 +103,9 @@ namespace CrowdMatch
             grid = new PixelItem[columns, TotalRows];
             wallGrid = new bool[columns, TotalRows];
             pipeGrid = new bool[columns, TotalRows];
+            boxGrid = new bool[columns, TotalRows];
             pipes = new List<PipeItem>();
+            boxes = new List<BoxItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -117,6 +137,20 @@ namespace CrowdMatch
                 var cell = PipeItem.GetPipeCell(pipe.points);
                 if (IsInRange(cell.x, cell.y))
                     pipeGrid[cell.x, cell.y] = true;
+            }
+
+            foreach (var box in GetComponentsInChildren<BoxItem>())
+            {
+                if (box == null)
+                    continue;
+                box.group = this;
+                boxes.Add(box);
+                if (box.opened)
+                    continue;   // 已开箱不再占格
+                for (int r = box.rowMin; r <= box.rowMax; r++)
+                    for (int c = box.colMin; c <= box.colMax; c++)
+                        if (IsInRange(c, r))
+                            boxGrid[c, r] = true;
             }
         }
 
@@ -156,8 +190,18 @@ namespace CrowdMatch
             return pipeGrid[col, row];
         }
 
-        /// <summary>该格是否为障碍（墙体或管道）。</summary>
-        public bool IsBlocked(int col, int row) => IsWall(col, row) || IsPipe(col, row);
+        /// <summary>该格是否被未开箱的箱子占据。</summary>
+        public bool IsBox(int col, int row)
+        {
+            if (boxGrid == null)
+                return false;
+            if (!IsInRange(col, row))
+                return false;
+            return boxGrid[col, row];
+        }
+
+        /// <summary>该格是否为障碍（墙体、管道或未开箱的箱子）。</summary>
+        public bool IsBlocked(int col, int row) => IsWall(col, row) || IsPipe(col, row) || IsBox(col, row);
 
         /// <summary>该格是否为空（既无像素也无墙体/管道，可作为可通行 / 暴露判定依据）。grid 未重建时视为非空。</summary>
         public bool IsEmpty(int col, int row)
@@ -425,6 +469,36 @@ namespace CrowdMatch
             pipes = new List<PipeItem>();
         }
 
+        /// <summary>清空所有 BoxItem 及其隐藏 Pixel（供关卡重载时重建箱子）。隐藏 Pixel 是 PixelGroup 子物体，需单独销毁。</summary>
+        public void ClearBoxes()
+        {
+            var items = GetComponentsInChildren<BoxItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var b = items[i];
+                if (b == null)
+                    continue;
+                foreach (var p in b.hiddenPixels)
+                {
+                    if (p == null)
+                        continue;
+                    p.transform.SetParent(null, true);
+                    if (Application.isPlaying)
+                        Destroy(p.gameObject);
+                    else
+                        DestroyImmediate(p.gameObject);
+                }
+                b.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(b.gameObject);
+                else
+                    DestroyImmediate(b.gameObject);
+            }
+            boxGrid = new bool[columns, TotalRows];
+            boxes = new List<BoxItem>();
+            releasingBoxesCount = 0;
+        }
+
         /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
         /// 并在其占据的每个网格格上生成 wallPrefab 像素块作为子物体（运行时可视化）。
@@ -523,6 +597,120 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 在 PixelGroup 下动态创建一个 BoxItem（new GameObject + AddComponent），
+        /// 并把区域裁剪到网格内、拼接箱子视觉、生成隐藏 Pixel。视觉预制体取自 PixelGroup 字段。
+        /// </summary>
+        public BoxItem SpawnBox(LevelData.BoxData data, ColorConfig config)
+        {
+            if (data == null)
+                return null;
+            if (pixelPrefab == null)
+            {
+                Debug.LogError("[PixelGroup] pixelPrefab 为空，无法生成箱子隐藏 Pixel。");
+                return null;
+            }
+
+            int cmin = Mathf.Max(0, Mathf.Min(data.colMin, data.colMax));
+            int cmax = Mathf.Min(columns - 1, Mathf.Max(data.colMin, data.colMax));
+            int rmin = Mathf.Max(0, Mathf.Min(data.rowMin, data.rowMax));
+            int rmax = Mathf.Min(TotalRows - 1, Mathf.Max(data.rowMin, data.rowMax));
+
+            if (cmin > cmax || rmin > rmax)
+            {
+                Debug.LogWarning("[PixelGroup] 箱子区域完全越界，已忽略。");
+                return null;
+            }
+
+            var go = new GameObject("Box_" + rmin + "_" + cmin);
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+
+            var box = go.AddComponent<BoxItem>();
+            box.colMin = cmin;
+            box.rowMin = rmin;
+            box.colMax = cmax;
+            box.rowMax = rmax;
+            box.colorIds = data.colorIds != null ? (int[])data.colorIds.Clone() : new int[0];
+            box.jumpStartInterval = data.jumpStartInterval;
+            box.jumpSpawnYOffset = data.jumpSpawnYOffset;
+            box.cornerPrefab = boxCornerPrefab;
+            box.edgePrefab = boxEdgePrefab;
+            box.centerPrefab = boxCenterPrefab;
+
+            // 容量按周围环境自动计算（本体 + 相邻有效格，固定 8 方向），覆盖 JSON 里记录的 capacity。
+            box.capacity = BoxItem.ComputeCapacity(this, box.colMin, box.rowMin, box.colMax, box.rowMax);
+            if (box.colorIds.Length != box.capacity)
+                Debug.LogWarning("[PixelGroup] 箱子 " + go.name + " 的 colorIds 数量(" + box.colorIds.Length +
+                    ") 与自动计算的容量(" + box.capacity + ") 不一致，运行时按较小值处理。");
+
+            box.BuildVisual(this, config);
+
+            // 立即占用 boxGrid（供后续箱子的容量计算看到本箱本体）；ApplyBoxes 末尾的 RebuildGrid 会重建权威表。
+            if (boxGrid != null)
+            {
+                for (int r = box.rowMin; r <= box.rowMax; r++)
+                    for (int c = box.colMin; c <= box.colMax; c++)
+                        if (IsInRange(c, r))
+                            boxGrid[c, r] = true;
+            }
+
+            return box;
+        }
+
+        /// <summary>箱子开箱：清除其本体格占用，并登记「释放中」计数（由 BoxItem.TryOpen 调用）。</summary>
+        public void OnBoxOpened(BoxItem box)
+        {
+            if (box == null)
+                return;
+            for (int r = box.rowMin; r <= box.rowMax; r++)
+                for (int c = box.colMin; c <= box.colMax; c++)
+                    if (IsInRange(c, r))
+                        boxGrid[c, r] = false;
+            releasingBoxesCount++;
+        }
+
+        /// <summary>箱子释放完成（动画结束）：解除「释放中」计数（由 BoxItem 开箱动画收尾调用）。</summary>
+        public void OnBoxReleaseFinished(BoxItem box)
+        {
+            releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);
+        }
+
+        /// <summary>
+        /// 检查所有未开箱箱子并逐个尝试开箱（§7.3）：按 (rowMin 升序, colMin 升序) 串行判定，
+        /// 前箱占格影响后箱，不满足则跳过；动画并行。开箱产生的格变化统一刷新一次暴露。
+        /// </summary>
+        public void TryOpenBoxes()
+        {
+            if (boxes == null || boxes.Count == 0)
+                return;
+            if (grid == null)
+                RebuildGrid();
+
+            var sorted = new List<BoxItem>(boxes);
+            sorted.Sort((a, b) =>
+            {
+                if (a == null || b == null)
+                    return 0;
+                int rc = a.rowMin.CompareTo(b.rowMin);
+                if (rc != 0)
+                    return rc;
+                return a.colMin.CompareTo(b.colMin);
+            });
+
+            bool anyOpened = false;
+            foreach (var box in sorted)
+            {
+                if (box == null || box.opened)
+                    continue;
+                if (box.TryOpen())
+                    anyOpened = true;
+            }
+
+            if (anyOpened)
+                RefreshExposed();
+        }
+
+        /// <summary>
         /// 收集用于容器规划的 (层, 颜色) 列表：静态像素（含轨道上的初始像素）+ 管道将生成的像素。
         /// 编辑器与运行时均可调用（不依赖 grid 重建）。
         /// </summary>
@@ -548,6 +736,18 @@ namespace CrowdMatch
                     for (int k = 0; k < track; k++)
                         pixels.Add((layer, c));
             }
+
+            // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入
+            foreach (var box in GetComponentsInChildren<BoxItem>())
+            {
+                if (box == null || box.opened || box.colorIds == null)
+                    continue;
+                int layer = Mathf.Clamp(box.rowMin, 0, TotalRows - 1);
+                int count = Mathf.Min(box.capacity, box.colorIds.Length);
+                for (int i = 0; i < count; i++)
+                    pixels.Add((layer, box.colorIds[i]));
+            }
+
             return pixels;
         }
     }

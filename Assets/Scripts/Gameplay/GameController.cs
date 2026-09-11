@@ -160,7 +160,7 @@ namespace CrowdMatch
             InitLevel(GameData.CurrentLevel);
         }
 
-        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem）。</summary>
+        /// <summary>统计当前网格中的像素总数（仅限在网格范围内的 PixelItem，含箱子尚未释放的隐藏 Pixel）。</summary>
         private int CountPixels()
         {
             if (pixelGroup == null)
@@ -170,6 +170,12 @@ namespace CrowdMatch
             {
                 if (it != null && pixelGroup.IsInRange(it.gridX, it.gridZ))
                     n++;
+            }
+            // 箱子隐藏 Pixel 采用 active=false，GetComponentsInChildren 默认扫不到，需显式累加
+            foreach (var box in pixelGroup.GetComponentsInChildren<BoxItem>())
+            {
+                if (box != null)
+                    n += box.hiddenPixels.Count;
             }
             return n;
         }
@@ -244,6 +250,10 @@ namespace CrowdMatch
 
             // 静止门槛：有像素正在上车（jump 或回退 lerp）→ 还有进度，不判失败
             if (containerGroup.consumingCount > 0)
+                return false;
+
+            // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
+            if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
                 return false;
 
             var belt = conveyorZone.belt;
@@ -617,6 +627,9 @@ namespace CrowdMatch
 
             // 移除后刷新剩余像素的暴露（可点击）状态
             pixelGroup.RefreshExposed();
+
+            // 匹配移除后，检查并尝试开箱（箱子隐藏 Pixel 可能因此释放并再触发一次暴露刷新）
+            pixelGroup.TryOpenBoxes();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集

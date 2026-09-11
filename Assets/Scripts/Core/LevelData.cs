@@ -15,6 +15,7 @@ namespace CrowdMatch
         public ContainerData container = new ContainerData();
         public WallData[] walls = new WallData[0];
         public PipeData[] pipes = new PipeData[0];
+        public BoxData[] boxes = new BoxData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -67,6 +68,20 @@ namespace CrowdMatch
         {
             public Vector2[] points = new Vector2[0];
             public int[] colors = new int[0];
+        }
+
+        /// <summary>
+        /// 一个箱子：矩形区域（左上 + 右下）+ 容量 + 隐藏 Pixel 颜色 + 行为开关。
+        /// 箱子区域的格子在 pixel.cells 里写 0（占位），开箱后的 Pixel 颜色由 colorIds 提供。
+        /// </summary>
+        [Serializable]
+        public class BoxData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+            public int capacity;
+            public int[] colorIds = new int[0];
+            public float jumpStartInterval = 0.1f;
+            public float jumpSpawnYOffset = 0.5f;
         }
     }
 

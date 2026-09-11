@@ -83,7 +83,8 @@ namespace CrowdMatch
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
                 (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
-                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个" + (locked ? "，已锁定" : "") + "）");
+                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个，箱子 " + data.boxes.Length + " 个" +
+                (locked ? "，已锁定" : "") + "）");
 
             EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
@@ -178,6 +179,7 @@ namespace CrowdMatch
                 pixelGroup.ClearPixels();
                 pixelGroup.ClearWalls();
                 pixelGroup.ClearPipes();
+                pixelGroup.ClearBoxes();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -267,6 +269,26 @@ namespace CrowdMatch
                 pipes.Add(new LevelData.PipeData { points = pipe.points.ToArray(), colors = pipe.colors.ToArray() });
             }
             data.pipes = pipes.ToArray();
+
+            // 箱子：扫描 PixelGroup 下的 BoxItem，每个箱子存矩形区域 + 容量 + 隐藏 Pixel 颜色 + 行为开关
+            var boxes = new List<LevelData.BoxData>();
+            foreach (var box in pg.GetComponentsInChildren<BoxItem>())
+            {
+                if (box == null)
+                    continue;
+                boxes.Add(new LevelData.BoxData
+                {
+                    colMin = box.colMin,
+                    rowMin = box.rowMin,
+                    colMax = box.colMax,
+                    rowMax = box.rowMax,
+                    capacity = box.capacity,
+                    colorIds = box.colorIds != null ? (int[])box.colorIds.Clone() : new int[0],
+                    jumpStartInterval = box.jumpStartInterval,
+                    jumpSpawnYOffset = box.jumpSpawnYOffset,
+                });
+            }
+            data.boxes = boxes.ToArray();
 
             return data;
         }
