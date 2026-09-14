@@ -371,7 +371,7 @@ namespace CrowdMatch
         {
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
 
-            // 起跳即回 Idle，并让身体（exposeMoveTarget）匀速坐回原始 y（-0.6957998）
+            // 起跳即回 Idle，并让身体（exposeMoveTarget）匀速坐回 boardSitDownYOffset（默认 -1.3803998）
             pixel.SetWalking(false);
             pixel.SitDownExposeTarget();
 

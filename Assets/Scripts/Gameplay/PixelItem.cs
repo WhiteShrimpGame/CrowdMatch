@@ -39,11 +39,14 @@ namespace CrowdMatch
         [Tooltip("暴露在外层（可点击）时激活的 Animator")]
         public Animator animator;
 
-        [Tooltip("暴露后要匀速移动到 y=0 的物体（独立于 Animator 引用）")]
+        [Tooltip("上车（跳入容器）时坐回配置偏移的物体（独立于 Animator 引用；起身/坐下逻辑已移除，不再随暴露位移）")]
         public Transform exposeMoveTarget;
 
-        [Tooltip("暴露后把 exposeMoveTarget 匀速移动到 y=0 的时长（秒）")]
+        [Tooltip("上车坐回（把 exposeMoveTarget 匀速移到 boardSitDownYOffset）的时长（秒）")]
         public float exposeMoveDuration = 0.3f;
+
+        [Tooltip("上车坐下时 exposeMoveTarget 的目标 y 偏移（相对其父级）。原预制体默认 -1.3803998")]
+        public float boardSitDownYOffset = -1.3803998f;
 
         [Tooltip("点击碰撞体组件（挂在 Click 层的子物体上）；为空时在 Awake 中自动查找子物体")]
         public PixelClickListener listener;
@@ -73,9 +76,6 @@ namespace CrowdMatch
         /// <summary>是否正在做 Idle 平滑归零（期间不切回 Walking）。</summary>
         private bool _smoothing;
 
-        /// <summary>起跳坐回时 exposeMoveTarget 的目标 y（Awake 捕获预制体初始值，兜底 -0.6957998）。</summary>
-        private float _restLocalY = -0.6957998f;
-
         private Coroutine _exposeMove;
 
         /// <summary>问号物体「延迟一帧显示」的协程句柄（隐藏时立即停止）。</summary>
@@ -103,8 +103,6 @@ namespace CrowdMatch
         {
             ApplyMaterial();
             BindClickListener();
-            if (exposeMoveTarget != null)
-                _restLocalY = exposeMoveTarget.localPosition.y;
             if (outlineRenderer != null)
                 outlineRenderer.enabled = false;   // 初始不可点击，描边关闭
             RefreshQuestionObject();   // 初始化问号物体显隐（未揭晓问号显示、其余隐藏）
@@ -149,7 +147,7 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>立即切到 Walking：先直接归零再恢复根运动。走路是站立姿态，故取消进行中的坐下并把 exposeMoveTarget 恢复到 y=0。</summary>
+        /// <summary>立即切到 Walking：先直接归零再恢复根运动。</summary>
         private void ApplyWalking()
         {
             animator.enabled = true;
@@ -162,18 +160,6 @@ namespace CrowdMatch
 
             // 恢复根运动：身体随 Walking 的根运动位移/晃动
             animator.applyRootMotion = true;
-
-            // 走路是站立姿态：取消「退出暴露触发的坐下」并把 exposeMoveTarget 恢复到 y=0（被匹配移除的像素要站立走开，不应坐下）
-            if (_exposeMove != null)
-            {
-                StopCoroutine(_exposeMove);
-                _exposeMove = null;
-            }
-            if (exposeMoveTarget != null)
-            {
-                var lp = exposeMoveTarget.localPosition;
-                exposeMoveTarget.localPosition = new Vector3(lp.x, 0f, lp.z);
-            }
         }
 
         /// <summary>切到 Idle：关闭根运动并平滑归零；完成后若仍处于追赶状态则切回 Walking。</summary>
@@ -201,14 +187,14 @@ namespace CrowdMatch
                 ApplyWalking();
         }
 
-        /// <summary>把 exposeMoveTarget 匀速坐回原始 y（上车起跳时调用，默认回 _restLocalY）。</summary>
+        /// <summary>把 exposeMoveTarget 匀速坐到 boardSitDownYOffset（上车起跳时调用）。</summary>
         public void SitDownExposeTarget()
         {
             if (exposeMoveTarget == null)
                 return;
             if (_exposeMove != null)
                 StopCoroutine(_exposeMove);
-            _exposeMove = StartCoroutine(MoveExposeTargetToY(_restLocalY, exposeMoveDuration));
+            _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset, exposeMoveDuration));
         }
 
         /// <summary>设置颜色 ID 并立即应用材质</summary>
@@ -292,9 +278,8 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，并在 exposeMoveDuration 内把 exposeMoveTarget 匀速移动到 y=0（起身上升）。
-        /// 退出暴露时关闭 Animator，并把 exposeMoveTarget 坐回 _restLocalY（坐下）。起身与坐下互斥共用 _exposeMove、都从当前位置开始，
-        /// 因此「坐下途中又暴露」会从当前位置站起（过程状态与稳态都正确）。
+        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，退出暴露时关闭 Animator。
+        /// 起身上升/坐下逻辑已移除（预制体 Root 无 y 偏移），全程保持站立位置，只切换描边与 Animator。
         /// </summary>
         public void SetExposed(bool exposed)
         {
@@ -313,27 +298,13 @@ namespace CrowdMatch
             ApplyExposedState(exposed);
         }
 
-        /// <summary>按暴露状态应用动画：进入暴露激活 Animator、把 exposeMoveTarget 平滑到 y=0（起身）；
-        /// 退出暴露关闭 Animator、把 exposeMoveTarget 坐回 _restLocalY（坐下）。
-        /// 起身与坐下互斥共用 _exposeMove、都从当前位置开始，中途切换（如坐下途中又暴露）会从当前位置反向移动。</summary>
+        /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。</summary>
         private void ApplyExposedState(bool exposed)
         {
             if (outlineRenderer != null)
                 outlineRenderer.enabled = exposed;
-            if (exposed)
-            {
-                if (animator != null)
-                    animator.enabled = true;
-                if (_exposeMove != null)
-                    StopCoroutine(_exposeMove);
-                _exposeMove = StartCoroutine(MoveExposeTargetToY(0f, exposeMoveDuration));
-            }
-            else
-            {
-                if (animator != null)
-                    animator.enabled = false;
-                SitDownExposeTarget();   // 坐下：被箱体/管道封路重新堵住时，从站起状态坐回
-            }
+            if (animator != null)
+                animator.enabled = exposed;
         }
 
         /// <summary>管道放置完成：清除放置标记并把暴露状态复位（Animator 关闭、Root 归位），等待后续 RefreshExposed 统一激活。</summary>

@@ -511,8 +511,7 @@ namespace CrowdMatch
             if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, _clickMask))
             {
                 if (debugClickLog)
-                    Debug.Log("[Click] 射线未命中 Click 层（鼠标 " + Input.mousePosition +
-                        "；起身中的像素其点击碰撞体随 exposeMoveTarget 上移，可能尚未/已经移出点击位置）");
+                    Debug.Log("[Click] 射线未命中 Click 层（鼠标 " + Input.mousePosition + "）");
                 return;
             }
 
