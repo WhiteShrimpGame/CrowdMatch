@@ -454,7 +454,7 @@ namespace CrowdMatch
         }
 
         /// <summary>在指定格子生成一个 ContainerItem 并应用颜色/容量（供运行时关卡加载使用）。</summary>
-        public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config)
+        public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config, bool isQuestion = false)
         {
             GameObject go = containerPrefab != null
                 ? Instantiate(containerPrefab).gameObject
@@ -471,10 +471,11 @@ namespace CrowdMatch
             item.gridX = col;
             item.gridZ = row;
             item.colorId = colorId;
+            item.isQuestion = isQuestion;
             item.SetCapacity(capacity);
             item.ApplyMaterial(config);
             if (row == 0)
-                item.HideLid();   // 初始就在第一排：盖子直接隐藏
+                item.HideLid();   // 初始就在第一排：盖子直接隐藏（问号车此时也揭晓）
             return item;
         }
 

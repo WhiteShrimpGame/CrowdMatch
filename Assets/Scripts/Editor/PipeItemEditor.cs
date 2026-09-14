@@ -111,6 +111,7 @@ namespace CrowdMatch
             pipe.colors = new List<int>();
             var pipeCell = PipeItem.GetPipeCell(points);
             pipeGo.transform.localPosition = group.GetLocalPosition(pipeCell.x, pipeCell.y);
+            pipe.OrientBody();
 
             Undo.RegisterCreatedObjectUndo(pipeGo, "创建管道");
 

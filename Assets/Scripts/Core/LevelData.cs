@@ -15,6 +15,8 @@ namespace CrowdMatch
         public ContainerData container = new ContainerData();
         public WallData[] walls = new WallData[0];
         public PipeData[] pipes = new PipeData[0];
+        public BoxData[] boxes = new BoxData[0];
+        public ElevatorData[] elevators = new ElevatorData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -27,6 +29,9 @@ namespace CrowdMatch
 
             /// <summary>长度 = columns × (rows + tailRows)，index = row * columns + col。</summary>
             public int[] cells = new int[0];
+
+            /// <summary>长度 = columns × (rows + tailRows)，index = row * columns + col；true = 该格为问号 Pixel（隐藏真实颜色）。</summary>
+            public bool[] questionCells = new bool[0];
         }
 
         /// <summary>ContainerGroup 布局：尺寸 + 稀疏容器列表（只存非空格）。</summary>
@@ -49,6 +54,9 @@ namespace CrowdMatch
             public int y;
             public int colorId;
             public int capacity;
+
+            /// <summary>true = 问号车（开盖揭晓前隐藏真实颜色）。旧 JSON 无此字段时为 false。</summary>
+            public bool question;
         }
 
         /// <summary>一段墙体：端点序列（网格坐标，x = 列 col，y = 行 row），相邻两点构成一段，每段平行于 X 或 Z 轴。</summary>
@@ -67,6 +75,45 @@ namespace CrowdMatch
         {
             public Vector2[] points = new Vector2[0];
             public int[] colors = new int[0];
+        }
+
+        /// <summary>
+        /// 一个箱子：矩形区域（左上 + 右下）+ 容量 + 隐藏 Pixel 颜色 + 行为开关。
+        /// 箱子区域的格子在 pixel.cells 里写 0（占位），开箱后的 Pixel 颜色由 colorIds 提供。
+        /// </summary>
+        [Serializable]
+        public class BoxData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+            public int capacity;
+            public int[] colorIds = new int[0];
+            public float jumpStartInterval = 0.1f;
+            public float jumpSpawnYOffset = 0.5f;
+        }
+
+        /// <summary>
+        /// 一个地面升降台：矩形区域（左上 + 右下）+ 若干组稀疏像素（全部在地下竖井里等待升起）。
+        /// 区域内的格子是普通地上像素（触发升起的「上方层」），在 pixel.cells 里正常记录；
+        /// 升降台自身的像素全部在地下，由 groups 提供（第 0 组是第一个升起的组）。
+        /// </summary>
+        [Serializable]
+        public class ElevatorData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+            public ElevatorGroupData[] groups = new ElevatorGroupData[0];
+
+            /// <summary>地面高度（PixelGroup 本地 Y）；<=-500 表示自动（像素底部 -unitSize/2）。</summary>
+            public float groundY = -999f;
+
+            /// <summary>竖井深度（世界单位）；<=0 表示自动（unitSize × 1.5）。</summary>
+            public float pitDepth = 0f;
+        }
+
+        /// <summary>升降台的一组像素：cells = 三元组拍平 [col,row,color, col,row,color, ...]。</summary>
+        [Serializable]
+        public class ElevatorGroupData
+        {
+            public int[] cells = new int[0];
         }
     }
 

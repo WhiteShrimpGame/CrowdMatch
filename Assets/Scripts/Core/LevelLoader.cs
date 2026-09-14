@@ -53,15 +53,17 @@ namespace CrowdMatch
                 return;
             if (pixelGroup != null)
             {
-                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, colorConfig);
+                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, colorConfig);
                 ApplyWalls(pixelGroup, data.walls);
                 ApplyPipes(pixelGroup, data.pipes);
+                ApplyBoxes(pixelGroup, data.boxes, colorConfig);
+                ApplyElevators(pixelGroup, data.elevators, colorConfig);
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -100,14 +102,30 @@ namespace CrowdMatch
                     skipCells.Add(PipeItem.GetPipeCell(p.points));
                 }
             }
-
+            if (boxes != null)
+            {
+                foreach (var b in boxes)
+                {
+                    if (b == null)
+                        continue;
+                    int cmin = Mathf.Max(0, Mathf.Min(b.colMin, b.colMax));
+                    int cmax = Mathf.Min(columns - 1, Mathf.Max(b.colMin, b.colMax));
+                    int rmin = Mathf.Max(0, Mathf.Min(b.rowMin, b.rowMax));
+                    int rmax = Mathf.Min(totalRows - 1, Mathf.Max(b.rowMin, b.rowMax));
+                    for (int r = rmin; r <= rmax; r++)
+                        for (int c = cmin; c <= cmax; c++)
+                            skipCells.Add(new Vector2Int(c, r));
+                }
+            }
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
                 {
                     if (skipCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int colorId = d.cells[r * columns + c];
-                    pg.SpawnPixel(c, r, colorId, config);
+                    bool isQuestion = d.questionCells != null && d.questionCells.Length > r * columns + c
+                        && d.questionCells[r * columns + c];
+                    pg.SpawnPixel(c, r, colorId, config, false, isQuestion);
                 }
 
             pg.RebuildGrid();
@@ -165,6 +183,58 @@ namespace CrowdMatch
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
         }
 
+        /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>
+        private static void ApplyBoxes(PixelGroup pg, LevelData.BoxData[] boxes, ColorConfig config)
+        {
+            pg.ClearBoxes();
+
+            if (boxes == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var b in boxes)
+            {
+                if (b == null)
+                    continue;
+                if (pg.SpawnBox(b, config) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个箱子。");
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的地面升降台（区域越界或无分组的升降台被跳过）。</summary>
+        private static void ApplyElevators(PixelGroup pg, LevelData.ElevatorData[] elevators, ColorConfig config)
+        {
+            pg.ClearElevators();
+
+            if (elevators == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var e in elevators)
+            {
+                if (e == null)
+                    continue;
+                if (pg.SpawnElevator(e, config) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个升降台。");
+        }
+
         private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)
         {
             cg.columns = Mathf.Max(1, d.columns);
@@ -181,7 +251,7 @@ namespace CrowdMatch
                         Debug.LogWarning("[LevelLoader] 容器越界被忽略：x=" + it.x + " y=" + it.y);
                         continue;
                     }
-                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config);
+                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question);
                 }
             }
 

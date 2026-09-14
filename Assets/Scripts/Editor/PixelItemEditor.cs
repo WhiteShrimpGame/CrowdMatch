@@ -40,6 +40,16 @@ namespace CrowdMatch
             {
                 ApplyColorToAll();
             }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("问号 Pixel", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("标记为问号 Pixel"))
+                SetQuestionAll(true);
+            if (GUILayout.Button("取消问号标记"))
+                SetQuestionAll(false);
+            EditorGUILayout.EndHorizontal();
         }
 
         private void DrawPalette()
@@ -82,6 +92,25 @@ namespace CrowdMatch
                 }
 
                 item.colorId = batchColorId;
+                item.ApplyMaterial(colorConfig);
+                EditorUtility.SetDirty(item);
+            }
+        }
+
+        private void SetQuestionAll(bool question)
+        {
+            foreach (var t in targets)
+            {
+                var item = (PixelItem)t;
+
+                Undo.RecordObject(item, question ? "Mark Question Pixel" : "Unmark Question Pixel");
+                foreach (var r in item.renderers)
+                {
+                    if (r != null)
+                        Undo.RecordObject(r, question ? "Mark Question Pixel" : "Unmark Question Pixel");
+                }
+
+                item.isQuestion = question;
                 item.ApplyMaterial(colorConfig);
                 EditorUtility.SetDirty(item);
             }

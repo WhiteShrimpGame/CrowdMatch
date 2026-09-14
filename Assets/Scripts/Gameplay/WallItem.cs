@@ -3,6 +3,15 @@ using UnityEngine;
 
 namespace CrowdMatch
 {
+    /// <summary>墙体视觉部件类型：独立 1×1、端点、边（直段中间）、角（转角）。</summary>
+    public enum WallPieceType
+    {
+        Single,
+        End,
+        Edge,
+        Corner,
+    }
+
     /// <summary>
     /// 墙体单位：必须作为 PixelGroup 的子物体。用一组网格坐标端点（Vector2：x = 列 col，y = 行 row）
     /// 定义若干段墙体，相邻两个端点构成一段，每段必须平行于 X 或 Z 轴（端点 x 或 y 相等）。
@@ -99,6 +108,121 @@ namespace CrowdMatch
             foreach (var _ in EnumerateOccupiedCells())
                 n++;
             return n;
+        }
+
+        /// <summary>
+        /// 用四类预制体（角/边/端点/独立 1×1）把墙体占据的每个网格格拼成实体。
+        /// 每个格子按相邻墙格数分类（见 ClassifyPiece），绕 Y 轴旋转对齐墙走向（见 DirYaw/CornerYaw）。
+        /// 定位到格中心、scale = unitSize；缺少对应预制体时跳过该格并告警。
+        /// </summary>
+        public void BuildVisual(PixelGroup pg)
+        {
+            group = pg;
+
+            // 清掉旧视觉部件（避免重复构建叠加）
+            for (int i = transform.childCount - 1; i >= 0; i--)
+            {
+                var child = transform.GetChild(i);
+                if (Application.isPlaying)
+                    Destroy(child.gameObject);
+                else
+                    DestroyImmediate(child.gameObject);
+            }
+
+            var occupied = new HashSet<Vector2Int>();
+            foreach (var cell in EnumerateOccupiedCells())
+                if (pg.IsInRange(cell.x, cell.y))
+                    occupied.Add(cell);
+
+            foreach (var cell in occupied)
+            {
+                var type = ClassifyPiece(cell, occupied, out float yaw);
+                var prefab = ChoosePrefab(pg, type);
+                if (prefab == null)
+                {
+                    Debug.LogWarning("[WallItem] 缺少" + type + "预制体，跳过墙体格 (" + cell.x + "," + cell.y + ")。");
+                    continue;
+                }
+
+                var piece = Instantiate(prefab, transform);
+                piece.name = "WallPiece_" + type + "_" + cell.y + "_" + cell.x;
+                piece.transform.localPosition = pg.GetLocalPosition(cell.x, cell.y);
+                piece.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+                piece.transform.localScale = Vector3.one * pg.unitSize;
+            }
+        }
+
+        private GameObject ChoosePrefab(PixelGroup pg, WallPieceType type)
+        {
+            switch (type)
+            {
+                case WallPieceType.Single: return pg.wallSinglePrefab;
+                case WallPieceType.End:    return pg.wallEndPrefab;
+                case WallPieceType.Edge:   return pg.wallEdgePrefab;
+                default:                   return pg.wallCornerPrefab;
+            }
+        }
+
+        /// <summary>
+        /// 把一个墙体格按相邻墙格数分类并给出绕 Y 轴的对齐角度：
+        /// 0 个相邻 = 独立 1×1（0°）；1 个 = 端点（朝相邻方向）；2 个共线 = 边（水平 90°、竖直 0°）；
+        /// 2 个垂直 = 角；3/4 个相邻的罕见分支按角兜底。
+        /// </summary>
+        private WallPieceType ClassifyPiece(Vector2Int cell, HashSet<Vector2Int> occupied, out float yaw)
+        {
+            bool right = occupied.Contains(new Vector2Int(cell.x + 1, cell.y));
+            bool left  = occupied.Contains(new Vector2Int(cell.x - 1, cell.y));
+            bool front = occupied.Contains(new Vector2Int(cell.x, cell.y - 1));
+            bool back  = occupied.Contains(new Vector2Int(cell.x, cell.y + 1));
+
+            int n = (right ? 1 : 0) + (left ? 1 : 0) + (front ? 1 : 0) + (back ? 1 : 0);
+
+            if (n == 0)
+            {
+                yaw = 0f;
+                return WallPieceType.Single;
+            }
+
+            if (n == 1)
+            {
+                int dc = right ? 1 : (left ? -1 : 0);
+                int dr = back ? 1 : (front ? -1 : 0);
+                yaw = DirYaw(dc, dr);
+                return WallPieceType.End;
+            }
+
+            if (n == 2 && ((right && left) || (front && back)))
+            {
+                yaw = (right && left) ? 90f : 0f;
+                return WallPieceType.Edge;
+            }
+
+            yaw = CornerYaw(right, left, front, back);
+            return WallPieceType.Corner;
+        }
+
+        /// <summary>网格方向 → 绕 Y 轴角度（度）。世界方向 = (dc, -dr)：+col 右(+X)、-col 左(-X)、-row 前(+Z)、+row 后(-Z)。组件本地 +Z 对齐该方向。</summary>
+        private static float DirYaw(int dc, int dr)
+        {
+            return Mathf.Atan2(dc, -dr) * Mathf.Rad2Deg;
+        }
+
+        /// <summary>角格：取两个相邻墙格方向，令组件本地 +X 与 +Z 两臂分别对齐。绕 Y +90° 把 (x,z) 映射为 (z,-x)。</summary>
+        private static float CornerYaw(bool right, bool left, bool front, bool back)
+        {
+            var dirs = new List<Vector2>(2);
+            if (right) dirs.Add(new Vector2(1f, 0f));    // +X
+            if (left)  dirs.Add(new Vector2(-1f, 0f));   // -X
+            if (front) dirs.Add(new Vector2(0f, 1f));    // +Z
+            if (back)  dirs.Add(new Vector2(0f, -1f));   // -Z
+
+            Vector2 a = dirs[0];
+            Vector2 b = dirs.Count > 1 ? dirs[1] : Vector2.zero;
+
+            // 若 b == +90°(a)，则 a 为基准臂（本地 +Z 对齐 a）；否则 b 为基准臂。
+            if (Mathf.Approximately(b.x, a.y) && Mathf.Approximately(b.y, -a.x))
+                return Mathf.Atan2(a.x, a.y) * Mathf.Rad2Deg;
+            return Mathf.Atan2(b.x, b.y) * Mathf.Rad2Deg;
         }
 
         /// <summary>某网格格的世界坐标。</summary>

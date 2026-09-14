@@ -83,7 +83,8 @@ namespace CrowdMatch
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
                 (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
-                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个" + (locked ? "，已锁定" : "") + "）");
+                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个，箱子 " + data.boxes.Length + " 个，升降台 " +
+                data.elevators.Length + " 个" + (locked ? "，已锁定" : "") + "）");
 
             EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
@@ -178,6 +179,8 @@ namespace CrowdMatch
                 pixelGroup.ClearPixels();
                 pixelGroup.ClearWalls();
                 pixelGroup.ClearPipes();
+                pixelGroup.ClearBoxes();
+                pixelGroup.ClearElevators();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -207,6 +210,7 @@ namespace CrowdMatch
 
             int totalRows = pg.TotalRows;
             data.pixel.cells = new int[pg.columns * totalRows];
+            data.pixel.questionCells = new bool[pg.columns * totalRows];
             int emptyCells = 0;
             for (int r = 0; r < totalRows; r++)
             {
@@ -214,7 +218,10 @@ namespace CrowdMatch
                 {
                     var item = pg.GetItem(c, r);
                     if (item != null)
+                    {
                         data.pixel.cells[r * pg.columns + c] = item.colorId;
+                        data.pixel.questionCells[r * pg.columns + c] = item.isQuestion;
+                    }
                     else
                     {
                         data.pixel.cells[r * pg.columns + c] = 0;
@@ -243,6 +250,7 @@ namespace CrowdMatch
                         y = item.gridZ,
                         colorId = item.colorId,
                         capacity = item.capacity,
+                        question = item.isQuestion,
                     });
                 }
             }
@@ -267,6 +275,55 @@ namespace CrowdMatch
                 pipes.Add(new LevelData.PipeData { points = pipe.points.ToArray(), colors = pipe.colors.ToArray() });
             }
             data.pipes = pipes.ToArray();
+
+            // 箱子：扫描 PixelGroup 下的 BoxItem，每个箱子存矩形区域 + 容量 + 隐藏 Pixel 颜色 + 行为开关
+            var boxes = new List<LevelData.BoxData>();
+            foreach (var box in pg.GetComponentsInChildren<BoxItem>())
+            {
+                if (box == null)
+                    continue;
+                boxes.Add(new LevelData.BoxData
+                {
+                    colMin = box.colMin,
+                    rowMin = box.rowMin,
+                    colMax = box.colMax,
+                    rowMax = box.rowMax,
+                    capacity = box.capacity,
+                    colorIds = box.colorIds != null ? (int[])box.colorIds.Clone() : new int[0],
+                    jumpStartInterval = box.jumpStartInterval,
+                    jumpSpawnYOffset = box.jumpSpawnYOffset,
+                });
+            }
+            data.boxes = boxes.ToArray();
+
+            // 升降台：扫描 PixelGroup 下的 ElevatorItem，每个升降台存矩形区域 + 若干组稀疏像素
+            var elevators = new List<LevelData.ElevatorData>();
+            foreach (var elev in pg.GetComponentsInChildren<ElevatorItem>())
+            {
+                if (elev == null || elev.groups == null || elev.groups.Count == 0)
+                    continue;
+                var groups = new List<LevelData.ElevatorGroupData>();
+                foreach (var g in elev.groups)
+                {
+                    if (g == null)
+                        continue;
+                    groups.Add(new LevelData.ElevatorGroupData
+                    {
+                        cells = g.cells != null ? (int[])g.cells.Clone() : new int[0],
+                    });
+                }
+                elevators.Add(new LevelData.ElevatorData
+                {
+                    colMin = elev.colMin,
+                    rowMin = elev.rowMin,
+                    colMax = elev.colMax,
+                    rowMax = elev.rowMax,
+                    groups = groups.ToArray(),
+                    groundY = elev.groundY,
+                    pitDepth = elev.pitDepth,
+                });
+            }
+            data.elevators = elevators.ToArray();
 
             return data;
         }

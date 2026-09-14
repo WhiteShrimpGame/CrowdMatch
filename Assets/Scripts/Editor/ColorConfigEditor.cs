@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
@@ -8,6 +9,7 @@ namespace CrowdMatch
     public class ColorConfigEditor : Editor
     {
         public const int ColorCount = 24;
+        private const string DefaultAssetPath = "Assets/CrowdMatch/ColorConfig.asset";
 
         public override void OnInspectorGUI()
         {
@@ -22,6 +24,11 @@ namespace CrowdMatch
             {
                 GenerateMaterials(config);
             }
+
+            if (GUILayout.Button("从材质主色生成字色与描边色"))
+            {
+                GenerateTextColors(config);
+            }
         }
 
         [MenuItem("CrowdMatch/Create Color Config (24 种颜色)")]
@@ -30,12 +37,11 @@ namespace CrowdMatch
             const string dir = "Assets/CrowdMatch";
             EnsureFolder(dir);
 
-            const string path = "Assets/CrowdMatch/ColorConfig.asset";
-            var config = AssetDatabase.LoadAssetAtPath<ColorConfig>(path);
+            var config = AssetDatabase.LoadAssetAtPath<ColorConfig>(DefaultAssetPath);
             if (config == null)
             {
                 config = CreateInstance<ColorConfig>();
-                AssetDatabase.CreateAsset(config, path);
+                AssetDatabase.CreateAsset(config, DefaultAssetPath);
             }
 
             GenerateMaterials(config);
@@ -87,6 +93,73 @@ namespace CrowdMatch
             EditorUtility.SetDirty(config);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// 从 materials 的主色生成字色与描边色：字色 = 材质主色；
+        /// 按 RGB 权重（感知亮度）判断亮暗，亮色描边取原色 1/3，暗色描边取 255-(255-c)/5。
+        /// </summary>
+        [MenuItem("CrowdMatch/从材质主色生成字色与描边色")]
+        public static void GenerateTextColorsFromMaterials()
+        {
+            var config = Selection.activeObject as ColorConfig;
+            if (config == null)
+                config = AssetDatabase.LoadAssetAtPath<ColorConfig>(DefaultAssetPath);
+            if (config == null)
+            {
+                EditorUtility.DisplayDialog("生成字色与描边色", "未找到 ColorConfig，请先选中 ColorConfig 资产或先创建。", "确定");
+                return;
+            }
+
+            GenerateTextColors(config);
+            Selection.activeObject = config;
+            EditorGUIUtility.PingObject(config);
+        }
+
+        /// <summary>从 config.materials 的主色生成字色/描边色，写入 textColors / textOutlineColors。</summary>
+        public static void GenerateTextColors(ColorConfig config)
+        {
+            if (config.materials == null || config.materials.Length == 0)
+            {
+                Debug.LogWarning("[ColorConfig] materials 为空，无法生成字色/描边色。");
+                return;
+            }
+
+            if (config.textColors == null)
+                config.textColors = new List<Color>();
+            if (config.textOutlineColors == null)
+                config.textOutlineColors = new List<Color>();
+            config.textColors.Clear();
+            config.textOutlineColors.Clear();
+
+            for (int i = 0; i < config.materials.Length; i++)
+            {
+                var mat = config.materials[i];
+                Color c = mat != null ? mat.color : Color.white;
+                config.textColors.Add(c);                       // 字色 = 材质主色
+                config.textOutlineColors.Add(ComputeOutlineColor(c));
+            }
+
+            EditorUtility.SetDirty(config);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[ColorConfig] 已从材质主色生成 " + config.textColors.Count + " 组字色/描边色。");
+        }
+
+        /// <summary>按 RGB 权重（0.299/0.587/0.114）判断亮暗并计算描边色。</summary>
+        private static Color ComputeOutlineColor(Color c)
+        {
+            float luminance = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
+            if (luminance > 0.5f)
+            {
+                // 亮色：描边取原色 1/2（更暗）
+                return new Color(c.r / 2f, c.g / 2f, c.b / 2f, 1f);
+            }
+            // 暗色：描边取 255-(255-c)/6（更亮）
+            return new Color(
+                1f - (1f - c.r) / 6f,
+                1f - (1f - c.g) / 6f,
+                1f - (1f - c.b) / 6f,
+                1f);
         }
 
         /// <summary>
