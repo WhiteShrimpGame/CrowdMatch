@@ -149,7 +149,7 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>立即切到 Walking：先直接归零再恢复根运动。</summary>
+        /// <summary>立即切到 Walking：先直接归零再恢复根运动。走路是站立姿态，故取消进行中的坐下并把 exposeMoveTarget 恢复到 y=0。</summary>
         private void ApplyWalking()
         {
             animator.enabled = true;
@@ -162,6 +162,18 @@ namespace CrowdMatch
 
             // 恢复根运动：身体随 Walking 的根运动位移/晃动
             animator.applyRootMotion = true;
+
+            // 走路是站立姿态：取消「退出暴露触发的坐下」并把 exposeMoveTarget 恢复到 y=0（被匹配移除的像素要站立走开，不应坐下）
+            if (_exposeMove != null)
+            {
+                StopCoroutine(_exposeMove);
+                _exposeMove = null;
+            }
+            if (exposeMoveTarget != null)
+            {
+                var lp = exposeMoveTarget.localPosition;
+                exposeMoveTarget.localPosition = new Vector3(lp.x, 0f, lp.z);
+            }
         }
 
         /// <summary>切到 Idle：关闭根运动并平滑归零；完成后若仍处于追赶状态则切回 Walking。</summary>
@@ -281,7 +293,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 设置暴露（可点击）状态：进入暴露时激活 Animator，并在 exposeMoveDuration 内把 exposeMoveTarget 匀速移动到 y=0（起身上升）。
-        /// 退出暴露时仅关闭 Animator；上升/坐回动画与状态切换相互独立——正在进行的上升不会被中断，会自然完成到 y=0。
+        /// 退出暴露时关闭 Animator，并把 exposeMoveTarget 坐回 _restLocalY（坐下）。起身与坐下互斥共用 _exposeMove、都从当前位置开始，
+        /// 因此「坐下途中又暴露」会从当前位置站起（过程状态与稳态都正确）。
         /// </summary>
         public void SetExposed(bool exposed)
         {
@@ -300,8 +313,9 @@ namespace CrowdMatch
             ApplyExposedState(exposed);
         }
 
-        /// <summary>按暴露状态应用动画：激活/关闭 Animator，并把 exposeMoveTarget 平滑到 y=0。
-        /// 退出暴露（false）不打断进行中的上升——上升动画独立于状态切换，保证起身过程一定完成。</summary>
+        /// <summary>按暴露状态应用动画：进入暴露激活 Animator、把 exposeMoveTarget 平滑到 y=0（起身）；
+        /// 退出暴露关闭 Animator、把 exposeMoveTarget 坐回 _restLocalY（坐下）。
+        /// 起身与坐下互斥共用 _exposeMove、都从当前位置开始，中途切换（如坐下途中又暴露）会从当前位置反向移动。</summary>
         private void ApplyExposedState(bool exposed)
         {
             if (outlineRenderer != null)
@@ -316,10 +330,9 @@ namespace CrowdMatch
             }
             else
             {
-                // 不 StopCoroutine(_exposeMove)：点击离开等状态切换不打断正在进行的上升，让其自然完成到 y=0；
-                // 需要坐回时由 SitDownExposeTarget 显式 StopCoroutine + 启动坐回。
                 if (animator != null)
                     animator.enabled = false;
+                SitDownExposeTarget();   // 坐下：被箱体/管道封路重新堵住时，从站起状态坐回
             }
         }
 

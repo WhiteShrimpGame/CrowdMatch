@@ -643,14 +643,11 @@ namespace CrowdMatch
                 item.SetWalking(true);
             }
 
-            // 移除后刷新剩余像素的暴露（可点击）状态
-            pixelGroup.RefreshExposed();
-
-            // 匹配移除后，检查并尝试开箱（箱子隐藏 Pixel 可能因此释放并再触发一次暴露刷新）
+            // 匹配移除后，先让箱子/升降台释放像素占格（占格同步、动画异步），
+            // 再统一刷新暴露状态：避免「移除后短暂暴露的像素紧接着被释放像素封路」却已经站起。
             pixelGroup.TryOpenBoxes();
-
-            // 再检查并尝试推进升降台（区域清空后开门 + 升起下一组）
             pixelGroup.TryAdvanceElevators();
+            pixelGroup.RefreshExposed();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
