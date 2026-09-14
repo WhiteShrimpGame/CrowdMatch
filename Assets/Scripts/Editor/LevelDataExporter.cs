@@ -83,8 +83,8 @@ namespace CrowdMatch
 
             Debug.Log(Tag + " 已导出关卡 JSON 到 " + path + "（像素 " + data.pixel.columns + "×" +
                 (data.pixel.rows + data.pixel.tailRows) + "，容器 " + data.container.items.Length + " 个，墙体 " +
-                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个，箱子 " + data.boxes.Length + " 个" +
-                (locked ? "，已锁定" : "") + "）");
+                data.walls.Length + " 段，管道 " + data.pipes.Length + " 个，箱子 " + data.boxes.Length + " 个，升降台 " +
+                data.elevators.Length + " 个" + (locked ? "，已锁定" : "") + "）");
 
             EditorUtility.DisplayDialog(dialogTitle,
                 "已导出到：\n" + path +
@@ -180,6 +180,7 @@ namespace CrowdMatch
                 pixelGroup.ClearWalls();
                 pixelGroup.ClearPipes();
                 pixelGroup.ClearBoxes();
+                pixelGroup.ClearElevators();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -289,6 +290,35 @@ namespace CrowdMatch
                 });
             }
             data.boxes = boxes.ToArray();
+
+            // 升降台：扫描 PixelGroup 下的 ElevatorItem，每个升降台存矩形区域 + 若干组稀疏像素
+            var elevators = new List<LevelData.ElevatorData>();
+            foreach (var elev in pg.GetComponentsInChildren<ElevatorItem>())
+            {
+                if (elev == null || elev.groups == null || elev.groups.Count == 0)
+                    continue;
+                var groups = new List<LevelData.ElevatorGroupData>();
+                foreach (var g in elev.groups)
+                {
+                    if (g == null)
+                        continue;
+                    groups.Add(new LevelData.ElevatorGroupData
+                    {
+                        cells = g.cells != null ? (int[])g.cells.Clone() : new int[0],
+                    });
+                }
+                elevators.Add(new LevelData.ElevatorData
+                {
+                    colMin = elev.colMin,
+                    rowMin = elev.rowMin,
+                    colMax = elev.colMax,
+                    rowMax = elev.rowMax,
+                    groups = groups.ToArray(),
+                    groundY = elev.groundY,
+                    pitDepth = elev.pitDepth,
+                });
+            }
+            data.elevators = elevators.ToArray();
 
             return data;
         }

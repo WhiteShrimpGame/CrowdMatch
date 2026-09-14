@@ -71,6 +71,12 @@ namespace CrowdMatch
         [Tooltip("箱子中心格预制体（占一格，可视觉溢出边界）")]
         public GameObject boxCenterPrefab;
 
+        [Tooltip("地面升降台预制体模板（需自带 ElevatorItem 组件，并配置好 Frame/Door/HoleMask/Pit 视觉子节点）")]
+        public GameObject elevatorPrefab;
+
+        [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
+        public Material defaultGroundMaterial;
+
         /// <summary>运行时网格 [column, row]，row 0 为最前排（+Z），row = TotalRows-1 为后排（-Z，含尾部）</summary>
         [System.NonSerialized] public PixelItem[,] grid;
 
@@ -89,8 +95,14 @@ namespace CrowdMatch
         /// <summary>运行时收集到的所有箱子（重建 grid 时刷新；含已开箱的，用 opened 区分）。</summary>
         [System.NonSerialized] public List<BoxItem> boxes = new List<BoxItem>();
 
+        /// <summary>运行时收集到的所有升降台（重建 grid 时刷新）。</summary>
+        [System.NonSerialized] public List<ElevatorItem> elevators = new List<ElevatorItem>();
+
         /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
         [System.NonSerialized] public int releasingBoxesCount;
+
+        /// <summary>正在推进中的升降台数量（开门/升起动画期间 > 0，供失败判定阻塞）。</summary>
+        [System.NonSerialized] public int advancingElevatorsCount;
 
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
@@ -115,6 +127,7 @@ namespace CrowdMatch
             boxGrid = new bool[columns, TotalRows];
             pipes = new List<PipeItem>();
             boxes = new List<BoxItem>();
+            elevators = new List<ElevatorItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -161,6 +174,29 @@ namespace CrowdMatch
                         if (IsInRange(c, r))
                             boxGrid[c, r] = true;
             }
+
+            // 升降台：区域不占格（其像素是普通网格像素，由分组提供），仅登记引用
+            foreach (var elev in GetComponentsInChildren<ElevatorItem>())
+            {
+                if (elev == null)
+                    continue;
+                elev.group = this;
+                elevators.Add(elev);
+            }
+
+            // 无升降台的关卡：恢复默认地面材质（清除之前升降台留下的挖洞材质污染）
+            if (Application.isPlaying && elevators.Count == 0)
+                RestoreDefaultGroundMaterial();
+        }
+
+        /// <summary>找到地面 Renderer（优先 Block_BG，退 BG），若非默认 BG 材质则换回，用于无升降台关卡恢复地面外观。</summary>
+        public void RestoreDefaultGroundMaterial()
+        {
+            if (defaultGroundMaterial == null)
+                return;
+            var r = ElevatorItem.FindGroundRenderer();
+            if (r != null && r.sharedMaterial != defaultGroundMaterial)
+                r.sharedMaterial = defaultGroundMaterial;
         }
 
         /// <summary>取指定格子的单位，越界返回 null</summary>
@@ -520,6 +556,28 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 清空所有 ElevatorItem 及其视觉部件（供关卡重载时重建升降台）。
+        /// 升降台的地下像素（active、哨兵坐标 -1,-1）已由 ClearPixels 销毁，这里只销毁升降台本体。
+        /// </summary>
+        public void ClearElevators()
+        {
+            var items = GetComponentsInChildren<ElevatorItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var e = items[i];
+                if (e == null)
+                    continue;
+                e.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(e.gameObject);
+                else
+                    DestroyImmediate(e.gameObject);
+            }
+            elevators = new List<ElevatorItem>();
+            advancingElevatorsCount = 0;
+        }
+
+        /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
         /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
         /// </summary>
@@ -659,6 +717,77 @@ namespace CrowdMatch
             return box;
         }
 
+        /// <summary>
+        /// 在 PixelGroup 下动态创建一个 ElevatorItem（new GameObject + AddComponent），
+        /// 并把区域裁剪到网格内、生成地面组与地下组像素、拼接外框/门/竖井视觉。
+        /// </summary>
+        public ElevatorItem SpawnElevator(LevelData.ElevatorData data, ColorConfig config)
+        {
+            if (data == null)
+                return null;
+            if (pixelPrefab == null)
+            {
+                Debug.LogError("[PixelGroup] pixelPrefab 为空，无法生成升降台像素。");
+                return null;
+            }
+
+            int cmin = Mathf.Max(0, Mathf.Min(data.colMin, data.colMax));
+            int cmax = Mathf.Min(columns - 1, Mathf.Max(data.colMin, data.colMax));
+            int rmin = Mathf.Max(0, Mathf.Min(data.rowMin, data.rowMax));
+            int rmax = Mathf.Min(TotalRows - 1, Mathf.Max(data.rowMin, data.rowMax));
+
+            if (cmin > cmax || rmin > rmax)
+            {
+                Debug.LogWarning("[PixelGroup] 升降台区域完全越界，已忽略。");
+                return null;
+            }
+
+            GameObject go;
+            ElevatorItem elev;
+            if (elevatorPrefab != null)
+            {
+                go = Instantiate(elevatorPrefab, transform);
+                go.name = "Elevator_" + rmin + "_" + cmin;
+                go.transform.localPosition = Vector3.zero;
+                elev = go.GetComponent<ElevatorItem>();
+                if (elev == null)
+                {
+                    Debug.LogWarning("[PixelGroup] elevatorPrefab 缺少 ElevatorItem 组件，已回退为动态创建。");
+                    elev = go.AddComponent<ElevatorItem>();
+                }
+            }
+            else
+            {
+                go = new GameObject("Elevator_" + rmin + "_" + cmin);
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = Vector3.zero;
+                elev = go.AddComponent<ElevatorItem>();
+            }
+
+            elev.colMin = cmin;
+            elev.rowMin = rmin;
+            elev.colMax = cmax;
+            elev.rowMax = rmax;
+            elev.groundY = data.groundY;
+            elev.pitDepth = data.pitDepth;
+            elev.groups = new List<LevelData.ElevatorGroupData>();
+            if (data.groups != null)
+            {
+                foreach (var g in data.groups)
+                {
+                    if (g == null)
+                        continue;
+                    elev.groups.Add(new LevelData.ElevatorGroupData
+                    {
+                        cells = g.cells != null ? (int[])g.cells.Clone() : new int[0],
+                    });
+                }
+            }
+
+            elev.BuildVisual(this, config);
+            return elev;
+        }
+
         /// <summary>箱子开箱：清除其本体格占用，并登记「释放中」计数（由 BoxItem.TryOpen 调用）。</summary>
         public void OnBoxOpened(BoxItem box)
         {
@@ -675,6 +804,18 @@ namespace CrowdMatch
         public void OnBoxReleaseFinished(BoxItem box)
         {
             releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);
+        }
+
+        /// <summary>升降台开始推进（开门/升起动画）：登记「推进中」计数（由 ElevatorItem.TryAdvance 调用）。</summary>
+        public void OnElevatorAdvanceStarted(ElevatorItem elev)
+        {
+            advancingElevatorsCount++;
+        }
+
+        /// <summary>升降台推进完成（动画结束）：解除「推进中」计数（由 ElevatorItem 收尾调用）。</summary>
+        public void OnElevatorAdvanceFinished(ElevatorItem elev)
+        {
+            advancingElevatorsCount = Mathf.Max(0, advancingElevatorsCount - 1);
         }
 
         /// <summary>
@@ -713,16 +854,56 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 检查所有升降台并逐个尝试推进（区域清空 → 开门 + 升起下一组）：
+        /// 按 (rowMin 升序, colMin 升序) 串行判定，动画并行。推进产生的格变化统一刷新一次暴露。
+        /// </summary>
+        public void TryAdvanceElevators()
+        {
+            if (elevators == null || elevators.Count == 0)
+                return;
+            if (grid == null)
+                RebuildGrid();
+
+            var sorted = new List<ElevatorItem>(elevators);
+            sorted.Sort((a, b) =>
+            {
+                if (a == null || b == null)
+                    return 0;
+                int rc = a.rowMin.CompareTo(b.rowMin);
+                if (rc != 0)
+                    return rc;
+                return a.colMin.CompareTo(b.colMin);
+            });
+
+            bool anyAdvanced = false;
+            foreach (var elev in sorted)
+            {
+                if (elev == null || elev.IsDone)
+                    continue;
+                if (elev.TryAdvance())
+                    anyAdvanced = true;
+            }
+
+            if (anyAdvanced)
+                RefreshExposed();
+        }
+
+        /// <summary>
         /// 收集用于容器规划的 (层, 颜色) 列表：静态像素（含轨道上的初始像素）+ 管道将生成的像素。
         /// 编辑器与运行时均可调用（不依赖 grid 重建）。
         /// </summary>
         public List<(int layer, int color)> CollectPlanningPixels()
         {
             var pixels = new List<(int, int)>();
+
+            // 区域内的地上像素是普通网格像素，正常计入；升降台自身的地下像素由分组单独计入（下方）。
+            var elevators = GetComponentsInChildren<ElevatorItem>();
+
             foreach (var it in GetComponentsInChildren<PixelItem>())
             {
-                if (it != null && IsInRange(it.gridX, it.gridZ))
-                    pixels.Add((it.gridZ, it.colorId));
+                if (it == null || !IsInRange(it.gridX, it.gridZ))
+                    continue;
+                pixels.Add((it.gridZ, it.colorId));
             }
 
             foreach (var pipe in GetComponentsInChildren<PipeItem>())
@@ -748,6 +929,21 @@ namespace CrowdMatch
                 int count = Mathf.Min(box.capacity, box.colorIds.Length);
                 for (int i = 0; i < count; i++)
                     pixels.Add((layer, box.colorIds[i]));
+            }
+
+            // 升降台分组像素：layer 取升降台 rowMin，颜色按每组 cells 的三元组计入（编辑器与运行时通用）
+            foreach (var elev in elevators)
+            {
+                if (elev == null || elev.groups == null)
+                    continue;
+                int layer = Mathf.Clamp(elev.rowMin, 0, TotalRows - 1);
+                foreach (var g in elev.groups)
+                {
+                    if (g == null || g.cells == null)
+                        continue;
+                    for (int i = 0; i + 2 < g.cells.Length; i += 3)
+                        pixels.Add((layer, g.cells[i + 2]));
+                }
             }
 
             return pixels;

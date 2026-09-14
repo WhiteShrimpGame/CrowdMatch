@@ -16,6 +16,7 @@ namespace CrowdMatch
         public WallData[] walls = new WallData[0];
         public PipeData[] pipes = new PipeData[0];
         public BoxData[] boxes = new BoxData[0];
+        public ElevatorData[] elevators = new ElevatorData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -82,6 +83,31 @@ namespace CrowdMatch
             public int[] colorIds = new int[0];
             public float jumpStartInterval = 0.1f;
             public float jumpSpawnYOffset = 0.5f;
+        }
+
+        /// <summary>
+        /// 一个地面升降台：矩形区域（左上 + 右下）+ 若干组稀疏像素（全部在地下竖井里等待升起）。
+        /// 区域内的格子是普通地上像素（触发升起的「上方层」），在 pixel.cells 里正常记录；
+        /// 升降台自身的像素全部在地下，由 groups 提供（第 0 组是第一个升起的组）。
+        /// </summary>
+        [Serializable]
+        public class ElevatorData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+            public ElevatorGroupData[] groups = new ElevatorGroupData[0];
+
+            /// <summary>地面高度（PixelGroup 本地 Y）；<=-500 表示自动（像素底部 -unitSize/2）。</summary>
+            public float groundY = -999f;
+
+            /// <summary>竖井深度（世界单位）；<=0 表示自动（unitSize × 1.5）。</summary>
+            public float pitDepth = 0f;
+        }
+
+        /// <summary>升降台的一组像素：cells = 三元组拍平 [col,row,color, col,row,color, ...]。</summary>
+        [Serializable]
+        public class ElevatorGroupData
+        {
+            public int[] cells = new int[0];
         }
     }
 

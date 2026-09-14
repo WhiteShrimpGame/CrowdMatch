@@ -57,6 +57,7 @@ namespace CrowdMatch
                 ApplyWalls(pixelGroup, data.walls);
                 ApplyPipes(pixelGroup, data.pipes);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
+                ApplyElevators(pixelGroup, data.elevators, colorConfig);
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
@@ -116,7 +117,6 @@ namespace CrowdMatch
                             skipCells.Add(new Vector2Int(c, r));
                 }
             }
-
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
                 {
@@ -205,6 +205,32 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个箱子。");
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的地面升降台（区域越界或无分组的升降台被跳过）。</summary>
+        private static void ApplyElevators(PixelGroup pg, LevelData.ElevatorData[] elevators, ColorConfig config)
+        {
+            pg.ClearElevators();
+
+            if (elevators == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var e in elevators)
+            {
+                if (e == null)
+                    continue;
+                if (pg.SpawnElevator(e, config) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个升降台。");
         }
 
         private static void ApplyContainer(ContainerGroup cg, LevelData.ContainerData d, ColorConfig config)

@@ -177,6 +177,12 @@ namespace CrowdMatch
                 if (box != null)
                     n += box.hiddenPixels.Count;
             }
+            // 升降台地下像素：哨兵坐标 -1,-1 不在网格范围内，需显式累加
+            foreach (var elev in pixelGroup.GetComponentsInChildren<ElevatorItem>())
+            {
+                if (elev != null)
+                    n += elev.undergroundPixels.Count;
+            }
             return n;
         }
 
@@ -254,6 +260,10 @@ namespace CrowdMatch
 
             // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
             if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
+                return false;
+
+            // 静止门槛：有升降台正在推进（开门/升起未完成）→ 还有进度，不判失败
+            if (pixelGroup != null && pixelGroup.advancingElevatorsCount > 0)
                 return false;
 
             var belt = conveyorZone.belt;
@@ -630,6 +640,9 @@ namespace CrowdMatch
 
             // 匹配移除后，检查并尝试开箱（箱子隐藏 Pixel 可能因此释放并再触发一次暴露刷新）
             pixelGroup.TryOpenBoxes();
+
+            // 再检查并尝试推进升降台（区域清空后开门 + 升起下一组）
+            pixelGroup.TryAdvanceElevators();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
