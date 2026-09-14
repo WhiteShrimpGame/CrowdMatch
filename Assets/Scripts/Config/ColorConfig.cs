@@ -28,6 +28,12 @@ namespace CrowdMatch
         [Tooltip("问号 Pixel 隐藏状态使用的特殊材质（揭晓后换回 colorId 对应材质）")]
         public Material questionMaterial;
 
+        [Tooltip("问号车未揭晓时的车体材质（对应 Car 槽位，隐藏真实车体颜色）")]
+        public Material questionCarMaterial;
+
+        [Tooltip("问号车未揭晓时的车内部材质（对应 Interior 槽位，隐藏真实内部颜色）")]
+        public Material questionInteriorMaterial;
+
         /// <summary>材质数量（即颜色总数）</summary>
         public int Count => materials != null ? materials.Length : 0;
 

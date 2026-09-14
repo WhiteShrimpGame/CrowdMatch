@@ -16,6 +16,12 @@ namespace CrowdMatch
         [Tooltip("容器接受的颜色 ID")]
         public int colorId;
 
+        [Tooltip("是否为问号车（开盖揭晓前隐藏真实颜色，开盖暴露后显示 colorId 对应颜色）")]
+        public bool isQuestion;
+
+        /// <summary>是否已揭晓：问号车开盖暴露过一次后永久为 true，之后保持原色。运行时状态，不序列化。</summary>
+        [System.NonSerialized] public bool revealed;
+
         [Tooltip("总容量（可容纳的 PixelItem 数量）")]
         public int capacity = 1;
 
@@ -115,6 +121,9 @@ namespace CrowdMatch
         private Renderer _renderer;
         private int _remaining;
 
+        /// <summary>缓存的颜色配置（Awake/首次 ApplyMaterial 时记录，供问号揭晓切材质时复用，避免依赖 GameManager 时序）。</summary>
+        private ColorConfig _cachedConfig;
+
         private readonly HashSet<Transform> _occupiedPos = new HashSet<Transform>();
         private int _elasticPhase;                 // 0=空闲，1=放大中（未到最大值），2=复原中（最大值→1）
         private Coroutine _elasticRoutine;
@@ -187,6 +196,7 @@ namespace CrowdMatch
             lidOpened = true;
             if (lidTransform != null)
                 lidTransform.gameObject.SetActive(false);
+            RevealQuestion();   // 前排车初始即暴露：问号车立即揭晓为本来颜色
         }
 
         /// <summary>播放开盖动画（后排小车满足「前方全部找全匹配对象」时使用），幂等：只播放一次。</summary>
@@ -195,6 +205,7 @@ namespace CrowdMatch
             if (lidOpened)
                 return;
             lidOpened = true;
+            RevealQuestion();   // 开盖（暴露）即揭晓：在盖子消失动画播放前切换为本来颜色
             if (lidTransform == null || !lidTransform.gameObject.activeSelf)
                 return;
             lidTransform.DisappearWithPop(() =>
@@ -204,6 +215,16 @@ namespace CrowdMatch
             });
         }
 
+        /// <summary>问号车揭晓：开盖暴露后永久切换为本来颜色（单向，与问号 Pixel 的 revealed 语义一致）。</summary>
+        private void RevealQuestion()
+        {
+            if (isQuestion && !revealed)
+            {
+                revealed = true;
+                ApplyMaterial();
+            }
+        }
+
         /// <summary>
         /// 按 colorId 应用材质，config 为空时从 GameManager 获取。
         /// 正常路径：按 materialReplacements 逐项替换（materialType 决定取车材质还是车内部材质）；
@@ -211,18 +232,47 @@ namespace CrowdMatch
         /// </summary>
         public void ApplyMaterial(ColorConfig config = null)
         {
-            if (config == null)
-            {
-                if (GameManager.Instance != null)
-                    config = GameManager.Instance.colorConfig;
-            }
-            if (config == null)
+            if (config != null)
+                _cachedConfig = config;
+            else if (_cachedConfig == null && GameManager.Instance != null)
+                _cachedConfig = GameManager.Instance.colorConfig;
+
+            if (_cachedConfig == null)
                 return;
+
+            // 问号车未揭晓：按材质类型（Car/Interior）分别换成对应问号材质（隐藏真实颜色）
+            if (isQuestion && !revealed)
+            {
+                // 回退路径：无替换项时用问号车体材质给首个 Renderer 整车上色
+                if (materialReplacements == null || materialReplacements.Count == 0)
+                {
+                    var qMat = _cachedConfig.questionCarMaterial;
+                    if (qMat == null)
+                        return;
+                    if (_renderer == null)
+                        _renderer = GetComponent<Renderer>();
+                    if (_renderer != null)
+                        _renderer.sharedMaterial = qMat;
+                    return;
+                }
+                foreach (var rep in materialReplacements)
+                {
+                    if (rep == null || rep.renderer == null)
+                        continue;
+                    var qMat = rep.materialType == ContainerMaterialType.Interior
+                        ? _cachedConfig.questionInteriorMaterial
+                        : _cachedConfig.questionCarMaterial;
+                    if (qMat == null)
+                        continue;   // 该组未配置问号材质，跳过（保持原样）
+                    ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, qMat);
+                }
+                return;
+            }
 
             // 回退：未配置任何替换项时，用基础材质给首个 Renderer 整车上色（旧逻辑）
             if (materialReplacements == null || materialReplacements.Count == 0)
             {
-                var mat = config.GetMaterial(colorId);
+                var mat = _cachedConfig.GetMaterial(colorId);
                 if (_renderer == null)
                     _renderer = GetComponent<Renderer>();
                 if (_renderer != null && mat != null)
@@ -236,8 +286,8 @@ namespace CrowdMatch
                 if (rep == null || rep.renderer == null)
                     continue;
                 var repMat = rep.materialType == ContainerMaterialType.Interior
-                    ? config.GetInteriorMaterial(colorId)
-                    : config.GetCarMaterial(colorId);
+                    ? _cachedConfig.GetInteriorMaterial(colorId)
+                    : _cachedConfig.GetCarMaterial(colorId);
                 if (repMat == null)
                     continue;   // 该组未配置此颜色，跳过
                 ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, repMat);

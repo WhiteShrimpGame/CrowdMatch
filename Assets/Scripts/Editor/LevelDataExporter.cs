@@ -250,6 +250,7 @@ namespace CrowdMatch
                         y = item.gridZ,
                         colorId = item.colorId,
                         capacity = item.capacity,
+                        question = item.isQuestion,
                     });
                 }
             }

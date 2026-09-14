@@ -54,6 +54,9 @@ namespace CrowdMatch
             public int y;
             public int colorId;
             public int capacity;
+
+            /// <summary>true = 问号车（开盖揭晓前隐藏真实颜色）。旧 JSON 无此字段时为 false。</summary>
+            public bool question;
         }
 
         /// <summary>一段墙体：端点序列（网格坐标，x = 列 col，y = 行 row），相邻两点构成一段，每段平行于 X 或 Z 轴。</summary>
