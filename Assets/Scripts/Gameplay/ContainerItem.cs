@@ -22,6 +22,9 @@ namespace CrowdMatch
         /// <summary>是否已揭晓：问号车开盖暴露过一次后永久为 true，之后保持原色。运行时状态，不序列化。</summary>
         [System.NonSerialized] public bool revealed;
 
+        [Tooltip("问号物体（如车顶问号标志）：问号车未揭晓时显示，开盖揭晓后隐藏。留空则无问号视觉。")]
+        public GameObject questionObject;
+
         [Tooltip("总容量（可容纳的 PixelItem 数量）")]
         public int capacity = 1;
 
@@ -164,6 +167,7 @@ namespace CrowdMatch
                 capacityText = GetComponentInChildren<Text>();
             ApplyMaterial();
             UpdateText();
+            RefreshQuestionObject();   // 初始化问号物体显隐
         }
 
         /// <summary>设置容量（编辑器与运行时都可用），并刷新显示</summary>
@@ -222,7 +226,15 @@ namespace CrowdMatch
             {
                 revealed = true;
                 ApplyMaterial();
+                RefreshQuestionObject();   // 开盖揭晓：隐藏问号物体
             }
+        }
+
+        /// <summary>按「是否未揭晓问号车」刷新问号物体的显隐：未揭晓问号显示，其余（非问号/已揭晓）隐藏。车无 Animator，直接立即切换，无需延迟一帧。</summary>
+        public void RefreshQuestionObject()
+        {
+            if (questionObject != null)
+                questionObject.SetActive(isQuestion && !revealed);
         }
 
         /// <summary>

@@ -633,6 +633,7 @@ namespace CrowdMatch
             item.gridZ = row;
             item.colorId = colorId;
             item.isQuestion = isQuestion;
+            item.RefreshQuestionObject();   // Awake 时 isQuestion 尚未赋值（仍是预制体默认值），此处补刷新问号物体显隐
             item.ApplyMaterial(config);
             return item;
         }

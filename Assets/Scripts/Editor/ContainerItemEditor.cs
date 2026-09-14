@@ -48,9 +48,12 @@ namespace CrowdMatch
                             Undo.RecordObject(rep.renderer, question ? "Mark Question Container" : "Unmark Question Container");
                     }
                 }
+                if (item.questionObject != null)
+                    Undo.RecordObject(item.questionObject, question ? "Mark Question Container" : "Unmark Question Container");
 
                 item.isQuestion = question;
                 item.ApplyMaterial(colorConfig);
+                item.RefreshQuestionObject();
                 EditorUtility.SetDirty(item);
             }
         }

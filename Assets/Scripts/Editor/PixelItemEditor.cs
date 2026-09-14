@@ -109,9 +109,12 @@ namespace CrowdMatch
                     if (r != null)
                         Undo.RecordObject(r, question ? "Mark Question Pixel" : "Unmark Question Pixel");
                 }
+                if (item.questionObject != null)
+                    Undo.RecordObject(item.questionObject, question ? "Mark Question Pixel" : "Unmark Question Pixel");
 
                 item.isQuestion = question;
                 item.ApplyMaterial(colorConfig);
+                item.RefreshQuestionObject();
                 EditorUtility.SetDirty(item);
             }
         }
