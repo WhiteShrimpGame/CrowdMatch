@@ -29,6 +29,9 @@ namespace CrowdMatch
 
             /// <summary>长度 = columns × (rows + tailRows)，index = row * columns + col。</summary>
             public int[] cells = new int[0];
+
+            /// <summary>长度 = columns × (rows + tailRows)，index = row * columns + col；true = 该格为问号 Pixel（隐藏真实颜色）。</summary>
+            public bool[] questionCells = new bool[0];
         }
 
         /// <summary>ContainerGroup 布局：尺寸 + 稀疏容器列表（只存非空格）。</summary>

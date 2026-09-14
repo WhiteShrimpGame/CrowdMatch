@@ -533,6 +533,14 @@ namespace CrowdMatch
                 return;
             }
 
+            // 问号 Pixel 未揭晓时不可点击（揭晓后等同普通同色像素）
+            if (item.isQuestion && !item.revealed)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但为未揭晓问号 Pixel，忽略点击");
+                return;
+            }
+
             if (debugClickLog)
                 Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
                     ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
@@ -674,7 +682,12 @@ namespace CrowdMatch
 
                 foreach (var nb in GetNeighbors(cur))
                 {
-                    if (nb != null && nb.colorId == color && visited.Add(nb))
+                    if (nb == null || nb.colorId != color)
+                        continue;
+                    // 未揭晓问号 Pixel 断开连通：不参与移除、不扩散
+                    if (nb.isQuestion && !nb.revealed)
+                        continue;
+                    if (visited.Add(nb))
                         queue.Enqueue(nb);
                 }
             }

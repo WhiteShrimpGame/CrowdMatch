@@ -210,6 +210,7 @@ namespace CrowdMatch
 
             int totalRows = pg.TotalRows;
             data.pixel.cells = new int[pg.columns * totalRows];
+            data.pixel.questionCells = new bool[pg.columns * totalRows];
             int emptyCells = 0;
             for (int r = 0; r < totalRows; r++)
             {
@@ -217,7 +218,10 @@ namespace CrowdMatch
                 {
                     var item = pg.GetItem(c, r);
                     if (item != null)
+                    {
                         data.pixel.cells[r * pg.columns + c] = item.colorId;
+                        data.pixel.questionCells[r * pg.columns + c] = item.isQuestion;
+                    }
                     else
                     {
                         data.pixel.cells[r * pg.columns + c] = 0;

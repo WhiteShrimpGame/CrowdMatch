@@ -132,3 +132,4 @@ MonoBehaviour:
   - {r: 0.4009434, g: 0.4009434, b: 0.4009434, a: 1}
   - {r: 0.2924528, g: 0.28527945, b: 0.28527945, a: 1}
   - {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  questionMaterial: {fileID: 2100000, guid: 96c7e374244ba1f4faaf0900af7ce691, type: 2}

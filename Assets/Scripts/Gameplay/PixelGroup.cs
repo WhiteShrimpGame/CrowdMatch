@@ -410,6 +410,7 @@ namespace CrowdMatch
                     int color = grid[c, r].colorId;
                     var cells = new List<Vector2Int>();
                     bool hasExposed = false;
+                    bool hasExposedQuestion = false;
                     var queue = new Queue<Vector2Int>();
                     queue.Enqueue(new Vector2Int(c, r));
                     visited[c, r] = true;
@@ -419,7 +420,12 @@ namespace CrowdMatch
                         var cur = queue.Dequeue();
                         cells.Add(cur);
                         if (directlyExposed[cur.x, cur.y])
+                        {
                             hasExposed = true;
+                            var curItem = grid[cur.x, cur.y];
+                            if (curItem != null && curItem.isQuestion && !curItem.revealed)
+                                hasExposedQuestion = true;
+                        }
 
                         for (int d = 0; d < 4; d++)
                         {
@@ -439,11 +445,19 @@ namespace CrowdMatch
                         }
                     }
 
-                    if (!hasExposed)
-                        continue;
-
+                    // 逐格判定激活：
+                    // 未揭晓问号格：仅当块内存在「直接暴露的未揭晓问号格」才激活（问号不因相邻非问号暴露而揭晓）
+                    // 已揭晓问号格 / 非问号格：块内任一格直接暴露即激活（原逻辑，揭晓后等同普通像素）
                     foreach (var cell in cells)
-                        active[cell.x, cell.y] = true;
+                    {
+                        var it = grid[cell.x, cell.y];
+                        if (it == null)
+                            continue;
+                        bool isStillQuestion = it.isQuestion && !it.revealed;
+                        bool act = isStillQuestion ? hasExposedQuestion : hasExposed;
+                        if (act)
+                            active[cell.x, cell.y] = true;
+                    }
                 }
             }
 
@@ -594,7 +608,7 @@ namespace CrowdMatch
         }
 
         /// <summary>在指定格子生成一个 PixelItem 并应用颜色材质（供运行时关卡加载使用）。PixelItem 组件来自预制体，不再动态创建。</summary>
-        public PixelItem SpawnPixel(int col, int row, int colorId, ColorConfig config, bool scaleZero = false)
+        public PixelItem SpawnPixel(int col, int row, int colorId, ColorConfig config, bool scaleZero = false, bool isQuestion = false)
         {
             if (pixelPrefab == null)
             {
@@ -618,6 +632,7 @@ namespace CrowdMatch
             item.gridX = col;
             item.gridZ = row;
             item.colorId = colorId;
+            item.isQuestion = isQuestion;
             item.ApplyMaterial(config);
             return item;
         }

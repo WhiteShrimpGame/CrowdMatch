@@ -123,7 +123,9 @@ namespace CrowdMatch
                     if (skipCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int colorId = d.cells[r * columns + c];
-                    pg.SpawnPixel(c, r, colorId, config);
+                    bool isQuestion = d.questionCells != null && d.questionCells.Length > r * columns + c
+                        && d.questionCells[r * columns + c];
+                    pg.SpawnPixel(c, r, colorId, config, false, isQuestion);
                 }
 
             pg.RebuildGrid();

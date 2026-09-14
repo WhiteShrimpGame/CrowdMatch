@@ -15,6 +15,12 @@ namespace CrowdMatch
         [Tooltip("颜色 ID，对应 ColorConfig 中的材质下标")]
         public int colorId;
 
+        [Tooltip("是否为问号 Pixel（隐藏真实颜色，暴露到外层后才揭晓显示 colorId 对应颜色）")]
+        public bool isQuestion;
+
+        /// <summary>是否已揭晓：问号暴露过一次后永久为 true，之后保持原色、等同普通像素，不再变回问号。运行时状态，不序列化。</summary>
+        [System.NonSerialized] public bool revealed;
+
         [Tooltip("网格列坐标（横，X 方向），0 = 最小 X（最左）")]
         public int gridX;
 
@@ -67,6 +73,9 @@ namespace CrowdMatch
         private float _restLocalY = -0.6957998f;
 
         private Coroutine _exposeMove;
+
+        /// <summary>缓存的颜色配置（Spawn/首次 ApplyMaterial 时记录，供问号揭晓切材质时复用，避免依赖 GameManager 时序）。</summary>
+        private ColorConfig _cachedConfig;
 
         /// <summary>所属的 PixelGroup（运行时由 RebuildGrid 赋值，不序列化）</summary>
         [System.NonSerialized] public PixelGroup group;
@@ -194,15 +203,21 @@ namespace CrowdMatch
         /// </summary>
         public void ApplyMaterial(ColorConfig config = null)
         {
-            if (config == null)
-            {
-                if (GameManager.Instance != null)
-                    config = GameManager.Instance.colorConfig;
-            }
-            if (config == null)
+            if (config != null)
+                _cachedConfig = config;
+            else if (_cachedConfig == null && GameManager.Instance != null)
+                _cachedConfig = GameManager.Instance.colorConfig;
+
+            if (_cachedConfig == null)
                 return;
 
-            var mat = config.GetMaterial(colorId);
+            // 问号 Pixel 未揭晓时用问号材质，揭晓后（或普通 Pixel）用 colorId 对应材质
+            Material mat;
+            if (isQuestion && !revealed)
+                mat = _cachedConfig.questionMaterial;
+            else
+                mat = _cachedConfig.GetMaterial(colorId);
+
             if (mat == null)
                 return;
 
@@ -222,6 +237,12 @@ namespace CrowdMatch
             if (IsExposed == exposed)
                 return;
             IsExposed = exposed;
+            if (isQuestion)
+            {
+                if (exposed)
+                    revealed = true;   // 问号一旦揭晓，永久保持原色、等同普通像素
+                ApplyMaterial();       // 揭晓换回原色（之后不再变回问号材质）
+            }
             if (placing)
                 return;   // 管道放置中：只记录状态，不激活动画，放置完成后由 MarkPlaced / RefreshExposed 统一应用
             ApplyExposedState(exposed);
