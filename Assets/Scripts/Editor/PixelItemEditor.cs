@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
@@ -109,11 +110,92 @@ namespace CrowdMatch
                     if (r != null)
                         Undo.RecordObject(r, question ? "Mark Question Pixel" : "Unmark Question Pixel");
                 }
+                if (item.questionObject != null)
+                    Undo.RecordObject(item.questionObject, question ? "Mark Question Pixel" : "Unmark Question Pixel");
 
                 item.isQuestion = question;
                 item.ApplyMaterial(colorConfig);
+                item.RefreshQuestionObject();
                 EditorUtility.SetDirty(item);
             }
+        }
+    }
+
+    /// <summary>用选中的两个 Pixel 作为矩形对角（左上 + 右下），清除矩形范围内所有 PixelItem（支持 Undo）。</summary>
+    public static class PixelRectClearer
+    {
+        private const string Tag = "[PixelRectClearer]";
+
+        [MenuItem("CrowdMatch/清除选中矩形范围 Pixel %#x", true)]
+        private static bool ValidateClearRectFromSelection()
+        {
+            return CollectSelectedPixels().Count == 2;
+        }
+
+        [MenuItem("CrowdMatch/清除选中矩形范围 Pixel %#x")]
+        private static void ClearRectFromSelection()
+        {
+            var pixels = CollectSelectedPixels();
+            if (pixels.Count != 2)
+            {
+                EditorUtility.DisplayDialog("清除矩形范围 Pixel", "请精确选中 2 个 PixelItem（矩形对角两个角，如左上 + 右下）。", "确定");
+                return;
+            }
+
+            var a = pixels[0];
+            var b = pixels[1];
+
+            var group = a.GetComponentInParent<PixelGroup>();
+            if (group == null || b.GetComponentInParent<PixelGroup>() != group)
+            {
+                EditorUtility.DisplayDialog("清除矩形范围 Pixel", "选中的两个 Pixel 必须属于同一个 PixelGroup。", "确定");
+                return;
+            }
+
+            // 矩形对角归一化（不依赖选点先后顺序，任一对角都可）
+            int minX = Mathf.Min(a.gridX, b.gridX);
+            int maxX = Mathf.Max(a.gridX, b.gridX);
+            int minZ = Mathf.Min(a.gridZ, b.gridZ);
+            int maxZ = Mathf.Max(a.gridZ, b.gridZ);
+
+            group.RebuildGrid();
+
+            int removed = 0;
+            for (int r = minZ; r <= maxZ; r++)
+            {
+                for (int c = minX; c <= maxX; c++)
+                {
+                    var item = group.GetItem(c, r);
+                    if (item == null)
+                        continue;
+                    Undo.DestroyObjectImmediate(item.gameObject);
+                    removed++;
+                }
+            }
+
+            group.RebuildGrid();
+            if (Application.isPlaying)
+                group.RefreshExposed();
+            EditorUtility.SetDirty(group);
+
+            Debug.Log(Tag + " 已清除矩形范围 (" + minX + ", " + minZ + ") → (" + maxX + ", " + maxZ + ") 内的 " +
+                removed + " 个 Pixel（父物体 " + group.name + "）。");
+        }
+
+        /// <summary>收集按点选顺序缓存的 GameObject 中的 PixelItem（去重）。支持选中 PixelItem 的子物体（向上查找父级组件）。</summary>
+        private static List<PixelItem> CollectSelectedPixels()
+        {
+            var result = new List<PixelItem>();
+            var seen = new HashSet<PixelItem>();
+            foreach (var go in SelectionOrderTracker.Ordered)
+            {
+                if (go == null)
+                    continue;
+                var p = go.GetComponentInParent<PixelItem>();
+                if (p != null && seen.Add(p))
+                    result.Add(p);
+            }
+            return result;
         }
     }
 }

@@ -7,9 +7,10 @@ namespace CrowdMatch
 {
     /// <summary>
     /// 箱子（Box）：网格内一块矩形区域（左上 + 右下），内含若干隐藏 Pixel 并标注容量。
-    /// 开箱前区域是障碍；当相邻空格全部清空（可用格 == 容量）时开箱，把隐藏 Pixel 确定性
-    /// 释放到「本体 + 相邻」空格（格子按 row/col 排序、颜色按 colorIds 顺序），
+    /// 开箱前区域是障碍；当可用格（本体 + 相邻 + 连通）≥ 容量时开箱，把隐藏 Pixel 整体规划
+    /// 释放到这些候选格（优先级：本体 > 相邻 > 连通距离），确保同色像素各自 4 方向连通，
     /// 并分两段动画（本体外依次 Jump → 本体内原地站起 + 箱子放大缩小消失）。
+    /// 相邻仅按上下左右 4 方向（不含四角）。
     /// </summary>
     public class BoxItem : MonoBehaviour
     {
@@ -17,7 +18,7 @@ namespace CrowdMatch
         public int colMin, rowMin, colMax, rowMax;
 
         [Header("内容")]
-        [Tooltip("容量 = 隐藏 Pixel 数量 = 开箱触发阈值。运行时按周围环境自动计算（本体 + 相邻有效格），可在 Inspector 重算或手动覆盖。")]
+        [Tooltip("容量 = 隐藏 Pixel 数量 = 开箱触发阈值。以 colorIds（内容数）为准；可占用本体 + 相邻 + 连通格。")]
         public int capacity;
 
         [Tooltip("每个隐藏 Pixel 的颜色 ID，长度 == capacity")]
@@ -64,11 +65,18 @@ namespace CrowdMatch
         /// <summary>箱子视觉拼接出的 3 类预制体实例（开箱消失动画用）。</summary>
         private readonly List<GameObject> _visualPieces = new List<GameObject>();
 
+        /// <summary>回溯搜索预算（访问节点数上限）：防止极端关卡下穷举爆炸；超预算退回贪心兜底。</summary>
+        private const int BacktrackBudget = 50000;
+
+        /// <summary>回溯中单个颜色最多尝试的候选连通块数量。</summary>
+        private const int MaxBlocksPerColor = 64;
+
         public int BodyCount => (colMax - colMin + 1) * (rowMax - rowMin + 1);
 
         /// <summary>
-        /// 计算箱子容量 = 本体格子数 + 相邻有效格数（越界/墙体/管道/其它箱子本体不计数）。
-        /// 相邻固定按 8 方向（含四角）计算，与开箱触发、确定性落点口径一致。
+        /// 计算箱子「紧邻基础容量」= 本体格子数 + 相邻有效格数（越界/墙体/管道/其它箱子本体不计数）。
+        /// 相邻固定按上下左右 4 方向（不含四角），与开箱触发、落点候选口径一致。
+        /// 注：开箱实际可用格还包括「连通空格」，故该值仅作编辑器参考/兜底，不再是运行时容量上限。
         /// </summary>
         public int ComputeCapacity() => ComputeCapacity(group, colMin, rowMin, colMax, rowMax);
 
@@ -79,21 +87,29 @@ namespace CrowdMatch
                 return body;
 
             int adjacent = 0;
-            for (int r = rowMin - 1; r <= rowMax + 1; r++)
+            // 上/下边（不含四角）
+            for (int c = colMin; c <= colMax; c++)
             {
-                for (int c = colMin - 1; c <= colMax + 1; c++)
-                {
-                    bool inBody = c >= colMin && c <= colMax && r >= rowMin && r <= rowMax;
-                    if (inBody)
-                        continue;
-                    if (!group.IsInRange(c, r))
-                        continue;
-                    if (group.IsBlocked(c, r))
-                        continue;
-                    adjacent++;
-                }
+                CountIfEmpty(group, c, rowMin - 1, ref adjacent);
+                CountIfEmpty(group, c, rowMax + 1, ref adjacent);
+            }
+            // 左/右列（不含四角）
+            for (int r = rowMin; r <= rowMax; r++)
+            {
+                CountIfEmpty(group, colMin - 1, r, ref adjacent);
+                CountIfEmpty(group, colMax + 1, r, ref adjacent);
             }
             return body + adjacent;
+        }
+
+        /// <summary>若该格在范围内且非障碍（墙/管/箱），则计入相邻有效格数。</summary>
+        private static void CountIfEmpty(PixelGroup group, int c, int r, ref int adjacent)
+        {
+            if (!group.IsInRange(c, r))
+                return;
+            if (group.IsBlocked(c, r))
+                return;
+            adjacent++;
         }
 
         /// <summary>该格是否在箱子本体矩形内。</summary>
@@ -225,8 +241,8 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 尝试开箱：计算可用格，满足触发条件（相邻空格全部清空）则按确定性顺序分配位置
-        /// （候选格按 row/col 排序、颜色按 colorIds 顺序），立即把释放的 Pixel 落到 grid
+        /// 尝试开箱：收集候选格（本体 + 相邻 4 方向 + 连通），满足触发条件（可用格 ≥ 容量）则
+        /// 整体规划分配位置（同色像素各自连通），立即把释放的 Pixel 落到 grid
         /// （供多箱串行判定与后续逻辑看到），并启动两段开箱动画。返回是否实际开箱。
         /// </summary>
         public bool TryOpen()
@@ -244,16 +260,27 @@ namespace CrowdMatch
                 return true;
             }
 
-            // 1. 收集可用格：本体 + 相邻（固定 8 方向，含四角）
+            // 1. 收集候选格：本体 + 相邻（上下左右 4 方向）+ 连通（相邻出发 4 方向 BFS 的空格）
             var body = new List<Vector2Int>();
             EnumerateBody(body);
             var adjacent = CollectAdjacentEmpty();
+            var connected = CollectConnectedEmpty(adjacent);
 
-            int available = body.Count + adjacent.Count;
+            // 优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）
+            var score = new Dictionary<Vector2Int, int>();
+            foreach (var c in body)
+                score[c] = 0;
+            foreach (var c in adjacent)
+                score[c] = 1;
+            foreach (var pair in connected)
+                score[pair.cell] = 2 + pair.distance;
+
+            int available = body.Count + adjacent.Count + connected.Count;
             if (debugOpenLog)
             {
                 Debug.Log("[Box] 开箱判定 " + name + "：本体=" + body.Count +
                     " 相邻=" + adjacent.Count +
+                    " 连通=" + connected.Count +
                     " 可用=" + available + " 容量=" + capacity +
                     " 隐藏=" + hiddenPixels.Count +
                     (available >= capacity ? " → 开箱" : " → 空间不足，继续等待"));
@@ -265,21 +292,21 @@ namespace CrowdMatch
             opened = true;
             group.OnBoxOpened(this);
 
-            // 3. 确定性分布：所有候选格按 (row 升序, col 升序) 排序（同排先左后右），
-            //    隐藏 Pixel 保持 colorIds 顺序（不随机），一一对应。
-            var candidates = new List<Vector2Int>(body.Count + adjacent.Count);
-            candidates.AddRange(body);
-            candidates.AddRange(adjacent);
-            candidates.Sort(CompareByRowCol);
+            // 3. 整体规划：把隐藏像素按颜色分组，每种颜色分配到一组 4 方向连通的候选格，
+            //    确保释放后同色像素各自连通（优先级：本体 > 相邻 > 连通距离）。
+            var allCells = new List<Vector2Int>(available);
+            allCells.AddRange(body);
+            allCells.AddRange(adjacent);
+            foreach (var pair in connected)
+                allCells.Add(pair.cell);
 
-            var pixels = new List<PixelItem>(hiddenPixels);   // 保持 colorIds 顺序，不随机
+            var pixels = new List<PixelItem>(hiddenPixels);
+            var assignments = PlanAssignments(pixels, score, allCells);
 
-            int n = Mathf.Min(capacity, Mathf.Min(hiddenPixels.Count, candidates.Count));
-            var assignments = new List<(PixelItem pixel, Vector2Int cell)>();
-            for (int i = 0; i < n; i++)
+            foreach (var assignment in assignments)
             {
-                var pixel = pixels[i];
-                var cell = candidates[i];
+                var pixel = assignment.pixel;
+                var cell = assignment.cell;
                 pixel.gridX = cell.x;
                 pixel.gridZ = cell.y;
                 pixel.group = group;
@@ -288,7 +315,6 @@ namespace CrowdMatch
                 pixel.SetClickable(false);                 // 动画期间不可交互（就位后统一恢复可点击）
                 pixel.placing = true;                      // 动画期间不站起、保持 root 初始位置（就位后 MarkPlaced + RefreshExposed 统一激活）
                 pixel.walkableDuringExtraction = true;      // 本次点击开箱导致的占格，提取寻路时视为可走（结束后由 CrowdBufferZone 清除）
-                assignments.Add((pixel, cell));
                 hiddenPixels.Remove(pixel);
             }
 
@@ -297,21 +323,21 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>收集直接相邻空格（固定 8 方向，含四角）。</summary>
+        /// <summary>收集直接相邻空格（仅上下左右 4 方向，不含四角）。</summary>
         private List<Vector2Int> CollectAdjacentEmpty()
         {
             var result = new List<Vector2Int>();
-            int[] dx8 = { 1, -1, 0, 0, 1, 1, -1, -1 };
-            int[] dz8 = { 0, 0, 1, -1, 1, -1, 1, -1 };
+            int[] dx4 = { 1, -1, 0, 0 };
+            int[] dz4 = { 0, 0, 1, -1 };
 
             for (int r = rowMin; r <= rowMax; r++)
             {
                 for (int c = colMin; c <= colMax; c++)
                 {
-                    for (int d = 0; d < 8; d++)
+                    for (int d = 0; d < 4; d++)
                     {
-                        int nx = c + dx8[d];
-                        int nz = r + dz8[d];
+                        int nx = c + dx4[d];
+                        int nz = r + dz4[d];
                         if (!group.IsInRange(nx, nz))
                             continue;
                         if (IsInBody(nx, nz))
@@ -325,6 +351,379 @@ namespace CrowdMatch
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// 收集「连通空格」：从相邻格出发、只经上下左右 4 方向的空 BFS 扩散可达的空格
+        /// （不含本体与相邻格本身）。返回每个格及其到相邻格的最短距离（0 起跳）。
+        /// </summary>
+        private List<(Vector2Int cell, int distance)> CollectConnectedEmpty(IReadOnlyList<Vector2Int> adjacent)
+        {
+            var result = new List<(Vector2Int, int)>();
+            if (group == null)
+                return result;
+
+            var body = new HashSet<Vector2Int>();
+            for (int r = rowMin; r <= rowMax; r++)
+                for (int c = colMin; c <= colMax; c++)
+                    body.Add(new Vector2Int(c, r));
+
+            var adjSet = new HashSet<Vector2Int>(adjacent);
+            var visited = new HashSet<Vector2Int>(adjSet);
+            var queue = new Queue<(Vector2Int cell, int dist)>();
+            foreach (var a in adjacent)
+                queue.Enqueue((a, 0));
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.cell.x + dx[d];
+                    int nz = cur.cell.y + dz[d];
+                    var nb = new Vector2Int(nx, nz);
+                    if (!group.IsInRange(nx, nz))
+                        continue;
+                    if (body.Contains(nb) || adjSet.Contains(nb))
+                        continue;
+                    if (visited.Contains(nb))
+                        continue;
+                    if (!group.IsEmpty(nx, nz))
+                        continue;
+                    visited.Add(nb);
+                    result.Add((nb, cur.dist + 1));
+                    queue.Enqueue((nb, cur.dist + 1));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 整体规划释放落点：把隐藏像素按颜色分组，每种颜色分配到一组 4 方向连通的候选格，
+        /// 使释放后同色像素各自连通。颜色组按数量降序（大块优先占高优先级格）。
+        /// 先回溯搜索「所有颜色各自连通」的完整解（受预算约束），避免贪心先把某块贪掉、
+        /// 导致其余候选格被割裂、本该连通的颜色被截断；无解/超预算时退回贪心兜底。
+        /// </summary>
+        private List<(PixelItem pixel, Vector2Int cell)> PlanAssignments(
+            List<PixelItem> pixels,
+            Dictionary<Vector2Int, int> score,
+            List<Vector2Int> allCells)
+        {
+            // 颜色分组（保持 colorIds 相对顺序）
+            var groups = new Dictionary<int, List<PixelItem>>();
+            foreach (var p in pixels)
+            {
+                if (!groups.TryGetValue(p.colorId, out var list))
+                {
+                    list = new List<PixelItem>();
+                    groups[p.colorId] = list;
+                }
+                list.Add(p);
+            }
+            var colorGroups = new List<List<PixelItem>>(groups.Values);
+            colorGroups.Sort((a, b) =>
+            {
+                int c = b.Count.CompareTo(a.Count);   // 数量降序：大块优先占高优先级格
+                if (c != 0)
+                    return c;
+                return a[0].colorId.CompareTo(b[0].colorId);   // 平局按颜色值升序，保证确定性
+            });
+
+            // 1. 回溯求「所有颜色各自连通」的完整解（若存在，优先于贪心）
+            var remaining = new HashSet<Vector2Int>(allCells);
+            var solution = new List<Vector2Int>[colorGroups.Count];
+            int budget = BacktrackBudget;
+            if (SolveConnected(colorGroups, 0, remaining, score, solution, ref budget))
+            {
+                var result = new List<(PixelItem, Vector2Int)>();
+                for (int gi = 0; gi < colorGroups.Count; gi++)
+                {
+                    var g = colorGroups[gi];
+                    var block = solution[gi];
+                    for (int i = 0; i < g.Count && i < block.Count; i++)
+                        result.Add((g[i], block[i]));
+                }
+                return result;
+            }
+
+            // 2. 兜底：贪心（可能因障碍割裂而不连通）
+            return PlanAssignmentsGreedy(colorGroups, score, allCells);
+        }
+
+        /// <summary>贪心兜底：每种颜色从剩余候选格按优先级 BFS 生长连通块；被障碍割裂无法连通容纳时按优先级补齐（可能不连通）。</summary>
+        private List<(PixelItem pixel, Vector2Int cell)> PlanAssignmentsGreedy(
+            List<List<PixelItem>> colorGroups,
+            Dictionary<Vector2Int, int> score,
+            List<Vector2Int> allCells)
+        {
+            var result = new List<(PixelItem, Vector2Int)>();
+            var remaining = new HashSet<Vector2Int>(allCells);
+
+            foreach (var groupPixels in colorGroups)
+            {
+                int n = groupPixels.Count;
+                var block = GrowBlock(remaining, score, n);
+                if (block.Count < n)
+                {
+                    var blockSet = new HashSet<Vector2Int>(block);
+                    var extra = new List<Vector2Int>();
+                    foreach (var c in remaining)
+                        if (!blockSet.Contains(c))
+                            extra.Add(c);
+                    extra.Sort(CompareByScoreThenRowCol(score));
+                    for (int i = 0; i < extra.Count && block.Count < n; i++)
+                        block.Add(extra[i]);
+                    Debug.LogWarning("[Box] 开箱 " + name + "：颜色 " + groupPixels[0].colorId +
+                        " 需要 " + n + " 格，剩余候选格被障碍割裂无法连通容纳，已按优先级补齐（可能不连通）。");
+                }
+                for (int i = 0; i < groupPixels.Count && i < block.Count; i++)
+                {
+                    result.Add((groupPixels[i], block[i]));
+                    remaining.Remove(block[i]);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 回溯搜索：把每个颜色组分配到一组 4 方向连通、互不重叠的候选格（数量 = 该颜色像素数）。
+        /// 颜色按数量降序处理（大块优先占高优先级格）；每种颜色按优先级从高到低枚举候选连通块并逐一尝试。
+        /// 找到完整解返回 true（solution[gi] = 该颜色的落点列表）；超预算或无解返回 false（调用方走贪心兜底）。
+        /// </summary>
+        private bool SolveConnected(
+            List<List<PixelItem>> colorGroups,
+            int gi,
+            HashSet<Vector2Int> remaining,
+            Dictionary<Vector2Int, int> score,
+            List<Vector2Int>[] solution,
+            ref int budget)
+        {
+            if (gi >= colorGroups.Count)
+                return true;
+            if (budget <= 0)
+                return false;
+            budget--;
+
+            int n = colorGroups[gi].Count;
+            if (n <= 0)
+            {
+                solution[gi] = new List<Vector2Int>();
+                return SolveConnected(colorGroups, gi + 1, remaining, score, solution, ref budget);
+            }
+
+            var blocks = new List<List<Vector2Int>>();
+            EnumerateConnectedBlocks(remaining, score, n, ref budget, blocks);
+
+            foreach (var block in blocks)
+            {
+                foreach (var c in block)
+                    remaining.Remove(c);
+                solution[gi] = block;
+                if (SolveConnected(colorGroups, gi + 1, remaining, score, solution, ref budget))
+                    return true;
+                foreach (var c in block)
+                    remaining.Add(c);
+                solution[gi] = null;
+                if (budget <= 0)
+                    return false;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 枚举 remaining 中大小为 n 的 4 方向连通块（以块内优先级最高格为种子、只朝优先级更低的格子生长，保证每个块唯一枚举）。
+        /// 结果按优先级（分数和升序，平局按规范键字典序）排序，最多 MaxBlocksPerColor 个，受 budget 约束。
+        /// </summary>
+        private void EnumerateConnectedBlocks(
+            HashSet<Vector2Int> remaining,
+            Dictionary<Vector2Int, int> score,
+            int n,
+            ref int budget,
+            List<List<Vector2Int>> outBlocks)
+        {
+            outBlocks.Clear();
+            if (n <= 0 || remaining.Count < n)
+                return;
+
+            var cmp = CompareByScoreThenRowCol(score);
+            var seeds = new List<Vector2Int>(remaining);
+            seeds.Sort(cmp);
+
+            var block = new List<Vector2Int>();
+            var inBlock = new HashSet<Vector2Int>();
+            var seen = new HashSet<string>();   // 去重：同一集合可能被不同生长顺序枚举出来
+
+            foreach (var seed in seeds)
+            {
+                if (budget <= 0 || outBlocks.Count >= MaxBlocksPerColor)
+                    break;
+                block.Add(seed);
+                inBlock.Add(seed);
+                GrowConnectedRec(remaining, score, cmp, n, seed, block, inBlock, seen, ref budget, outBlocks);
+                inBlock.Clear();
+                block.Clear();
+            }
+
+            outBlocks.Sort((a, b) =>
+            {
+                int sa = 0, sb = 0;
+                foreach (var c in a)
+                    sa += ScoreOf(score, c);
+                foreach (var c in b)
+                    sb += ScoreOf(score, c);
+                if (sa != sb)
+                    return sa.CompareTo(sb);
+                return string.CompareOrdinal(CanonicalKey(a), CanonicalKey(b));
+            });
+        }
+
+        /// <summary>
+        /// 递归生长连通块：把当前块的可扩展邻居（在 remaining、不在块内、且优先级低于 seed）按优先级排序逐个尝试。
+        /// 达到大小 n 时记录（去重）；受 budget 与 MaxBlocksPerColor 约束。
+        /// </summary>
+        private void GrowConnectedRec(
+            HashSet<Vector2Int> remaining,
+            Dictionary<Vector2Int, int> score,
+            System.Comparison<Vector2Int> cmp,
+            int n,
+            Vector2Int seed,
+            List<Vector2Int> block,
+            HashSet<Vector2Int> inBlock,
+            HashSet<string> seen,
+            ref int budget,
+            List<List<Vector2Int>> outBlocks)
+        {
+            if (budget <= 0 || outBlocks.Count >= MaxBlocksPerColor)
+                return;
+            budget--;
+
+            if (block.Count == n)
+            {
+                var key = CanonicalKey(block);
+                if (seen.Add(key))
+                    outBlocks.Add(new List<Vector2Int>(block));
+                return;
+            }
+
+            // 收集可扩展邻居（去重 + 仅保留优先级低于 seed 的格子，保证 seed 是块内最优、避免跨种子重复）
+            var candidateSet = new HashSet<Vector2Int>();
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+            foreach (var c in block)
+            {
+                for (int d = 0; d < 4; d++)
+                {
+                    var nb = new Vector2Int(c.x + dx[d], c.y + dz[d]);
+                    if (!remaining.Contains(nb) || inBlock.Contains(nb))
+                        continue;
+                    if (cmp(seed, nb) >= 0)
+                        continue;
+                    candidateSet.Add(nb);
+                }
+            }
+
+            var candidates = new List<Vector2Int>(candidateSet);
+            candidates.Sort(cmp);
+
+            foreach (var cand in candidates)
+            {
+                block.Add(cand);
+                inBlock.Add(cand);
+                GrowConnectedRec(remaining, score, cmp, n, seed, block, inBlock, seen, ref budget, outBlocks);
+                inBlock.Remove(cand);
+                block.RemoveAt(block.Count - 1);
+                if (budget <= 0 || outBlocks.Count >= MaxBlocksPerColor)
+                    break;
+            }
+        }
+
+        /// <summary>连通块去重/排序用的规范键：按 (x, y) 升序拼接。</summary>
+        private static string CanonicalKey(List<Vector2Int> block)
+        {
+            var arr = new List<Vector2Int>(block);
+            arr.Sort((a, b) =>
+            {
+                int c = a.x.CompareTo(b.x);
+                return c != 0 ? c : a.y.CompareTo(b.y);
+            });
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in arr)
+                sb.Append(c.x).Append(',').Append(c.y).Append(';');
+            return sb.ToString();
+        }
+
+        /// <summary>从剩余候选格中按优先级 BFS 生长出至多 n 个 4 方向连通的格子（BFS 前缀保证连通），优先占用 score 低的格子。</summary>
+        private List<Vector2Int> GrowBlock(HashSet<Vector2Int> remaining, Dictionary<Vector2Int, int> score, int n)
+        {
+            var result = new List<Vector2Int>();
+            if (n <= 0 || remaining.Count == 0)
+                return result;
+
+            // 种子：remaining 中 score 最小（平局 row/col 小），确定性
+            Vector2Int seed = default;
+            bool found = false;
+            int bestScore = int.MaxValue;
+            foreach (var c in remaining)
+            {
+                int s = ScoreOf(score, c);
+                if (!found || s < bestScore || (s == bestScore && (c.y < seed.y || (c.y == seed.y && c.x < seed.x))))
+                {
+                    found = true;
+                    bestScore = s;
+                    seed = c;
+                }
+            }
+            if (!found)
+                return result;
+
+            var visited = new HashSet<Vector2Int>();
+            var frontier = new SortedSet<(int s, int r, int c)>();
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            void Push(Vector2Int cell)
+            {
+                if (!remaining.Contains(cell) || visited.Contains(cell))
+                    return;
+                frontier.Add((ScoreOf(score, cell), cell.y, cell.x));
+            }
+
+            Push(seed);
+            while (result.Count < n && frontier.Count > 0)
+            {
+                var top = frontier.Min;
+                frontier.Remove(top);
+                var cur = new Vector2Int(top.c, top.r);
+                if (!remaining.Contains(cur) || !visited.Add(cur))
+                    continue;
+                result.Add(cur);
+                for (int d = 0; d < 4; d++)
+                    Push(new Vector2Int(cur.x + dx[d], cur.y + dz[d]));
+            }
+            return result;
+        }
+
+        /// <summary>取候选格的优先级分数；未记录（理论上不应出现）的按最低优先级处理。</summary>
+        private static int ScoreOf(Dictionary<Vector2Int, int> score, Vector2Int c)
+            => score.TryGetValue(c, out var v) ? v : int.MaxValue;
+
+        /// <summary>按优先级分数升序（平局 row/col 升序）排序的比较器，供退化兜底用。</summary>
+        private static System.Comparison<Vector2Int> CompareByScoreThenRowCol(Dictionary<Vector2Int, int> score)
+        {
+            return (Vector2Int a, Vector2Int b) =>
+            {
+                int sa = ScoreOf(score, a);
+                int sb = ScoreOf(score, b);
+                if (sa != sb)
+                    return sa.CompareTo(sb);
+                int rc = a.y.CompareTo(b.y);
+                if (rc != 0)
+                    return rc;
+                return a.x.CompareTo(b.x);
+            };
         }
 
         /// <summary>确定性排序：先按 row（排）升序，同排再按 col（列）升序（从左到右）。</summary>

@@ -79,7 +79,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 一个箱子：矩形区域（左上 + 右下）+ 容量 + 隐藏 Pixel 颜色 + 行为开关。
-        /// 箱子区域的格子在 pixel.cells 里写 0（占位），开箱后的 Pixel 颜色由 colorIds 提供。
+        /// 箱子区域的格子在 pixel.cells 里写 -1（占位/空像素），开箱后的 Pixel 颜色由 colorIds 提供。
         /// </summary>
         [Serializable]
         public class BoxData

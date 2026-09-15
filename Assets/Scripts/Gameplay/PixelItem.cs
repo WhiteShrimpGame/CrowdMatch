@@ -21,6 +21,10 @@ namespace CrowdMatch
         /// <summary>是否已揭晓：问号暴露过一次后永久为 true，之后保持原色、等同普通像素，不再变回问号。运行时状态，不序列化。</summary>
         [System.NonSerialized] public bool revealed;
 
+        [Header("问号外观")]
+        [Tooltip("问号物体（如头顶问号标志）：问号未揭晓时显示，揭晓后隐藏。留空则无问号视觉。")]
+        public GameObject questionObject;
+
         [Tooltip("网格列坐标（横，X 方向），0 = 最小 X（最左）")]
         public int gridX;
 
@@ -35,11 +39,14 @@ namespace CrowdMatch
         [Tooltip("暴露在外层（可点击）时激活的 Animator")]
         public Animator animator;
 
-        [Tooltip("暴露后要匀速移动到 y=0 的物体（独立于 Animator 引用）")]
+        [Tooltip("上车（跳入容器）时坐回配置偏移的物体（独立于 Animator 引用；起身/坐下逻辑已移除，不再随暴露位移）")]
         public Transform exposeMoveTarget;
 
-        [Tooltip("暴露后把 exposeMoveTarget 匀速移动到 y=0 的时长（秒）")]
+        [Tooltip("上车坐回（把 exposeMoveTarget 匀速移到 boardSitDownYOffset）的时长（秒）")]
         public float exposeMoveDuration = 0.3f;
+
+        [Tooltip("上车坐下时 exposeMoveTarget 的目标 y 偏移（相对其父级）。原预制体默认 -1.3803998")]
+        public float boardSitDownYOffset = -1.3803998f;
 
         [Tooltip("点击碰撞体组件（挂在 Click 层的子物体上）；为空时在 Awake 中自动查找子物体")]
         public PixelClickListener listener;
@@ -69,10 +76,10 @@ namespace CrowdMatch
         /// <summary>是否正在做 Idle 平滑归零（期间不切回 Walking）。</summary>
         private bool _smoothing;
 
-        /// <summary>起跳坐回时 exposeMoveTarget 的目标 y（Awake 捕获预制体初始值，兜底 -0.6957998）。</summary>
-        private float _restLocalY = -0.6957998f;
-
         private Coroutine _exposeMove;
+
+        /// <summary>问号物体「延迟一帧显示」的协程句柄（隐藏时立即停止）。</summary>
+        private Coroutine _questionShowRoutine;
 
         /// <summary>缓存的颜色配置（Spawn/首次 ApplyMaterial 时记录，供问号揭晓切材质时复用，避免依赖 GameManager 时序）。</summary>
         private ColorConfig _cachedConfig;
@@ -96,10 +103,9 @@ namespace CrowdMatch
         {
             ApplyMaterial();
             BindClickListener();
-            if (exposeMoveTarget != null)
-                _restLocalY = exposeMoveTarget.localPosition.y;
             if (outlineRenderer != null)
                 outlineRenderer.enabled = false;   // 初始不可点击，描边关闭
+            RefreshQuestionObject();   // 初始化问号物体显隐（未揭晓问号显示、其余隐藏）
         }
 
         /// <summary>查找并绑定点击碰撞体组件，赋值反向引用供点击判定使用。</summary>
@@ -181,14 +187,14 @@ namespace CrowdMatch
                 ApplyWalking();
         }
 
-        /// <summary>把 exposeMoveTarget 匀速坐回原始 y（上车起跳时调用，默认回 _restLocalY）。</summary>
+        /// <summary>把 exposeMoveTarget 匀速坐到 boardSitDownYOffset（上车起跳时调用）。</summary>
         public void SitDownExposeTarget()
         {
             if (exposeMoveTarget == null)
                 return;
             if (_exposeMove != null)
                 StopCoroutine(_exposeMove);
-            _exposeMove = StartCoroutine(MoveExposeTargetToY(_restLocalY, exposeMoveDuration));
+            _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset, exposeMoveDuration));
         }
 
         /// <summary>设置颜色 ID 并立即应用材质</summary>
@@ -228,9 +234,52 @@ namespace CrowdMatch
             }
         }
 
+        /// <summary>按「是否未揭晓问号」刷新问号物体的显隐：未揭晓问号显示，其余（非问号/已揭晓）隐藏。
+        /// 运行时显示延迟一帧（避免生成瞬间就位前瞬移），隐藏立即；编辑器（非 Play）立即显示以便预览。</summary>
+        public void RefreshQuestionObject()
+        {
+            if (questionObject == null)
+                return;
+
+            bool show = isQuestion && !revealed;
+            if (!show)
+            {
+                StopQuestionShowDelay();
+                questionObject.SetActive(false);
+                return;
+            }
+
+            if (!Application.isPlaying)
+            {
+                questionObject.SetActive(true);   // 编辑器预览：立即显示
+                return;
+            }
+
+            StopQuestionShowDelay();
+            _questionShowRoutine = StartCoroutine(ShowQuestionNextFrame());
+        }
+
+        private void StopQuestionShowDelay()
+        {
+            if (_questionShowRoutine != null)
+            {
+                StopCoroutine(_questionShowRoutine);
+                _questionShowRoutine = null;
+            }
+        }
+
+        /// <summary>延迟一帧后再显示问号物体（期间若已揭晓/隐藏则取消）。</summary>
+        private IEnumerator ShowQuestionNextFrame()
+        {
+            yield return null;
+            _questionShowRoutine = null;
+            if (questionObject != null && isQuestion && !revealed)
+                questionObject.SetActive(true);
+        }
+
         /// <summary>
-        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，并在 exposeMoveDuration 内把 exposeMoveTarget 匀速移动到 y=0（起身上升）。
-        /// 退出暴露时仅关闭 Animator；上升/坐回动画与状态切换相互独立——正在进行的上升不会被中断，会自然完成到 y=0。
+        /// 设置暴露（可点击）状态：进入暴露时激活 Animator，退出暴露时关闭 Animator。
+        /// 起身上升/坐下逻辑已移除（预制体 Root 无 y 偏移），全程保持站立位置，只切换描边与 Animator。
         /// </summary>
         public void SetExposed(bool exposed)
         {
@@ -241,34 +290,21 @@ namespace CrowdMatch
             {
                 if (exposed)
                     revealed = true;   // 问号一旦揭晓，永久保持原色、等同普通像素
-                ApplyMaterial();       // 揭晓换回原色（之后不再变回问号材质）
+                ApplyMaterial();         // 揭晓换回原色（之后不再变回问号材质）
+                RefreshQuestionObject(); // 揭晓后隐藏问号物体
             }
             if (placing)
                 return;   // 管道放置中：只记录状态，不激活动画，放置完成后由 MarkPlaced / RefreshExposed 统一应用
             ApplyExposedState(exposed);
         }
 
-        /// <summary>按暴露状态应用动画：激活/关闭 Animator，并把 exposeMoveTarget 平滑到 y=0。
-        /// 退出暴露（false）不打断进行中的上升——上升动画独立于状态切换，保证起身过程一定完成。</summary>
+        /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。</summary>
         private void ApplyExposedState(bool exposed)
         {
             if (outlineRenderer != null)
                 outlineRenderer.enabled = exposed;
-            if (exposed)
-            {
-                if (animator != null)
-                    animator.enabled = true;
-                if (_exposeMove != null)
-                    StopCoroutine(_exposeMove);
-                _exposeMove = StartCoroutine(MoveExposeTargetToY(0f, exposeMoveDuration));
-            }
-            else
-            {
-                // 不 StopCoroutine(_exposeMove)：点击离开等状态切换不打断正在进行的上升，让其自然完成到 y=0；
-                // 需要坐回时由 SitDownExposeTarget 显式 StopCoroutine + 启动坐回。
-                if (animator != null)
-                    animator.enabled = false;
-            }
+            if (animator != null)
+                animator.enabled = exposed;
         }
 
         /// <summary>管道放置完成：清除放置标记并把暴露状态复位（Animator 关闭、Root 归位），等待后续 RefreshExposed 统一激活。</summary>

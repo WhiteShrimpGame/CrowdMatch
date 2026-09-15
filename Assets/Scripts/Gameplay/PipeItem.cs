@@ -40,9 +40,6 @@ namespace CrowdMatch
         [Tooltip("管道本体网格 Transform（其本地 +Z 将朝向 points[0]→points[1] 方向）；留空自动取子物体首个带 MeshFilter 的物体")]
         public Transform bodyMesh;
 
-        [Tooltip("颜色耗尽（无剩余波次）时隐藏「下一颜色指示器」的 mesh 物体（仅当存在颜色 mesh 时生效）")]
-        public bool hideColorMeshWhenEmpty;
-
         [Tooltip("剩余波次数字（UI Text，留空自动从子物体查找）")]
         public Text waveCountText;
 
@@ -61,8 +58,11 @@ namespace CrowdMatch
             [Tooltip("要替换的材质槽位下标（Renderer.materials 数组的 index）")]
             public int materialIndex;
 
-            [Tooltip("默认材质（Awake 时记录，颜色耗尽后恢复）")]
-            [System.NonSerialized] public Material defaultMaterial;
+            [Tooltip("颜色耗尽时是否隐藏该 Renderer（不显示最后一波颜色）")]
+            public bool hideWhenEmpty;
+
+            [Tooltip("默认材质：颜色耗尽且不隐藏时，若非空则换回该材质（留空则保持最后一波颜色）")]
+            public Material defaultMaterial;
         }
 
         [System.NonSerialized] public PixelGroup group;
@@ -201,19 +201,6 @@ namespace CrowdMatch
         {
             if (waveCountText == null)
                 waveCountText = GetComponentInChildren<Text>(true);
-
-            // 记录每个指示器槽位的默认材质，供颜色耗尽后恢复
-            if (nextColorIndicators != null)
-            {
-                foreach (var ind in nextColorIndicators)
-                {
-                    if (ind == null || ind.renderer == null)
-                        continue;
-                    var mats = ind.renderer.sharedMaterials;
-                    if (mats != null && ind.materialIndex >= 0 && ind.materialIndex < mats.Length)
-                        ind.defaultMaterial = mats[ind.materialIndex];
-                }
-            }
         }
 
         private void Start()
@@ -601,15 +588,17 @@ namespace CrowdMatch
 
                 if (mat == null)
                 {
-                    // 颜色耗尽：恢复默认材质（而非保留最后一波颜色）
-                    if (ind.defaultMaterial != null)
+                    // 颜色耗尽：优先隐藏；不隐藏则换回默认材质；都不配置则保持最后一波颜色
+                    if (ind.hideWhenEmpty)
                     {
+                        ind.renderer.gameObject.SetActive(false);
+                    }
+                    else if (ind.defaultMaterial != null)
+                    {
+                        ind.renderer.gameObject.SetActive(true);
                         mats[ind.materialIndex] = ind.defaultMaterial;
                         ind.renderer.sharedMaterials = mats;
                     }
-                    // 可选：耗尽时隐藏颜色 mesh（不留上一波颜色视觉）
-                    if (hideColorMeshWhenEmpty)
-                        ind.renderer.gameObject.SetActive(false);
                     continue;
                 }
 

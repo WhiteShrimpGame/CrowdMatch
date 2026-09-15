@@ -613,7 +613,7 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>统计当前网格每种颜色的总数（实际像素 + 管道计划生成），并输出是否被 3 整除（不能整除则显示余数）。</summary>
+        /// <summary>先统计总数是否被 3 整除，再统计每种颜色的总数（实际像素 + 管道计划生成）及各自是否被 3 整除（不能整除则显示余数）。</summary>
         private void LogColorCounts(PixelGroup group)
         {
             // 实际像素颜色
@@ -649,6 +649,16 @@ namespace CrowdMatch
                 Debug.Log("[PixelGroup] 没有找到任何 PixelItem 或管道计划颜色，请先「生成网格」或配置管道 colors。");
                 return;
             }
+
+            // 先统计总数（实际像素 + 管道计划）是否被 3 整除
+            int grandTotal = 0;
+            foreach (var kv in actual)
+                grandTotal += kv.Value;
+            foreach (var kv in planned)
+                grandTotal += kv.Value;
+            int grandRem = grandTotal % 3;
+            Debug.Log("[PixelGroup] 总数 " + grandTotal + " 个，" +
+                (grandRem == 0 ? "✓ 被 3 整除" : "✗ 余 " + grandRem));
 
             var config = ColorConfigLocator.Find();
 

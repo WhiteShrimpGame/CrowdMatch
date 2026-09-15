@@ -472,10 +472,11 @@ namespace CrowdMatch
             item.gridZ = row;
             item.colorId = colorId;
             item.isQuestion = isQuestion;
+            item.RefreshQuestionObject();   // Awake 时 isQuestion 尚未赋值，补刷新问号物体显隐
             item.SetCapacity(capacity);
             item.ApplyMaterial(config);
             if (row == 0)
-                item.HideLid();   // 初始就在第一排：盖子直接隐藏（问号车此时也揭晓）
+                item.HideLid();   // 初始就在第一排：盖子直接隐藏（问号车此时也揭晓、隐藏问号物体）
             return item;
         }
 

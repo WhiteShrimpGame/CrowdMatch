@@ -36,13 +36,13 @@ namespace CrowdMatch
     {
         private const string Tag = "[WallCreator]";
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体", true)]
+        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体 %#w", true)]
         private static bool ValidateCreateWallFromSelection()
         {
             return CollectSelectedPixels().Count >= 2;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体")]
+        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体 %#w")]
         private static void CreateWallFromSelection()
         {
             var pixels = CollectSelectedPixels();

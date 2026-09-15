@@ -27,17 +27,15 @@ namespace CrowdMatch
                 int computed = BoxItem.ComputeCapacity(pg, box.colMin, box.rowMin, box.colMax, box.rowMax);
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("自动容量（本体 + 相邻有效格）", computed.ToString());
-                if (box.capacity != computed)
+                EditorGUILayout.LabelField("紧邻基础容量（本体 + 相邻 4 方向，不含连通格）", computed.ToString());
+                if (box.capacity > computed)
+                    EditorGUILayout.HelpBox("capacity(" + box.capacity + ") 超过紧邻基础容量(" + computed +
+                        ")，开箱时超出部分会占用连通空格（需周围空域足够）。", MessageType.Info);
+                if (GUILayout.Button("按周围环境重算 capacity（本体 + 相邻）"))
                 {
-                    EditorGUILayout.HelpBox("当前 capacity(" + box.capacity + ") 与周围环境推算的自动容量(" + computed +
-                        ") 不一致。可点击下方按钮重算。", MessageType.Warning);
-                    if (GUILayout.Button("按周围环境重算 capacity"))
-                    {
-                        Undo.RecordObject(box, "重算箱子容量");
-                        box.capacity = computed;
-                        EditorUtility.SetDirty(box);
-                    }
+                    Undo.RecordObject(box, "重算箱子容量");
+                    box.capacity = computed;
+                    EditorUtility.SetDirty(box);
                 }
             }
 

@@ -132,6 +132,6 @@ MonoBehaviour:
   - {r: 0.4009434, g: 0.4009434, b: 0.4009434, a: 1}
   - {r: 0.2924528, g: 0.28527945, b: 0.28527945, a: 1}
   - {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  questionMaterial: {fileID: 2100000, guid: 96c7e374244ba1f4faaf0900af7ce691, type: 2}
-  questionCarMaterial: {fileID: 2100000, guid: 6a66f927fe9cf9e45bb081a222926de4, type: 2}
-  questionInteriorMaterial: {fileID: 2100000, guid: 62a1ae7192599b7489bbfbd369f41027, type: 2}
+  questionMaterial: {fileID: 2100000, guid: d63ea6c8a54f68c4d96e5b3ddb731826, type: 2}
+  questionCarMaterial: {fileID: 2100000, guid: b6d6480de273b924288fec8fbaa49a7b, type: 2}
+  questionInteriorMaterial: {fileID: 2100000, guid: ac9f255700fded142bfb8bc3795e8f98, type: 2}

@@ -633,6 +633,7 @@ namespace CrowdMatch
             item.gridZ = row;
             item.colorId = colorId;
             item.isQuestion = isQuestion;
+            item.RefreshQuestionObject();   // Awake 时 isQuestion 尚未赋值（仍是预制体默认值），此处补刷新问号物体显隐
             item.ApplyMaterial(config);
             return item;
         }
@@ -712,11 +713,14 @@ namespace CrowdMatch
             box.edgePrefab = boxEdgePrefab;
             box.centerPrefab = boxCenterPrefab;
 
-            // 容量按周围环境自动计算（本体 + 相邻有效格，固定 8 方向），覆盖 JSON 里记录的 capacity。
-            box.capacity = BoxItem.ComputeCapacity(this, box.colMin, box.rowMin, box.colMax, box.rowMax);
+            // 容量以 colorIds（内容数）为准；colorIds 为空时按周围环境（本体 + 相邻 4 方向）兜底。
+            // 开箱实际可用格还包括「连通空格」，故不再用周围环境覆盖容量。
+            box.capacity = box.colorIds.Length > 0
+                ? box.colorIds.Length
+                : BoxItem.ComputeCapacity(this, box.colMin, box.rowMin, box.colMax, box.rowMax);
             if (box.colorIds.Length != box.capacity)
                 Debug.LogWarning("[PixelGroup] 箱子 " + go.name + " 的 colorIds 数量(" + box.colorIds.Length +
-                    ") 与自动计算的容量(" + box.capacity + ") 不一致，运行时按较小值处理。");
+                    ") 与容量(" + box.capacity + ") 不一致，运行时按较小值处理。");
 
             box.BuildVisual(this, config);
 
@@ -835,7 +839,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 检查所有未开箱箱子并逐个尝试开箱（§7.3）：按 (rowMin 升序, colMin 升序) 串行判定，
-        /// 前箱占格影响后箱，不满足则跳过；动画并行。开箱产生的格变化统一刷新一次暴露。
+        /// 前箱占格影响后箱，不满足则跳过；动画并行。占格在 TryOpen 内同步完成，
+        /// 暴露刷新由调用方在箱子/升降台释放占格全部完成后统一执行（避免释放封路导致旧像素误站起）。
         /// </summary>
         public void TryOpenBoxes()
         {
@@ -855,22 +860,17 @@ namespace CrowdMatch
                 return a.colMin.CompareTo(b.colMin);
             });
 
-            bool anyOpened = false;
             foreach (var box in sorted)
             {
                 if (box == null || box.opened)
                     continue;
-                if (box.TryOpen())
-                    anyOpened = true;
+                box.TryOpen();
             }
-
-            if (anyOpened)
-                RefreshExposed();
         }
 
         /// <summary>
         /// 检查所有升降台并逐个尝试推进（区域清空 → 开门 + 升起下一组）：
-        /// 按 (rowMin 升序, colMin 升序) 串行判定，动画并行。推进产生的格变化统一刷新一次暴露。
+        /// 按 (rowMin 升序, colMin 升序) 串行判定，动画并行。暴露刷新由调用方统一执行。
         /// </summary>
         public void TryAdvanceElevators()
         {
@@ -890,17 +890,12 @@ namespace CrowdMatch
                 return a.colMin.CompareTo(b.colMin);
             });
 
-            bool anyAdvanced = false;
             foreach (var elev in sorted)
             {
                 if (elev == null || elev.IsDone)
                     continue;
-                if (elev.TryAdvance())
-                    anyAdvanced = true;
+                elev.TryAdvance();
             }
-
-            if (anyAdvanced)
-                RefreshExposed();
         }
 
         /// <summary>
