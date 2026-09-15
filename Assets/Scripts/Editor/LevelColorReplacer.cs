@@ -226,14 +226,14 @@ namespace CrowdMatch
                 EditorUtility.DisplayDialog("替换关卡颜色", "请先选择关卡 JSON。", "确定");
                 return;
             }
-            if (oldIndex < 1)
+            if (oldIndex < 0)
             {
-                EditorUtility.DisplayDialog("替换关卡颜色", "旧颜色 index 必须 ≥ 1（0 = 空格，不是颜色）。", "确定");
+                EditorUtility.DisplayDialog("替换关卡颜色", "旧颜色 index 必须 ≥ 0（-1 = 空格，不是颜色）。", "确定");
                 return;
             }
-            if (newIndex < 1)
+            if (newIndex < 0)
             {
-                EditorUtility.DisplayDialog("替换关卡颜色", "新颜色 index 必须 ≥ 1（0 = 空格，不是颜色）。", "确定");
+                EditorUtility.DisplayDialog("替换关卡颜色", "新颜色 index 必须 ≥ 0（-1 = 空格，不是颜色）。", "确定");
                 return;
             }
             if (oldIndex == newIndex)
