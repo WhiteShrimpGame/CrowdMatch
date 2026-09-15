@@ -262,7 +262,7 @@ namespace CrowdMatch
             {
                 if (wall == null || wall.points == null || wall.points.Count < 2)
                     continue;
-                walls.Add(new LevelData.WallData { points = wall.points.ToArray() });
+                walls.Add(new LevelData.WallData { points = wall.points.ToArray(), closed = wall.closed });
             }
             data.walls = walls.ToArray();
 

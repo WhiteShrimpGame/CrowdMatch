@@ -42,6 +42,18 @@ namespace CrowdMatch
                 ApplyColorToAll();
             }
 
+            // 矩形范围应用：仅当精确选中 2 个 Pixel（左上 + 右下）时可用
+            bool canRect = targets.Length == 2;
+            using (new EditorGUI.DisabledScope(!canRect))
+            {
+                if (GUILayout.Button(new GUIContent("应用到选中矩形范围",
+                    canRect ? "把当前颜色应用到两个选中 Pixel 作为对角所围的整个矩形范围"
+                            : "需精确选中 2 个 Pixel（左上 + 右下）作为矩形对角")))
+                {
+                    ApplyColorToRect();
+                }
+            }
+
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("问号 Pixel", EditorStyles.boldLabel);
 
@@ -96,6 +108,57 @@ namespace CrowdMatch
                 item.ApplyMaterial(colorConfig);
                 EditorUtility.SetDirty(item);
             }
+        }
+
+        /// <summary>把当前调色板颜色应用到两个选中 Pixel 作为对角所围的整个矩形范围（支持 Undo）。</summary>
+        private void ApplyColorToRect()
+        {
+            if (targets.Length != 2)
+                return;
+
+            var a = (PixelItem)targets[0];
+            var b = (PixelItem)targets[1];
+
+            var group = a.GetComponentInParent<PixelGroup>();
+            if (group == null || b.GetComponentInParent<PixelGroup>() != group)
+            {
+                EditorUtility.DisplayDialog("应用到矩形范围", "选中的两个 Pixel 必须属于同一个 PixelGroup。", "确定");
+                return;
+            }
+
+            // 矩形对角归一化（不依赖选点先后顺序，任一对角都可）
+            int minX = Mathf.Min(a.gridX, b.gridX);
+            int maxX = Mathf.Max(a.gridX, b.gridX);
+            int minZ = Mathf.Min(a.gridZ, b.gridZ);
+            int maxZ = Mathf.Max(a.gridZ, b.gridZ);
+
+            group.RebuildGrid();
+
+            int count = 0;
+            for (int r = minZ; r <= maxZ; r++)
+            {
+                for (int c = minX; c <= maxX; c++)
+                {
+                    var item = group.GetItem(c, r);
+                    if (item == null)
+                        continue;
+
+                    Undo.RecordObject(item, "Set Pixel Color (Rect)");
+                    foreach (var rend in item.renderers)
+                    {
+                        if (rend != null)
+                            Undo.RecordObject(rend, "Set Pixel Material (Rect)");
+                    }
+
+                    item.colorId = batchColorId;
+                    item.ApplyMaterial(colorConfig);
+                    EditorUtility.SetDirty(item);
+                    count++;
+                }
+            }
+
+            Debug.Log("[PixelItemEditor] 已把矩形范围 (" + minX + ", " + minZ + ") → (" + maxX + ", " + maxZ +
+                ") 内的 " + count + " 个 Pixel 设置为颜色 " + batchColorId + "。");
         }
 
         private void SetQuestionAll(bool question)
