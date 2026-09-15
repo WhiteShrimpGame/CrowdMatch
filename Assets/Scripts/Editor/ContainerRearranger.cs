@@ -76,25 +76,32 @@ namespace CrowdMatch
             int columns = Mathf.Max(1, data.pixel.columns);
             int totalRows = Mathf.Max(0, data.pixel.rows) + Mathf.Max(0, data.pixel.tailRows);
             int gridCells = columns * totalRows;
+            if (data.pixel.cells == null || data.pixel.cells.Length < gridCells)
+                return "关卡像素 cells 数量不足（需要 " + gridCells + "）。";
 
             // 收集墙体 + 管道自身占据的格（这些格不生成 Pixel，Record 中也不包含）
             var skipCells = new HashSet<Vector2Int>();
             if (data.walls != null)
                 foreach (var w in data.walls)
                     if (w != null && w.points != null)
-                        WallItem.CollectOccupiedCells(w.points, skipCells);
+                        WallItem.CollectOccupiedCells(w.points, w.closed, skipCells);
             if (data.pipes != null)
                 foreach (var p in data.pipes)
                     if (p != null && p.points != null && p.points.Length >= 1)
                         skipCells.Add(PipeItem.GetPipeCell(p.points));
 
-            // 初始像素数 = 网格格数 − 墙/管道格数（仅统计网格范围内的跳过格）
+            // 初始像素数 = 网格格数 − 墙/管道格 − 空像素格（仅统计网格范围内的非跳过、非空格）
             int skipInGrid = 0;
+            int emptyCells = 0;
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
+                {
                     if (skipCells.Contains(new Vector2Int(c, r)))
                         skipInGrid++;
-            int initialPixels = gridCells - skipInGrid;
+                    else if (data.pixel.cells[r * columns + c] < 0)
+                        emptyCells++;
+                }
+            int initialPixels = gridCells - skipInGrid - emptyCells;
 
             // 管道额外生成的像素数 = Σ 轨道格数 × 波次数
             int pipePixels = 0;
@@ -107,9 +114,7 @@ namespace CrowdMatch
 
             if (seq.Count != pixelTotal)
                 return "Record 像素数(" + seq.Count + ")与关卡像素数(" + pixelTotal +
-                    "，含管道生成 " + pipePixels + "，扣除墙/管道格 " + skipInGrid + ")不一致。";
-            if (data.pixel.cells == null || data.pixel.cells.Length < gridCells)
-                return "关卡像素 cells 数量不足（需要 " + gridCells + "）。";
+                    "，含管道生成 " + pipePixels + "，扣除墙/管道格 " + skipInGrid + "、空像素 " + emptyCells + ")不一致。";
 
             var recordCounts = new Dictionary<int, int>();
             foreach (var c in seq)
@@ -123,6 +128,8 @@ namespace CrowdMatch
                     if (skipCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int color = data.pixel.cells[r * columns + c];
+                    if (color < 0)
+                        continue;   // 空像素（-1）
                     pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + 1 : 1;
                 }
             if (data.pipes != null)

@@ -594,8 +594,9 @@ namespace CrowdMatch
         /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
         /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
+        /// closed = true 时额外补首尾闭合段。
         /// </summary>
-        public WallItem SpawnWall(IList<Vector2> points)
+        public WallItem SpawnWall(IList<Vector2> points, bool closed = false)
         {
             var go = new GameObject("Wall_" + (transform.childCount + 1));
             go.transform.SetParent(transform, false);
@@ -603,6 +604,7 @@ namespace CrowdMatch
 
             var wall = go.AddComponent<WallItem>();
             wall.points = new List<Vector2>(points);
+            wall.closed = closed;
             wall.BuildVisual(this);
             return wall;
         }

@@ -224,13 +224,13 @@ namespace CrowdMatch
                     }
                     else
                     {
-                        data.pixel.cells[r * pg.columns + c] = 0;
+                        data.pixel.cells[r * pg.columns + c] = -1;   // 空像素
                         emptyCells++;
                     }
                 }
             }
             if (emptyCells > 0)
-                Debug.LogWarning(Tag + " 像素网格中有 " + emptyCells + " 个空格，导出时将按颜色 0 处理。");
+                Debug.Log(Tag + " 像素网格中有 " + emptyCells + " 个空格，导出时标记为 -1（空像素）。");
 
             // 容器：稀疏列表，只存非空格
             data.container.columns = cg.columns;
@@ -262,7 +262,7 @@ namespace CrowdMatch
             {
                 if (wall == null || wall.points == null || wall.points.Count < 2)
                     continue;
-                walls.Add(new LevelData.WallData { points = wall.points.ToArray() });
+                walls.Add(new LevelData.WallData { points = wall.points.ToArray(), closed = wall.closed });
             }
             data.walls = walls.ToArray();
 

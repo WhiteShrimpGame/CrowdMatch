@@ -4,7 +4,7 @@ using UnityEditor;
 
 namespace CrowdMatch
 {
-    /// <summary>WallItem 的 Inspector：显示校验结果与占用格数。</summary>
+    /// <summary>WallItem 的 Inspector：显示校验结果与占用格数，并提供闭环/取消闭环操作。</summary>
     [CustomEditor(typeof(WallItem))]
     public class WallItemEditor : Editor
     {
@@ -15,6 +15,19 @@ namespace CrowdMatch
             serializedObject.Update();
             DrawDefaultInspector();
             serializedObject.ApplyModifiedProperties();
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("闭环", EditorStyles.boldLabel);
+
+            if (wall.closed)
+                EditorGUILayout.HelpBox("当前为闭环墙体：首尾之间自动补一条闭合段，并作为封闭障碍包围内部 Pixel。", MessageType.Info);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("闭环"))
+                CloseLoop(wall);
+            if (GUILayout.Button("取消闭环"))
+                CancelLoop(wall);
+            EditorGUILayout.EndHorizontal();
 
             if (wall.points == null || wall.points.Count < 2)
             {
@@ -29,6 +42,176 @@ namespace CrowdMatch
                 EditorGUILayout.HelpBox("有效：共 " + wall.points.Count + " 个端点，占据 " +
                     wall.OccupiedCellCount() + " 个网格格。", MessageType.Info);
         }
+
+        /// <summary>执行闭环：校验闭环条件，弹窗询问是否移除包围 Pixel，通过后标记 closed 并刷新。</summary>
+        private void CloseLoop(WallItem wall)
+        {
+            if (wall.closed)
+            {
+                EditorUtility.DisplayDialog("闭环", "该墙体已经是闭环，无需重复操作。", "确定");
+                return;
+            }
+
+            string err = wall.CheckClosable();
+            if (err != null)
+            {
+                EditorUtility.DisplayDialog("闭环", "无法闭环：\n" + err, "确定");
+                return;
+            }
+
+            var group = wall.Group;
+            if (group == null)
+            {
+                EditorUtility.DisplayDialog("闭环", "墙体必须位于 PixelGroup 下才能闭环。", "确定");
+                return;
+            }
+
+            group.RebuildGrid();
+
+            var wallCells = CollectLoopCells(wall);
+            var interior = ComputeInteriorCells(group, wallCells);
+
+            int pixelCount = 0;
+            foreach (var c in wallCells)
+                if (group.GetItem(c.x, c.y) != null)
+                    pixelCount++;
+            foreach (var c in interior)
+                if (group.GetItem(c.x, c.y) != null)
+                    pixelCount++;
+
+            int choice = EditorUtility.DisplayDialogComplex("闭环",
+                "闭环条件满足：包围区域（含闭合段）共 " + (interior.Count + wallCells.Count) + " 格，其中含 Pixel " + pixelCount + " 个。\n\n是否移除包围的 Pixel？",
+                "移除 Pixel 并闭环", "只闭环", "取消");
+
+            if (choice == 2)
+                return;
+
+            Undo.RecordObject(wall, "闭环墙体");
+
+            if (choice == 0)
+            {
+                var toRemove = new HashSet<Vector2Int>(wallCells);
+                toRemove.UnionWith(interior);
+                foreach (var c in toRemove)
+                {
+                    var item = group.GetItem(c.x, c.y);
+                    if (item != null)
+                        Undo.DestroyObjectImmediate(item.gameObject);
+                }
+            }
+
+            wall.closed = true;
+            group.RebuildGrid();
+            if (Application.isPlaying)
+                group.RefreshExposed();
+            EditorUtility.SetDirty(wall);
+            EditorUtility.SetDirty(group);
+
+            Debug.Log("[WallItem] 已闭环墙体 " + wall.name + "（包围区域 " + (interior.Count + wallCells.Count) + " 格，移除 Pixel " +
+                (choice == 0 ? pixelCount : 0) + " 个）。");
+        }
+
+        /// <summary>取消闭环：去掉首尾闭合段并刷新（不移除/恢复任何 Pixel）。</summary>
+        private void CancelLoop(WallItem wall)
+        {
+            if (!wall.closed)
+            {
+                EditorUtility.DisplayDialog("取消闭环", "该墙体当前不是闭环。", "确定");
+                return;
+            }
+
+            Undo.RecordObject(wall, "取消闭环墙体");
+            wall.closed = false;
+
+            var group = wall.Group;
+            if (group != null)
+            {
+                group.RebuildGrid();
+                if (Application.isPlaying)
+                    group.RefreshExposed();
+                EditorUtility.SetDirty(group);
+            }
+            EditorUtility.SetDirty(wall);
+
+            Debug.Log("[WallItem] 已取消闭环墙体 " + wall.name + "。");
+        }
+
+        /// <summary>构建闭环后的完整占格集合（含首尾闭合段）。</summary>
+        private static HashSet<Vector2Int> CollectLoopCells(WallItem wall)
+        {
+            var closedPoints = new List<Vector2>(wall.points);
+            if (closedPoints.Count >= 2)
+                closedPoints.Add(closedPoints[0]);
+            var wallCells = new HashSet<Vector2Int>();
+            WallItem.CollectOccupiedCells(closedPoints, wallCells);
+            return wallCells;
+        }
+
+        /// <summary>用「从网格边界四向 BFS 漫过非墙格」求闭环内部的网格格集合（不含墙自身格）。</summary>
+        private static HashSet<Vector2Int> ComputeInteriorCells(PixelGroup group, HashSet<Vector2Int> wallCells)
+        {
+            int cols = group.columns;
+            int rows = group.TotalRows;
+
+            int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
+            foreach (var c in wallCells)
+            {
+                if (c.x < minX) minX = c.x;
+                if (c.x > maxX) maxX = c.x;
+                if (c.y < minZ) minZ = c.y;
+                if (c.y > maxZ) maxZ = c.y;
+            }
+
+            // 从网格边界（非墙格）BFS，能到达的都视为「外部」
+            var outside = new bool[cols, rows];
+            var q = new Queue<Vector2Int>();
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+            for (int c = 0; c < cols; c++)
+                for (int r = 0; r < rows; r++)
+                {
+                    if (c != 0 && c != cols - 1 && r != 0 && r != rows - 1)
+                        continue;
+                    var cell = new Vector2Int(c, r);
+                    if (wallCells.Contains(cell) || outside[c, r])
+                        continue;
+                    outside[c, r] = true;
+                    q.Enqueue(cell);
+                }
+
+            while (q.Count > 0)
+            {
+                var cur = q.Dequeue();
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + dx[d];
+                    int nz = cur.y + dz[d];
+                    if (nx < 0 || nx >= cols || nz < 0 || nz >= rows)
+                        continue;
+                    if (outside[nx, nz])
+                        continue;
+                    var ncell = new Vector2Int(nx, nz);
+                    if (wallCells.Contains(ncell))
+                        continue;
+                    outside[nx, nz] = true;
+                    q.Enqueue(ncell);
+                }
+            }
+
+            var interior = new HashSet<Vector2Int>();
+            for (int x = minX; x <= maxX; x++)
+                for (int z = minZ; z <= maxZ; z++)
+                {
+                    if (x < 0 || x >= cols || z < 0 || z >= rows)
+                        continue;
+                    var cell = new Vector2Int(x, z);
+                    if (wallCells.Contains(cell))
+                        continue;
+                    if (!outside[x, z])
+                        interior.Add(cell);
+                }
+            return interior;
+        }
     }
 
     /// <summary>用选中的 PixelItem 作为端点创建墙体，并移除路径上占用的 Pixel（支持 Undo）。</summary>
@@ -36,13 +219,13 @@ namespace CrowdMatch
     {
         private const string Tag = "[WallCreator]";
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体", true)]
+        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体 %#w", true)]
         private static bool ValidateCreateWallFromSelection()
         {
             return CollectSelectedPixels().Count >= 2;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体")]
+        [MenuItem("CrowdMatch/用选中 Pixel 创建墙体 %#w")]
         private static void CreateWallFromSelection()
         {
             var pixels = CollectSelectedPixels();

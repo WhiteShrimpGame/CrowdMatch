@@ -90,7 +90,7 @@ namespace CrowdMatch
                 {
                     if (w == null || w.points == null)
                         continue;
-                    WallItem.CollectOccupiedCells(w.points, skipCells);
+                    WallItem.CollectOccupiedCells(w.points, w.closed, skipCells);
                 }
             }
             if (pipes != null)
@@ -123,6 +123,8 @@ namespace CrowdMatch
                     if (skipCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int colorId = d.cells[r * columns + c];
+                    if (colorId < 0)
+                        continue;   // 空像素（-1），不创建 Pixel
                     bool isQuestion = d.questionCells != null && d.questionCells.Length > r * columns + c
                         && d.questionCells[r * columns + c];
                     pg.SpawnPixel(c, r, colorId, config, false, isQuestion);
@@ -147,7 +149,7 @@ namespace CrowdMatch
             {
                 if (w == null || w.points == null || w.points.Length < 2)
                     continue;
-                if (pg.SpawnWall(w.points) != null)
+                if (pg.SpawnWall(w.points, w.closed) != null)
                     spawned++;
             }
 

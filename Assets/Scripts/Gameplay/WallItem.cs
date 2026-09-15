@@ -24,6 +24,10 @@ namespace CrowdMatch
         [Tooltip("墙体端点（网格坐标：x = 列 col，y = 行 row）。相邻两点构成一段，每段必须平行于 X 或 Z 轴。")]
         public List<Vector2> points = new List<Vector2>();
 
+        [Tooltip("闭环墙体：true 时首尾之间自动补一条闭合段（占用格、视觉、Gizmos 均包含该段），并作为封闭障碍包围内部 Pixel。")]
+        [HideInInspector]
+        public bool closed;
+
         [Tooltip("墙高度（世界单位，仅用于 Gizmos 显示）")]
         public float height = 2f;
 
@@ -69,6 +73,45 @@ namespace CrowdMatch
             return true;
         }
 
+        /// <summary>
+        /// 校验能否闭环：返回 null = 可闭环，否则返回失败原因。
+        /// 闭环要求（首尾自动补一条闭合段）：
+        /// 1. 首点→下一点的延伸方向，与尾点→上一点的延伸方向，必须同为横向（x 变）或同为纵向（y 变）；
+        /// 2. 同为横向时，首尾点需同列（纵向闭合）；同为纵向时，首尾点需同行（横向闭合）。
+        /// </summary>
+        public string CheckClosable()
+        {
+            if (points == null || points.Count < 3)
+                return "至少需要 3 个端点才能闭环。";
+
+            string segErr;
+            if (!IsValid(out segErr))
+                return "墙体存在非轴对齐段，无法闭环：\n" + segErr;
+
+            Vector2 first = points[0];
+            Vector2 second = points[1];
+            Vector2 last = points[points.Count - 1];
+            Vector2 prev = points[points.Count - 2];
+
+            bool firstHorizontal = !Mathf.Approximately(first.x, second.x);
+            bool lastHorizontal = !Mathf.Approximately(prev.x, last.x);
+
+            if (firstHorizontal != lastHorizontal)
+                return "首尾两端的延伸方向一个横向、一个纵向，无法形成矩形闭环。";
+
+            if (firstHorizontal)
+            {
+                if (!Mathf.Approximately(first.x, last.x))
+                    return "两端均为横向时，首尾点需在同一列（纵向闭合）：当前首点列 " + first.x + "、尾点列 " + last.x + " 不一致。";
+            }
+            else
+            {
+                if (!Mathf.Approximately(first.y, last.y))
+                    return "两端均为纵向时，首尾点需在同一行（横向闭合）：当前首点行 " + first.y + "、尾点行 " + last.y + " 不一致。";
+            }
+            return null;
+        }
+
         /// <summary>枚举一段墙经过的所有网格格（含两端与中间格；对角段按逐格阶梯枚举作为兜底）。</summary>
         private static void EnumerateSegment(Vector2 a, Vector2 b, HashSet<Vector2Int> set)
         {
@@ -93,11 +136,19 @@ namespace CrowdMatch
                 EnumerateSegment(points[i], points[i + 1], set);
         }
 
-        /// <summary>枚举墙体占据的所有网格格（去重）。</summary>
+        /// <summary>把一组端点换算为占据的网格格集合；closed = true 时额外补首尾闭合段（供无实例场景复用）。</summary>
+        public static void CollectOccupiedCells(IReadOnlyList<Vector2> points, bool closed, HashSet<Vector2Int> set)
+        {
+            CollectOccupiedCells(points, set);
+            if (closed && points != null && points.Count >= 2)
+                EnumerateSegment(points[points.Count - 1], points[0], set);
+        }
+
+        /// <summary>枚举墙体占据的所有网格格（去重；闭环时包含首尾闭合段）。</summary>
         public IEnumerable<Vector2Int> EnumerateOccupiedCells()
         {
             var set = new HashSet<Vector2Int>();
-            CollectOccupiedCells(points, set);
+            CollectOccupiedCells(points, closed, set);
             return set;
         }
 
@@ -257,6 +308,20 @@ namespace CrowdMatch
                 Gizmos.DrawLine(b, bTop);
             }
 
+            // 闭环：补画首尾闭合段面板
+            if (closed && points.Count >= 2)
+            {
+                Vector3 a = CellWorld(points[points.Count - 1]);
+                Vector3 b = CellWorld(points[0]);
+                Vector3 aTop = a + Vector3.up * height;
+                Vector3 bTop = b + Vector3.up * height;
+
+                Gizmos.DrawLine(a, b);
+                Gizmos.DrawLine(aTop, bTop);
+                Gizmos.DrawLine(a, aTop);
+                Gizmos.DrawLine(b, bTop);
+            }
+
             // 占用格：底面浅色方块标记（可直观看到墙阻挡了哪些格）
             Color cellColor = gizmoColor;
             cellColor.a = Mathf.Clamp01(gizmoColor.a * 0.4f);
@@ -285,6 +350,17 @@ namespace CrowdMatch
             {
                 Vector3 a = CellWorld(points[i]);
                 Vector3 b = CellWorld(points[i + 1]);
+                Vector3 aTop = a + Vector3.up * height;
+                Vector3 bTop = b + Vector3.up * height;
+                Gizmos.DrawLine(a, b);
+                Gizmos.DrawLine(aTop, bTop);
+            }
+
+            // 闭环：补画首尾闭合段描边
+            if (closed && points.Count >= 2)
+            {
+                Vector3 a = CellWorld(points[points.Count - 1]);
+                Vector3 b = CellWorld(points[0]);
                 Vector3 aTop = a + Vector3.up * height;
                 Vector3 bTop = b + Vector3.up * height;
                 Gizmos.DrawLine(a, b);
