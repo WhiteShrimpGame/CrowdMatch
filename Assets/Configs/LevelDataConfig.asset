@@ -13,10 +13,10 @@ MonoBehaviour:
   m_Name: LevelDataConfig
   m_EditorClassIdentifier: 
   levels:
-  - {fileID: 4900000, guid: 19bff9220e8e9e848bbf87e57c35e7e1, type: 3}
+  - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
   - {fileID: 4900000, guid: 55383b11d83348547b958b2e046d2434, type: 3}
   - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
   loopLevels:
-  - {fileID: 4900000, guid: 19bff9220e8e9e848bbf87e57c35e7e1, type: 3}
+  - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
   - {fileID: 4900000, guid: 55383b11d83348547b958b2e046d2434, type: 3}
   - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
