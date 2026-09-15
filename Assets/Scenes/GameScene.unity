@@ -1576,11 +1576,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
-  levelJsons:
-  - {fileID: 4900000, guid: 19bff9220e8e9e848bbf87e57c35e7e1, type: 3}
-  - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
-  - {fileID: 4900000, guid: 55383b11d83348547b958b2e046d2434, type: 3}
-  - {fileID: 4900000, guid: cb0ac343b9cdfbe418dbce5bf8b361cf, type: 3}
+  levelJsons: []
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
 --- !u!4 &1940794605
 Transform:
