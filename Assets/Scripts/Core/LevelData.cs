@@ -64,6 +64,9 @@ namespace CrowdMatch
         public class WallData
         {
             public Vector2[] points = new Vector2[0];
+
+            /// <summary>true = 闭环墙体（首尾之间自动补一条闭合段）。旧 JSON 无此字段时为 false。</summary>
+            public bool closed;
         }
 
         /// <summary>

@@ -84,7 +84,7 @@ namespace CrowdMatch
             if (data.walls != null)
                 foreach (var w in data.walls)
                     if (w != null && w.points != null)
-                        WallItem.CollectOccupiedCells(w.points, skipCells);
+                        WallItem.CollectOccupiedCells(w.points, w.closed, skipCells);
             if (data.pipes != null)
                 foreach (var p in data.pipes)
                     if (p != null && p.points != null && p.points.Length >= 1)
