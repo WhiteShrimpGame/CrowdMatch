@@ -17,6 +17,9 @@ namespace CrowdMatch
         [Tooltip("颜色配置 ScriptableObject，提供 24 种基础颜色材质")]
         public ColorConfig colorConfig;
 
+        [Tooltip("音频配置 ScriptableObject（tag → clip → volume）；留空则不做任何音频初始化")]
+        public AudioConfig audioConfig;
+
         [Header("关卡")]
         [Tooltip("关卡 JSON 列表（调试用，优先级高于 levelDataConfig；非空时按序号循环取关）")]
         public List<TextAsset> levelJsons = new List<TextAsset>();
@@ -35,6 +38,14 @@ namespace CrowdMatch
 
             Application.targetFrameRate = 60;
             QualitySettings.vSyncCount = 0;
+
+            // 音频：挂上 AudioManager 并注入配置（AudioSource 首次 Play 时才懒创建）
+            var audioManager = gameObject.AddComponent<AudioManager>();
+            audioManager.Init(audioConfig);
+            audioManager.MusicEnabled = PlayerPrefs.GetInt("Music", 1) == 1;
+            audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
+            if (audioConfig != null)
+                audioManager.Play("BGM", loop: true);   // 背景音乐循环播放（跨关卡不重播）
         }
 
         // ========== Debug / 调试 ==========
