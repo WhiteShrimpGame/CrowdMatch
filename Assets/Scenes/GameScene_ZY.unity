@@ -1024,7 +1024,7 @@ MonoBehaviour:
   rows: 40
   xSpacing: 2
   zSpacing: 1.2
-  shuffleContainers: 1
+  shuffleContainers: 0
   pixelGroup: {fileID: 882082744}
   minCapacity: 3
   maxCapacity: 3
@@ -1578,6 +1578,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
+  audioConfig: {fileID: 0}
   levelJsons:
   - {fileID: 4900000, guid: 16de2b730eac1cf469b65bc59ed85b69, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
