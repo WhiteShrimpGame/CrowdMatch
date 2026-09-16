@@ -18,7 +18,7 @@ MonoBehaviour:
     volume: 1
     isBGM: 1
   - tag: Tap
-    clip: {fileID: 8300000, guid: e9ea81a17bae8034198be683e59c37c5, type: 3}
+    clip: {fileID: 8300000, guid: 1e82ee583a49b794eabae6c2ab2e7585, type: 3}
     volume: 0.8
     isBGM: 0
   - tag: Jump
@@ -34,7 +34,7 @@ MonoBehaviour:
     volume: 1
     isBGM: 0
   - tag: TapBlocked
-    clip: {fileID: 8300000, guid: bdaf05b3c98e60f4fb4a9842d36510ae, type: 3}
+    clip: {fileID: 8300000, guid: 317ca8f0da5a66b44874f4855897c582, type: 3}
     volume: 1
     isBGM: 0
   - tag: CarLeave2
