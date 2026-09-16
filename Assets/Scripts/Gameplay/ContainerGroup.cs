@@ -28,6 +28,10 @@ namespace CrowdMatch
         [Tooltip("纵向间距（Z）")]
         public float zSpacing = 1.2f;
 
+        [Header("洗牌")]
+        [Tooltip("是否洗牌容器排列（与 JSON 里的 lockContainer 是同一个开关）：导出时取反写入 lockContainer，导入时从 lockContainer 反向读回。运行时实际是否洗牌以关卡 JSON 为准。")]
+        public bool shuffleContainers = true;
+
         [Header("生成参数（编辑器用）")]
         [Tooltip("读取颜色分布的 PixelGroup，留空自动查找")]
         public PixelGroup pixelGroup;
@@ -457,8 +461,10 @@ namespace CrowdMatch
         public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config, bool isQuestion = false)
         {
             GameObject go = containerPrefab != null
-                ? Instantiate(containerPrefab).gameObject
-                : GameObject.CreatePrimitive(PrimitiveType.Cube);
+                ? PrefabSpawner.Instantiate(containerPrefab.gameObject, transform)
+                : null;
+            if (go == null)
+                go = GameObject.CreatePrimitive(PrimitiveType.Cube);
 
             go.name = "Container_" + col + "_" + row;
             go.transform.SetParent(transform, false);

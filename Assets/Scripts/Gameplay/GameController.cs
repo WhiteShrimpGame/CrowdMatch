@@ -140,7 +140,8 @@ namespace CrowdMatch
             LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
 #endif
 
-            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定 Container 时跳过）
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定的关卡跳过）。
+            // 运行时以 JSON 的 lockContainer 为准；它与场景里 ContainerGroup.shuffleContainers 由导出/导入互相同步。
             if (!data.container.lockContainer)
                 LevelLoader.ShuffleContainers(data.container);
 

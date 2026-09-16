@@ -141,6 +141,13 @@ namespace CrowdMatch
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, config);
 
+            // 洗牌开关与 JSON 的 lockContainer 是同一个值：导入时反向同步回 ContainerGroup
+            if (containerGroup != null)
+            {
+                Undo.RecordObject(containerGroup, "导入关卡 JSON");
+                containerGroup.shuffleContainers = !data.container.lockContainer;
+            }
+
             if (pixelGroup != null)
                 EditorUtility.SetDirty(pixelGroup);
             if (containerGroup != null)
@@ -235,6 +242,7 @@ namespace CrowdMatch
             // 容器：稀疏列表，只存非空格
             data.container.columns = cg.columns;
             data.container.rows = cg.rows;
+            data.container.lockContainer = !cg.shuffleContainers;   // 洗牌开关取反写入 lockContainer
 
             var items = new List<LevelData.ContainerItemData>();
             for (int c = 0; c < cg.columns; c++)
