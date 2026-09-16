@@ -16,6 +16,6 @@ MonoBehaviour:
   - tag: Trail
     item: {fileID: 1897174840349734895, guid: f2693e04641fc0c439a4f38a152053b6, type: 3}
     preloadCount: 0
-  - tag: 
-    item: {fileID: 0}
+  - tag: Confetti
+    item: {fileID: 129898, guid: 36bdc02b23d9ca94d93bd715c0cca5c0, type: 3}
     preloadCount: 0

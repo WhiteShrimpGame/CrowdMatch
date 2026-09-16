@@ -1,9 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-#if DOTWEEN
 using DG.Tweening;
-#endif
 
 namespace CrowdMatch
 {
@@ -118,7 +116,6 @@ namespace CrowdMatch
             usingObjDic.Remove(go);
         }
 
-#if DOTWEEN
         public GameObject SpawnDuration(string tag, float timeDuration, Transform parent = null)
         {
             var go = Spawn(tag, parent);
@@ -128,7 +125,6 @@ namespace CrowdMatch
             });
             return go;
         }
-#endif
 
         public void GC(bool clear = false)
         {
