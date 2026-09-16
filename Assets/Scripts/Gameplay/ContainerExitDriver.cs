@@ -170,9 +170,6 @@ namespace CrowdMatch
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
 
-            // 挂拖尾：生成后随车移动，车销毁前回收
-            SpawnTrail(container);
-
             // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
             // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
             // （缩放轴，或无缩放轴时的自转轴，或都无时的小车）整体移到新轴下，最后把旧轴还给小车。小车全程不脱离
@@ -231,6 +228,9 @@ namespace CrowdMatch
                     if (angle >= 0f)
                     {
                         front.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
+
+                        // 转正后才挂拖尾：生成后随车移动，车销毁前回收
+                        SpawnTrail(container);
 
                         // 恢复位移轴 + 缩放轴，但保留自转轴作为小车父物体（侧翻持续到归 0）
                         if (scale != null)
