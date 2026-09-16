@@ -151,6 +151,8 @@ namespace CrowdMatch
             // 倒车等待结束，开始出车
             //if (AudioManager.Instance != null)
             //    AudioManager.Instance.Play("CarOut");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
 
             // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
             // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点

@@ -386,6 +386,8 @@ namespace CrowdMatch
             // 落到车上
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("Geton");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(0);
 
             if (pixel != null)
             {

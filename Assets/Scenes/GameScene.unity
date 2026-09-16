@@ -1360,6 +1360,8 @@ MonoBehaviour:
   frameItem: {fileID: 0}
   gatherSpeed: 12
   gatherScatterRadius: 0.35
+  blockedNudgeDistance: 0.1
+  blockedNudgeDuration: 0.08
   crowdBuffer: {fileID: 424865907}
   conveyorZone: {fileID: 1582382721}
   recordMode: 0

@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+#if WeChat
+using WeChatWASM;
+#endif
 
 namespace CrowdMatch
 {
@@ -114,6 +117,51 @@ namespace CrowdMatch
             var gc = GameController.Instance;
             if (gc != null)
                 gc.ReloadLevel();
+        }
+
+        // ========== 震动 / Vibration ==========
+
+        /// <summary>
+        /// 触发震动。level：0 = 轻，1 = 中，2 = 重，其他 = 长震。
+        /// 目前只实现微信小游戏平台（需定义 WeChat 宏并引入 WX SDK），其余平台为空实现。
+        /// </summary>
+        public void TriggerVibrate(int level)
+        {
+#if WeChat
+            switch (level)
+            {
+                case 0:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "light",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                case 1:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "medium",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                case 2:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "heavy",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                default:
+                    WX.VibrateLong(new VibrateLongOption() { fail = null, complete = null, success = null });
+                    break;
+            }
+#endif
         }
     }
 }

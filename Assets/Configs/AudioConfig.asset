@@ -33,3 +33,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: bed4639a139bd5749999647049548e24, type: 3}
     volume: 1
     isBGM: 0
+  - tag: TapBlocked
+    clip: {fileID: 8300000, guid: bdaf05b3c98e60f4fb4a9842d36510ae, type: 3}
+    volume: 1
+    isBGM: 0

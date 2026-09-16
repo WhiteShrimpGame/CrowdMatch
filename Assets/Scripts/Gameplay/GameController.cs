@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -40,6 +41,13 @@ namespace CrowdMatch
         [Header("聚集表现")]
         [Tooltip("单位到达聚集点后的散布半径，避免完全重叠")]
         public float gatherScatterRadius = 0.35f;
+
+        [Header("点击无效反馈")]
+        [Tooltip("点击无法移出的像素时，被点像素与相连同色像素一起向前（本地 +Z）晃出的距离（世界单位）")]
+        public float blockedNudgeDistance = 0.25f;
+
+        [Tooltip("晃动单程时长（秒）；去与回同速，故两段时长相同")]
+        public float blockedNudgeDuration = 0.08f;
 
         [Header("过闸缓冲区（可选）")]
         [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
@@ -620,6 +628,41 @@ namespace CrowdMatch
             return false;
         }
 
+        /// <summary>
+        /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
+        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动。
+        /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
+        /// </summary>
+        private void PlayBlockedFeedback(List<PixelItem> blocked)
+        {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("TapBlocked");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
+
+            float distance = Mathf.Max(0f, blockedNudgeDistance);
+            float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
+
+            foreach (var item in blocked)
+            {
+                if (item == null)
+                    continue;
+
+                var tr = item.transform;
+                Vector3 origin = pixelGroup.GetLocalPosition(item.gridX, item.gridZ);   // 网格位 = 回位锚点
+                Vector3 forward = origin + Vector3.forward * distance;                  // 本地 +Z = 朝首排方向
+
+                tr.DOKill();
+                tr.DOLocalMove(forward, duration)
+                    .SetEase(Ease.Linear)
+                    .OnComplete(() =>
+                    {
+                        if (tr != null)
+                            tr.DOLocalMove(origin, duration).SetEase(Ease.Linear);
+                    });
+            }
+        }
+
         private void ResolveMatch(PixelItem start)
         {
             List<PixelItem> matched = FloodFill(start);
@@ -630,12 +673,15 @@ namespace CrowdMatch
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
                         "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
+                PlayBlockedFeedback(matched);
                 return;
             }
 
-            // 点击确认可移出：播放点击音效（每次点击一次，不按像素数）
+            // 点击确认可移出：播放点击音效 + 震动（每次点击一次，不按像素数）
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("Tap");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
