@@ -618,9 +618,10 @@ namespace CrowdMatch
                 return null;
             }
 
-            GameObject go = Instantiate(pixelPrefab);
+            GameObject go = PrefabSpawner.Instantiate(pixelPrefab, transform);
+            if (go == null)
+                return null;
             go.name = "Pixel_" + row + "_" + col;
-            go.transform.SetParent(transform, false);
             go.transform.localPosition = GetLocalPosition(col, row);
             go.transform.localScale = Vector3.one * (scaleZero ? 0f : unitSize);
 
@@ -652,9 +653,11 @@ namespace CrowdMatch
                 return null;
             }
 
-            var go = Instantiate(pipePrefab);
-            go.name = "Pipe_" + (transform.childCount + 1);
-            go.transform.SetParent(transform, false);
+            string pipeName = "Pipe_" + (transform.childCount + 1);   // 先取名，避免实例化后再数子物体多算一个
+            var go = PrefabSpawner.Instantiate(pipePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = pipeName;
 
             var pipe = go.GetComponent<PipeItem>();
             if (pipe == null)
@@ -767,7 +770,7 @@ namespace CrowdMatch
             ElevatorItem elev;
             if (elevatorPrefab != null)
             {
-                go = Instantiate(elevatorPrefab, transform);
+                go = PrefabSpawner.Instantiate(elevatorPrefab, transform);
                 go.name = "Elevator_" + rmin + "_" + cmin;
                 go.transform.localPosition = Vector3.zero;
                 elev = go.GetComponent<ElevatorItem>();

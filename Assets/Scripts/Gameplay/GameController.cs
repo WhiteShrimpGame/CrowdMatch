@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -30,6 +31,9 @@ namespace CrowdMatch
         [Tooltip("管理的 ContainerGroup，留空会自动查找")]
         public ContainerGroup containerGroup;
 
+        [Tooltip("整体描边 FrameItem（可选）；留空则不做描边，暴露状态刷新后会自动重建")]
+        public FrameItem frameItem;
+
         [Header("速度")]
         [Tooltip("单位向聚集点移动的速度（世界单位/秒）")]
         public float gatherSpeed = 12f;
@@ -37,6 +41,13 @@ namespace CrowdMatch
         [Header("聚集表现")]
         [Tooltip("单位到达聚集点后的散布半径，避免完全重叠")]
         public float gatherScatterRadius = 0.35f;
+
+        [Header("点击无效反馈")]
+        [Tooltip("点击无法移出的像素时，被点像素与相连同色像素一起向前（本地 +Z）晃出的距离（世界单位）")]
+        public float blockedNudgeDistance = 0.25f;
+
+        [Tooltip("晃动单程时长（秒）；去与回同速，故两段时长相同")]
+        public float blockedNudgeDuration = 0.08f;
 
         [Header("过闸缓冲区（可选）")]
         [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
@@ -94,6 +105,8 @@ namespace CrowdMatch
                 pixelGroup = FindObjectOfType<PixelGroup>();
             if (containerGroup == null)
                 containerGroup = FindObjectOfType<ContainerGroup>();
+            if (frameItem == null)
+                frameItem = FindObjectOfType<FrameItem>();
 
             _clickMask = LayerMask.GetMask("Click");
 
@@ -135,12 +148,14 @@ namespace CrowdMatch
             LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
 #endif
 
-            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定 Container 时跳过）
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定的关卡跳过）。
+            // 运行时以 JSON 的 lockContainer 为准；它与场景里 ContainerGroup.shuffleContainers 由导出/导入互相同步。
             if (!data.container.lockContainer)
                 LevelLoader.ShuffleContainers(data.container);
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
             pixelGroup.RefreshExposed();
+            RefreshFrame();
 
 #if UNITY_EDITOR
             // 缓存初始化（洗牌后）的关卡数据快照，供编辑器在 Play 模式下导出「锁定」初始状态
@@ -150,6 +165,14 @@ namespace CrowdMatch
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
+        }
+
+        /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
+        private void RefreshFrame()
+        {
+            if (frameItem == null)
+                return;
+            frameItem.Build();
         }
 
         /// <summary>原地重载当前关卡（由 GameManager 在胜负过渡后调用）。</summary>
@@ -605,6 +628,41 @@ namespace CrowdMatch
             return false;
         }
 
+        /// <summary>
+        /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
+        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动。
+        /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
+        /// </summary>
+        private void PlayBlockedFeedback(List<PixelItem> blocked)
+        {
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("TapBlocked");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
+
+            float distance = Mathf.Max(0f, blockedNudgeDistance);
+            float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
+
+            foreach (var item in blocked)
+            {
+                if (item == null)
+                    continue;
+
+                var tr = item.transform;
+                Vector3 origin = pixelGroup.GetLocalPosition(item.gridX, item.gridZ);   // 网格位 = 回位锚点
+                Vector3 forward = origin + Vector3.forward * distance;                  // 本地 +Z = 朝首排方向
+
+                tr.DOKill();
+                tr.DOLocalMove(forward, duration)
+                    .SetEase(Ease.Linear)
+                    .OnComplete(() =>
+                    {
+                        if (tr != null)
+                            tr.DOLocalMove(origin, duration).SetEase(Ease.Linear);
+                    });
+            }
+        }
+
         private void ResolveMatch(PixelItem start)
         {
             List<PixelItem> matched = FloodFill(start);
@@ -615,8 +673,15 @@ namespace CrowdMatch
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
                         "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
+                PlayBlockedFeedback(matched);
                 return;
             }
+
+            // 点击确认可移出：播放点击音效 + 震动（每次点击一次，不按像素数）
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("Tap");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
@@ -647,6 +712,7 @@ namespace CrowdMatch
             pixelGroup.TryOpenBoxes();
             pixelGroup.TryAdvanceElevators();
             pixelGroup.RefreshExposed();
+            RefreshFrame();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集

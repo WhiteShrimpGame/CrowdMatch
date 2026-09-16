@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39c0c6a54825e29478b728d8820a52ad, type: 3}
+  m_Name: AudioConfig
+  m_EditorClassIdentifier: 
+  items:
+  - tag: BGM
+    clip: {fileID: 8300000, guid: 3647da16116aecd43b06497470f1f254, type: 3}
+    volume: 1
+    isBGM: 1
+  - tag: Tap
+    clip: {fileID: 8300000, guid: e9ea81a17bae8034198be683e59c37c5, type: 3}
+    volume: 0.8
+    isBGM: 0
+  - tag: Jump
+    clip: {fileID: 8300000, guid: fa5eb05b24e47674cb7988fc99e00338, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: Geton
+    clip: {fileID: 8300000, guid: 5506fbc14e8b50643aa3fcbddd7a8c51, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: CarLeave
+    clip: {fileID: 8300000, guid: 35bfbfed012f4094ea5df70fe44352c8, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: TapBlocked
+    clip: {fileID: 8300000, guid: bdaf05b3c98e60f4fb4a9842d36510ae, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: CarLeave2
+    clip: {fileID: 8300000, guid: bed4639a139bd5749999647049548e24, type: 3}
+    volume: 1
+    isBGM: 0

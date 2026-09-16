@@ -195,7 +195,9 @@ namespace CrowdMatch
                     continue;
                 }
 
-                var piece = Instantiate(prefab, transform);
+                var piece = PrefabSpawner.Instantiate(prefab, transform);
+                if (piece == null)
+                    continue;
                 piece.name = "WallPiece_" + type + "_" + cell.y + "_" + cell.x;
                 piece.transform.localPosition = pg.GetLocalPosition(cell.x, cell.y);
                 piece.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);

@@ -298,11 +298,12 @@ namespace CrowdMatch
             ApplyExposedState(exposed);
         }
 
-        /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。</summary>
+        /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。
+        /// 场景中存在启用的 FrameItem 时，整体描边由 FrameItem 统一绘制，自身描边不再显示。</summary>
         private void ApplyExposedState(bool exposed)
         {
             if (outlineRenderer != null)
-                outlineRenderer.enabled = exposed;
+                outlineRenderer.enabled = exposed && !FrameItem.InUse;
             if (animator != null)
                 animator.enabled = exposed;
         }
