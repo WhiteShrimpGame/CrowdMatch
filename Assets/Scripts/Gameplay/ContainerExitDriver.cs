@@ -76,6 +76,21 @@ namespace CrowdMatch
 
         private bool _playing;
 
+        /// <summary>出车时从 SpawnPool 生成的拖尾物体（挂在 ContainerItem.trailParent 下）；车销毁前回收。</summary>
+        private GameObject _trail;
+
+        /// <summary>出车起步音效序列：连续出车时依次轮换。</summary>
+        private static readonly string[] CarLeaveTags = { "CarLeave", "CarLeave2", "CarLeave3" };
+
+        /// <summary>出车起步音效的轮换窗口（秒）：上次播放距今不超过该值则换下一段，超过则回到第一段。</summary>
+        private const float CarLeaveLoopWindow = 2f;
+
+        /// <summary>下一段出车音效的下标（静态：跨所有小车共享，同一时间可能有多辆车出库）。</summary>
+        private static int _carLeaveIndex;
+
+        /// <summary>上一次播放出车音效的时间（Time.time）。</summary>
+        private static float _carLeaveLastTime = float.NegativeInfinity;
+
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
         public void Play(Action onRefill)
         {
@@ -112,6 +127,11 @@ namespace CrowdMatch
             if (roll != null)  { roll.SetParent(chainRoot, true);  chainRoot = roll; }    // 自转轴 → 缩放轴下（最深层）
             transform.SetParent(chainRoot, true);   // 小车挂到自转轴（或缩放轴、后轴）
 
+            // 开始倒车
+            PlayCarLeaveSfx();
+
+            //SpawnConfetti();
+
             float t = 0f;
             float prevS = 0f;
             float total = reverseDuration + reverseWait;
@@ -143,6 +163,15 @@ namespace CrowdMatch
                     SetScaleX(scale, 1f - (1f - reverseSquashScale) * EaseOutQuad((t - reverseSquashDelay) / squashTotal));
                 yield return null;
             }
+
+            // 倒车等待结束，开始出车
+            //if (AudioManager.Instance != null)
+            //    AudioManager.Instance.Play("CarOut");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
+
+            // 挂拖尾：生成后随车移动，车销毁前回收
+            SpawnTrail(container);
 
             // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
             // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
@@ -300,7 +329,73 @@ namespace CrowdMatch
                 yield return null;
             }
 
+            DespawnTrail();   // 拖尾挂在车节点下，必须先回收再销毁车，否则会连带销毁、池里留下空引用
             Destroy(gameObject);
+        }
+
+        /// <summary>从 SpawnPool 生成 Trail 并挂到车上的拖尾父节点下；未配置池 / 节点 / tag 时静默跳过。</summary>
+        private void SpawnTrail(ContainerItem container)
+        {
+            if (_trail != null || container == null || container.trailParent == null)
+                return;
+
+            var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+            if (pool == null)
+                return;
+
+            _trail = pool.Spawn("Trail", container.trailParent);
+            if (_trail == null)
+                return;
+
+            // Spawn 用 parent 赋值（保持世界位姿），此处对齐到拖尾节点自身
+            _trail.transform.localPosition = Vector3.zero;
+            _trail.transform.localRotation = Quaternion.identity;
+            _trail.transform.localScale = Vector3.one;
+        }
+
+        /// <summary>
+        /// 播放出车起步音效：上次播放距今不超过 CarLeaveLoopWindow 秒时，按 CarLeave → CarLeave2 → CarLeave3 依次轮换
+        /// （到末尾回到开头）；超过该窗口则从 CarLeave 重新开始。状态静态，跨所有小车共享。
+        /// </summary>
+        private static void PlayCarLeaveSfx()
+        {
+            var audio = AudioManager.Instance;
+            if (audio == null)
+                return;
+
+            float now = Time.time;
+            _carLeaveIndex = now - _carLeaveLastTime > CarLeaveLoopWindow
+                ? 0
+                : (_carLeaveIndex + 1) % CarLeaveTags.Length;
+            _carLeaveLastTime = now;
+
+            audio.Play(CarLeaveTags[_carLeaveIndex]);
+        }
+
+        /// <summary>倒车起点就地生成 Confetti，3 秒后由 SpawnPool 自动回收。
+        /// 不挂到小车下：避免继承倒车挤压缩放，也让彩带留在原地作为爆发点。</summary>
+        //private void SpawnConfetti()
+        //{
+        //    var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+        //    if (pool == null)
+        //        return;
+
+        //    var fx = pool.SpawnDuration("Confetti", 3f);
+        //    if (fx != null)
+        //        fx.transform.position = transform.position;
+        //}
+
+        /// <summary>把拖尾归还对象池。可重复调用：已回收或未生成时为空操作。</summary>
+        private void DespawnTrail()
+        {
+            if (_trail == null)
+                return;
+
+            var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+            if (pool != null)
+                pool.Despawn(_trail, true);
+
+            _trail = null;
         }
 
         /// <summary>匀减速（ease-out quad，p∈[0,1] → [0,1]，起始最快、末速归零）。</summary>

@@ -8,9 +8,14 @@ namespace CrowdMatch
     [CustomEditor(typeof(WallItem))]
     public class WallItemEditor : Editor
     {
+        /// <summary>填充颜色 ID 的 EditorPrefs 键（记忆上次输入，避免每次重填）。</summary>
+        private const string FillColorKey = "CrowdMatch.WallItemEditor.FillColorId";
+
         public override void OnInspectorGUI()
         {
             var wall = (WallItem)target;
+            if (wall == null)   // 「转为 Pixel」可能已在延后回调里把本物体销毁
+                return;
 
             serializedObject.Update();
             DrawDefaultInspector();
@@ -28,6 +33,27 @@ namespace CrowdMatch
             if (GUILayout.Button("取消闭环"))
                 CancelLoop(wall);
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("转为 Pixel（仅非运行模式）", EditorStyles.boldLabel);
+
+            int fillColor = EditorPrefs.GetInt(FillColorKey, 0);
+            int newFillColor = EditorGUILayout.IntField("填充颜色 ID", fillColor);
+            if (newFillColor != fillColor)
+                EditorPrefs.SetInt(FillColorKey, newFillColor);
+
+            using (new EditorGUI.DisabledScope(Application.isPlaying))
+            {
+                if (GUILayout.Button("移除墙体并用 Pixel 填满其范围"))
+                {
+                    // 延后到本次 GUI 绘制结束后再执行：墙体会被销毁，本方法后续代码与同帧的 Layout/Repaint 都不该再访问它
+                    var targetWall = wall;
+                    int targetColor = newFillColor;
+                    EditorApplication.delayCall += () => FillWithPixels(targetWall, targetColor);
+                }
+            }
+            if (Application.isPlaying)
+                EditorGUILayout.HelpBox("运行模式下不可用，请先停止运行。", MessageType.Info);
 
             if (wall.points == null || wall.points.Count < 2)
             {
@@ -134,6 +160,84 @@ namespace CrowdMatch
             EditorUtility.SetDirty(wall);
 
             Debug.Log("[WallItem] 已取消闭环墙体 " + wall.name + "。");
+        }
+
+        /// <summary>
+        /// 移除该 WallItem，并在它占据的每个网格格上生成 Pixel（颜色统一用 colorId）。
+        /// 仅非运行模式可用；已在格上的 Pixel 保持不动，只补空缺。整体合并为一次撤销。
+        /// </summary>
+        private void FillWithPixels(WallItem wall, int colorId)
+        {
+            if (wall == null)   // 延后执行期间可能已被销毁
+                return;
+
+            if (Application.isPlaying)
+            {
+                EditorUtility.DisplayDialog("填充 Pixel", "请在非运行模式下使用。", "确定");
+                return;
+            }
+
+            var group = wall.Group;
+            if (group == null)
+            {
+                EditorUtility.DisplayDialog("填充 Pixel", "墙体必须位于 PixelGroup 下。", "确定");
+                return;
+            }
+
+            string wallName = wall.name;   // 下面会销毁墙体，名字先取出来
+            if (group.pixelPrefab == null)
+            {
+                EditorUtility.DisplayDialog("填充 Pixel", "PixelGroup.pixelPrefab 为空，无法生成 Pixel。", "确定");
+                return;
+            }
+
+            // 先刷新网格，保证下面的 GetItem 拿到的是当前像素/墙体占用表
+            group.RebuildGrid();
+
+            var occupied = new HashSet<Vector2Int>();
+            foreach (var cell in wall.EnumerateOccupiedCells())
+            {
+                if (group.IsInRange(cell.x, cell.y))
+                    occupied.Add(cell);
+            }
+
+            if (occupied.Count == 0)
+            {
+                EditorUtility.DisplayDialog("填充 Pixel", "该墙体没有落在网格范围内的格子，无法填充。", "确定");
+                return;
+            }
+
+            var config = ColorConfigLocator.Find();
+            if (config == null)
+                Debug.LogWarning("[WallItem] 未找到 ColorConfig，填充的 Pixel 将沿用预制体默认材质。");
+
+            // 补 Pixel 与删墙体合并为一步撤销
+            Undo.SetCurrentGroupName("移除墙体并填充 Pixel");
+            int undoGroup = Undo.GetCurrentGroup();
+
+            int created = 0;
+            foreach (var cell in occupied)
+            {
+                if (group.GetItem(cell.x, cell.y) != null)
+                    continue;   // 该格已有 Pixel，不覆盖
+
+                var item = group.SpawnPixel(cell.x, cell.y, colorId, config);
+                if (item == null)
+                    continue;
+
+                Undo.RegisterCreatedObjectUndo(item.gameObject, "填充 Pixel");
+                created++;
+            }
+
+            Undo.DestroyObjectImmediate(wall.gameObject);
+
+            group.RebuildGrid();
+            EditorUtility.SetDirty(group);
+
+            Undo.CollapseUndoOperations(undoGroup);
+
+            Debug.Log("[WallItem] 已移除墙体 " + wallName + "，在 " + occupied.Count +
+                " 格范围上新建 " + created + " 个 Pixel（颜色 " + colorId + "）。");
         }
 
         /// <summary>构建闭环后的完整占格集合（含首尾闭合段）。</summary>

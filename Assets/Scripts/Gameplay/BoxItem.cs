@@ -170,7 +170,12 @@ namespace CrowdMatch
             for (int i = 0; i < capacity; i++)
             {
                 int colorId = colorIds != null && i < colorIds.Length ? colorIds[i] : 0;
-                var go = Instantiate(pg.pixelPrefab, pg.transform);
+                var go = PrefabSpawner.Instantiate(pg.pixelPrefab, pg.transform);
+                if (go == null)
+                {
+                    Debug.LogError("[BoxItem] pixelPrefab 为空，无法生成箱内隐藏 Pixel。");
+                    continue;
+                }
                 go.name = "BoxPixel_" + rowMin + "_" + colMin + "_" + i;
                 go.transform.localPosition = appear;
                 go.transform.localRotation = Quaternion.identity;
@@ -205,7 +210,9 @@ namespace CrowdMatch
                         Debug.LogWarning("[BoxItem] 箱子视觉预制体为空，跳过格子 (" + c + "," + r + ")。");
                         continue;
                     }
-                    var piece = Instantiate(prefab, transform);
+                    var piece = PrefabSpawner.Instantiate(prefab, transform);
+                    if (piece == null)
+                        continue;
                     piece.name = "BoxPiece_" + r + "_" + c;
                     piece.transform.localPosition = pg.GetLocalPosition(c, r);
                     piece.transform.localRotation = Quaternion.identity;
