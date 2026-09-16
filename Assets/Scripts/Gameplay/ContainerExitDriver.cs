@@ -76,6 +76,9 @@ namespace CrowdMatch
 
         private bool _playing;
 
+        /// <summary>出车时从 SpawnPool 生成的拖尾物体（挂在 ContainerItem.trailParent 下）；车销毁前回收。</summary>
+        private GameObject _trail;
+
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
         public void Play(Action onRefill)
         {
@@ -153,6 +156,9 @@ namespace CrowdMatch
             //    AudioManager.Instance.Play("CarOut");
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
+
+            // 挂拖尾：生成后随车移动，车销毁前回收
+            SpawnTrail(container);
 
             // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
             // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
@@ -310,7 +316,41 @@ namespace CrowdMatch
                 yield return null;
             }
 
+            DespawnTrail();   // 拖尾挂在车节点下，必须先回收再销毁车，否则会连带销毁、池里留下空引用
             Destroy(gameObject);
+        }
+
+        /// <summary>从 SpawnPool 生成 Trail 并挂到车上的拖尾父节点下；未配置池 / 节点 / tag 时静默跳过。</summary>
+        private void SpawnTrail(ContainerItem container)
+        {
+            if (_trail != null || container == null || container.trailParent == null)
+                return;
+
+            var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+            if (pool == null)
+                return;
+
+            _trail = pool.Spawn("Trail", container.trailParent);
+            if (_trail == null)
+                return;
+
+            // Spawn 用 parent 赋值（保持世界位姿），此处对齐到拖尾节点自身
+            _trail.transform.localPosition = Vector3.zero;
+            _trail.transform.localRotation = Quaternion.identity;
+            _trail.transform.localScale = Vector3.one;
+        }
+
+        /// <summary>把拖尾归还对象池。可重复调用：已回收或未生成时为空操作。</summary>
+        private void DespawnTrail()
+        {
+            if (_trail == null)
+                return;
+
+            var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+            if (pool != null)
+                pool.Despawn(_trail, true);
+
+            _trail = null;
         }
 
         /// <summary>匀减速（ease-out quad，p∈[0,1] → [0,1]，起始最快、末速归零）。</summary>

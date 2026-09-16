@@ -30,6 +30,15 @@ namespace CrowdMatch
         [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用")]
         public LevelDataConfig levelDataConfig;
 
+        [Header("对象池")]
+        [Tooltip("对象池配置资产（tag → prefab → preloadCount）；留空则跳过对象池初始化")]
+        public SpawnPoolConfig spawnPoolConfig;
+
+        [Tooltip("对象池预加载与回收对象的父物体")]
+        public Transform spawnPoolRoot;
+
+        public SpawnPool spawnPool;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -49,6 +58,13 @@ namespace CrowdMatch
             audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
             if (audioConfig != null)
                 audioManager.Play("BGM", loop: true);   // 背景音乐循环播放（跨关卡不重播）
+
+            // 对象池：配置为空时跳过（未使用池化也能正常跑）
+            if (spawnPoolConfig != null)
+            {
+                spawnPool = new SpawnPool();
+                spawnPool.Init(spawnPoolConfig, spawnPoolRoot);
+            }
         }
 
         // ========== Debug / 调试 ==========
@@ -113,10 +129,20 @@ namespace CrowdMatch
         /// <summary>重载当前关卡（原地重建，不重载场景）：重置计数后交由 GameController 重新初始化。</summary>
         private void ReloadLevel()
         {
+            CleanupSpawnPool();   // 关卡重建前回收对象池：在用对象全部归还并裁回 preloadCount
             GameData.Init(true);
             var gc = GameController.Instance;
             if (gc != null)
                 gc.ReloadLevel();
+        }
+
+        /// <summary>对象池清理：归还所有在用对象并把池裁回 preloadCount。场景切换 / 关卡重建前调用。</summary>
+        public void CleanupSpawnPool()
+        {
+            if (spawnPool != null)
+            {
+                spawnPool.GC(true);
+            }
         }
 
         // ========== 震动 / Vibration ==========
