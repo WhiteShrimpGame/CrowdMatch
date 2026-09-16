@@ -79,6 +79,18 @@ namespace CrowdMatch
         /// <summary>出车时从 SpawnPool 生成的拖尾物体（挂在 ContainerItem.trailParent 下）；车销毁前回收。</summary>
         private GameObject _trail;
 
+        /// <summary>出车起步音效序列：连续出车时依次轮换。</summary>
+        private static readonly string[] CarLeaveTags = { "CarLeave", "CarLeave2", "CarLeave3" };
+
+        /// <summary>出车起步音效的轮换窗口（秒）：上次播放距今不超过该值则换下一段，超过则回到第一段。</summary>
+        private const float CarLeaveLoopWindow = 2f;
+
+        /// <summary>下一段出车音效的下标（静态：跨所有小车共享，同一时间可能有多辆车出库）。</summary>
+        private static int _carLeaveIndex;
+
+        /// <summary>上一次播放出车音效的时间（Time.time）。</summary>
+        private static float _carLeaveLastTime = float.NegativeInfinity;
+
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
         public void Play(Action onRefill)
         {
@@ -116,11 +128,7 @@ namespace CrowdMatch
             transform.SetParent(chainRoot, true);   // 小车挂到自转轴（或缩放轴、后轴）
 
             // 开始倒车
-            if (AudioManager.Instance != null)
-            {
-                AudioManager.Instance.Play("CarLeave");
-                AudioManager.Instance.Play("CarLeave2");
-            }
+            PlayCarLeaveSfx();
 
             SpawnConfetti();
 
@@ -343,6 +351,25 @@ namespace CrowdMatch
             _trail.transform.localPosition = Vector3.zero;
             _trail.transform.localRotation = Quaternion.identity;
             _trail.transform.localScale = Vector3.one;
+        }
+
+        /// <summary>
+        /// 播放出车起步音效：上次播放距今不超过 CarLeaveLoopWindow 秒时，按 CarLeave → CarLeave2 → CarLeave3 依次轮换
+        /// （到末尾回到开头）；超过该窗口则从 CarLeave 重新开始。状态静态，跨所有小车共享。
+        /// </summary>
+        private static void PlayCarLeaveSfx()
+        {
+            var audio = AudioManager.Instance;
+            if (audio == null)
+                return;
+
+            float now = Time.time;
+            _carLeaveIndex = now - _carLeaveLastTime > CarLeaveLoopWindow
+                ? 0
+                : (_carLeaveIndex + 1) % CarLeaveTags.Length;
+            _carLeaveLastTime = now;
+
+            audio.Play(CarLeaveTags[_carLeaveIndex]);
         }
 
         /// <summary>倒车起点就地生成 Confetti，3 秒后由 SpawnPool 自动回收。

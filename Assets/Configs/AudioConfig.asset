@@ -14,8 +14,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   items:
   - tag: BGM
-    clip: {fileID: 8300000, guid: 3647da16116aecd43b06497470f1f254, type: 3}
-    volume: 1
+    clip: {fileID: 8300000, guid: 00ce2c6c83120e345baa3e2255b08edb, type: 3}
+    volume: 0.3
     isBGM: 1
   - tag: Tap
     clip: {fileID: 8300000, guid: 1e82ee583a49b794eabae6c2ab2e7585, type: 3}
@@ -29,15 +29,23 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 5506fbc14e8b50643aa3fcbddd7a8c51, type: 3}
     volume: 1
     isBGM: 0
-  - tag: CarLeave
-    clip: {fileID: 8300000, guid: 35bfbfed012f4094ea5df70fe44352c8, type: 3}
-    volume: 1
-    isBGM: 0
   - tag: TapBlocked
     clip: {fileID: 8300000, guid: 317ca8f0da5a66b44874f4855897c582, type: 3}
     volume: 1
     isBGM: 0
+  - tag: CarLeave
+    clip: {fileID: 8300000, guid: 9c202f5b28c3c2a488e1c34e7d851d18, type: 3}
+    volume: 0.6
+    isBGM: 0
   - tag: CarLeave2
-    clip: {fileID: 8300000, guid: bed4639a139bd5749999647049548e24, type: 3}
-    volume: 1
+    clip: {fileID: 8300000, guid: 7f5c3013ffeefe14b90af902401b0cb9, type: 3}
+    volume: 0.6
+    isBGM: 0
+  - tag: CarLeave3
+    clip: {fileID: 8300000, guid: 1ea27698c02862442b6693b53e464bbc, type: 3}
+    volume: 0.6
+    isBGM: 0
+  - tag: OnBelt
+    clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
+    volume: 0.4
     isBGM: 0
