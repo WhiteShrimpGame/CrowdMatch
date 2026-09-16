@@ -376,10 +376,16 @@ namespace CrowdMatch
             pixel.SitDownExposeTarget();
 
             // 跳跃与转向并行：DOLocalJump 落到 0 点，同时 localRotation 平滑归 0（各自独立 tween，同时长）
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("Jump");
             var jumpTween = pixel.transform.DOLocalJump(Vector3.zero, boardJumpPower, boardJumpCount, boardJumpDuration);
             var rotateTween = pixel.transform.DOLocalRotate(Vector3.zero, boardJumpDuration);
             yield return jumpTween.WaitForCompletion();
             yield return rotateTween.WaitForCompletion();
+
+            // 落到车上
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("Geton");
 
             if (pixel != null)
             {

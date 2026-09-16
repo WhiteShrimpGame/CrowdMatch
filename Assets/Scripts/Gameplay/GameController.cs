@@ -633,6 +633,10 @@ namespace CrowdMatch
                 return;
             }
 
+            // 点击确认可移出：播放点击音效（每次点击一次，不按像素数）
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("Tap");
+
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
             {
