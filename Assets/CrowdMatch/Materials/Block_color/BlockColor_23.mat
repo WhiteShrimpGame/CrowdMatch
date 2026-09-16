@@ -144,8 +144,8 @@ Material:
     - _SpecularHighlights: 1
     - _SpecularMapType: 0
     - _SpecularRoughness: 0.08
-    - _SpecularToonSize: 0.033
-    - _SpecularToonSmoothness: 0.747
+    - _SpecularToonSize: 0.023
+    - _SpecularToonSmoothness: 0.341
     - _SpecularType: 0
     - _SrcBlend: 1
     - _UVSec: 0
