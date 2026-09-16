@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+#if WeChat
+using WeChatWASM;
+#endif
 
 namespace CrowdMatch
 {
@@ -27,6 +30,15 @@ namespace CrowdMatch
         [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用")]
         public LevelDataConfig levelDataConfig;
 
+        [Header("对象池")]
+        [Tooltip("对象池配置资产（tag → prefab → preloadCount）；留空则跳过对象池初始化")]
+        public SpawnPoolConfig spawnPoolConfig;
+
+        [Tooltip("对象池预加载与回收对象的父物体")]
+        public Transform spawnPoolRoot;
+
+        public SpawnPool spawnPool;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -46,6 +58,13 @@ namespace CrowdMatch
             audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
             if (audioConfig != null)
                 audioManager.Play("BGM", loop: true);   // 背景音乐循环播放（跨关卡不重播）
+
+            // 对象池：配置为空时跳过（未使用池化也能正常跑）
+            if (spawnPoolConfig != null)
+            {
+                spawnPool = new SpawnPool();
+                spawnPool.Init(spawnPoolConfig, spawnPoolRoot);
+            }
         }
 
         // ========== Debug / 调试 ==========
@@ -110,10 +129,65 @@ namespace CrowdMatch
         /// <summary>重载当前关卡（原地重建，不重载场景）：重置计数后交由 GameController 重新初始化。</summary>
         private void ReloadLevel()
         {
+            CleanupSpawnPool();   // 关卡重建前回收对象池：在用对象全部归还并裁回 preloadCount
             GameData.Init(true);
             var gc = GameController.Instance;
             if (gc != null)
                 gc.ReloadLevel();
+        }
+
+        /// <summary>对象池清理：归还所有在用对象并把池裁回 preloadCount。场景切换 / 关卡重建前调用。</summary>
+        public void CleanupSpawnPool()
+        {
+            if (spawnPool != null)
+            {
+                spawnPool.GC(true);
+            }
+        }
+
+        // ========== 震动 / Vibration ==========
+
+        /// <summary>
+        /// 触发震动。level：0 = 轻，1 = 中，2 = 重，其他 = 长震。
+        /// 目前只实现微信小游戏平台（需定义 WeChat 宏并引入 WX SDK），其余平台为空实现。
+        /// </summary>
+        public void TriggerVibrate(int level)
+        {
+#if WeChat
+            switch (level)
+            {
+                case 0:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "light",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                case 1:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "medium",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                case 2:
+                    WX.VibrateShort(new VibrateShortOption()
+                    {
+                        type = "heavy",
+                        success = null,
+                        fail = null,
+                        complete = null,
+                    });
+                    break;
+                default:
+                    WX.VibrateLong(new VibrateLongOption() { fail = null, complete = null, success = null });
+                    break;
+            }
+#endif
         }
     }
 }

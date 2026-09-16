@@ -53,6 +53,9 @@ namespace CrowdMatch
         [Tooltip("弹性缩放轴（空子物体，上车弹性缩放与出车侧翻归 0 后弹性缩放共用的 pivot；不配置则直接缩放车身）")]
         public Transform elasticScaleAxle;
 
+        [Tooltip("拖尾父节点（空子物体，出车瞬间从 SpawnPool 生成 Trail 挂到此处，随车移动；车销毁前回收）")]
+        public Transform trailParent;
+
         [Tooltip("盖子（可选，前排打开时直接隐藏；后排在前方全部找全匹配对象时播放 DisappearWithPop 消失动画）")]
         public Transform lidTransform;
 
@@ -385,7 +388,12 @@ namespace CrowdMatch
 
             // 落到车上
             if (AudioManager.Instance != null)
+            {
                 AudioManager.Instance.Play("Geton");
+                AudioManager.Instance.Play("Geton2");
+            }
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(0);
 
             if (pixel != null)
             {

@@ -791,6 +791,7 @@ Transform:
   - {fileID: 6380109393100094303}
   - {fileID: 8166711600158440386}
   - {fileID: 6362434280355853557}
+  - {fileID: 2147653374238413262}
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -818,6 +819,7 @@ MonoBehaviour:
   reverseScaleAxle: {fileID: 2994442980820408748}
   rollAxle: {fileID: 6380109393100094303}
   elasticScaleAxle: {fileID: 8166711600158440386}
+  trailParent: {fileID: 2147653374238413262}
   lidTransform: {fileID: 7478661911827386971}
   posList:
   - {fileID: 1328965301310577701}
@@ -1020,6 +1022,37 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &8357180152993608542
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2147653374238413262}
+  m_Layer: 0
+  m_Name: TrailRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2147653374238413262
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8357180152993608542}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.85, y: -0.2, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 10
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &8986039854410672198
 GameObject:
   m_ObjectHideFlags: 0
