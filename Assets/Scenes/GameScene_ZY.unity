@@ -1244,6 +1244,8 @@ MonoBehaviour:
   frameItem: {fileID: 0}
   gatherSpeed: 12
   gatherScatterRadius: 0.35
+  blockedNudgeDistance: 0.25
+  blockedNudgeDuration: 0.08
   crowdBuffer: {fileID: 424865907}
   conveyorZone: {fileID: 1582382721}
   recordMode: 0
@@ -1580,8 +1582,10 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 0}
   levelJsons:
-  - {fileID: 4900000, guid: 140de534ade1bdf4cbf94f95d98a2df9, type: 3}
+  - {fileID: 4900000, guid: 12b7510945961034db9f4fdb33ca3e4c, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
+  spawnPoolConfig: {fileID: 0}
+  spawnPoolRoot: {fileID: 0}
 --- !u!4 &1940794605
 Transform:
   m_ObjectHideFlags: 0
