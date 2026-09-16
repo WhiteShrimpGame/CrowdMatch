@@ -30,6 +30,9 @@ namespace CrowdMatch
         [Tooltip("管理的 ContainerGroup，留空会自动查找")]
         public ContainerGroup containerGroup;
 
+        [Tooltip("整体描边 FrameItem（可选）；留空则不做描边，暴露状态刷新后会自动重建")]
+        public FrameItem frameItem;
+
         [Header("速度")]
         [Tooltip("单位向聚集点移动的速度（世界单位/秒）")]
         public float gatherSpeed = 12f;
@@ -94,6 +97,8 @@ namespace CrowdMatch
                 pixelGroup = FindObjectOfType<PixelGroup>();
             if (containerGroup == null)
                 containerGroup = FindObjectOfType<ContainerGroup>();
+            if (frameItem == null)
+                frameItem = FindObjectOfType<FrameItem>();
 
             _clickMask = LayerMask.GetMask("Click");
 
@@ -135,12 +140,14 @@ namespace CrowdMatch
             LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
 #endif
 
-            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定 Container 时跳过）
+            // 洗牌：随机打乱容器摆放位置，让每次进关的容器排列不同（锁定的关卡跳过）。
+            // 运行时以 JSON 的 lockContainer 为准；它与场景里 ContainerGroup.shuffleContainers 由导出/导入互相同步。
             if (!data.container.lockContainer)
                 LevelLoader.ShuffleContainers(data.container);
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
             pixelGroup.RefreshExposed();
+            RefreshFrame();
 
 #if UNITY_EDITOR
             // 缓存初始化（洗牌后）的关卡数据快照，供编辑器在 Play 模式下导出「锁定」初始状态
@@ -150,6 +157,14 @@ namespace CrowdMatch
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
+        }
+
+        /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
+        private void RefreshFrame()
+        {
+            if (frameItem == null)
+                return;
+            frameItem.Build();
         }
 
         /// <summary>原地重载当前关卡（由 GameManager 在胜负过渡后调用）。</summary>
@@ -647,6 +662,7 @@ namespace CrowdMatch
             pixelGroup.TryOpenBoxes();
             pixelGroup.TryAdvanceElevators();
             pixelGroup.RefreshExposed();
+            RefreshFrame();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
