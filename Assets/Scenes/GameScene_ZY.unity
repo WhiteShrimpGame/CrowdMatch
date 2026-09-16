@@ -1581,9 +1581,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 0}
-  levelJsons:
-  - {fileID: 4900000, guid: 12b7510945961034db9f4fdb33ca3e4c, type: 3}
-  levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
+  levelJsons: []
+  levelDataConfig: {fileID: 11400000, guid: 64612b074c96ac24db114d74fa4202ec, type: 2}
   spawnPoolConfig: {fileID: 0}
   spawnPoolRoot: {fileID: 0}
 --- !u!4 &1940794605
