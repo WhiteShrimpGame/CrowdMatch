@@ -15,8 +15,8 @@
             -1,
             -1,
             -1,
-            9,
-            9,
+            0,
+            0,
             -1,
             4,
             4,
@@ -30,11 +30,11 @@
             -1,
             -1,
             -1,
-            9,
-            9,
+            0,
+            0,
             -1,
-            9,
-            9,
+            0,
+            0,
             4,
             5,
             5,
@@ -46,9 +46,9 @@
             8,
             -1,
             8,
-            9,
-            9,
-            9,
+            0,
+            0,
+            0,
             4,
             4,
             -1,
@@ -66,10 +66,10 @@
             -1,
             -1,
             -1,
-            9,
-            9,
-            9,
-            9,
+            13,
+            13,
+            13,
+            13,
             4,
             4,
             4,
@@ -81,10 +81,10 @@
             13,
             13,
             13,
-            9,
-            9,
-            9,
-            9,
+            13,
+            13,
+            13,
+            13,
             5,
             4,
             4,
@@ -99,7 +99,7 @@
             -1,
             -1,
             -1,
-            9,
+            13,
             5,
             -1,
             -1,
@@ -117,9 +117,9 @@
             8,
             5,
             -1,
-            6,
-            6,
-            6,
+            21,
+            21,
+            21,
             -1,
             4,
             8,
@@ -132,9 +132,9 @@
             5,
             5,
             -1,
-            6,
-            6,
-            6,
+            21,
+            21,
+            21,
             -1,
             4,
             4,
@@ -147,32 +147,32 @@
             5,
             2,
             2,
-            3,
-            3,
-            3,
+            8,
+            8,
+            8,
             0,
             0,
             4,
             -1,
             -1,
             -1,
-            6,
-            6,
+            21,
+            21,
             8,
             8,
             2,
             2,
-            3,
-            3,
-            3,
+            8,
+            8,
+            8,
             0,
             0,
             0,
             0,
             5,
             2,
-            6,
-            9,
+            21,
+            13,
             8,
             8,
             2,
@@ -186,24 +186,9 @@
             8,
             5,
             2,
-            6,
-            9,
+            21,
+            13,
             8,
-            -1,
-            14,
-            14,
-            14,
-            -1,
-            14,
-            14,
-            14,
-            -1,
-            8,
-            5,
-            2,
-            6,
-            9,
-            9,
             -1,
             14,
             14,
@@ -216,9 +201,24 @@
             8,
             5,
             2,
-            6,
-            9,
-            9,
+            21,
+            13,
+            13,
+            -1,
+            14,
+            14,
+            14,
+            -1,
+            14,
+            14,
+            14,
+            -1,
+            8,
+            5,
+            2,
+            21,
+            13,
+            13,
             -1,
             -1,
             -1,
@@ -473,37 +473,23 @@
                 "question": false
             },
             {
-                "x": 1,
-                "y": 0,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false
-            },
-            {
                 "x": 2,
                 "y": 0,
-                "colorId": 9,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 0,
                 "y": 1,
-                "colorId": 9,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false
             },
             {
-                "x": 2,
-                "y": 1,
+                "x": 1,
+                "y": 0,
                 "colorId": 0,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 2,
-                "colorId": 9,
                 "capacity": 3,
                 "question": false
             },
@@ -515,15 +501,22 @@
                 "question": false
             },
             {
-                "x": 1,
+                "x": 0,
                 "y": 2,
-                "colorId": 5,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false
             },
             {
-                "x": 0,
-                "y": 3,
+                "x": 1,
+                "y": 2,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 1,
                 "colorId": 0,
                 "capacity": 3,
                 "question": false
@@ -531,14 +524,7 @@
             {
                 "x": 2,
                 "y": 2,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 3,
-                "colorId": 5,
+                "colorId": 13,
                 "capacity": 3,
                 "question": false
             },
@@ -546,6 +532,27 @@
                 "x": 1,
                 "y": 3,
                 "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 1,
+                "y": 4,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 3,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 3,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false
             },
@@ -559,42 +566,21 @@
             {
                 "x": 2,
                 "y": 5,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 1,
-                "y": 4,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 6,
-                "colorId": 8,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 5,
-                "colorId": 2,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 7,
-                "colorId": 0,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 0,
                 "y": 4,
-                "colorId": 0,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false
             },
@@ -607,230 +593,209 @@
             },
             {
                 "x": 2,
-                "y": 8,
-                "colorId": 4,
+                "y": 6,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 6,
-                "colorId": 8,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 0,
                 "y": 6,
-                "colorId": 9,
+                "colorId": 5,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 7,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 0,
                 "y": 7,
-                "colorId": 9,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 8,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 7,
-                "colorId": 2,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 8,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 9,
-                "colorId": 6,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 9,
-                "colorId": 6,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 10,
-                "colorId": 3,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 10,
-                "colorId": 3,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 11,
-                "colorId": 5,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 8,
-                "colorId": 9,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 11,
-                "colorId": 13,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 12,
                 "colorId": 4,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 2,
-                "y": 12,
-                "colorId": 2,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 13,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 13,
-                "colorId": 13,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 14,
-                "colorId": 14,
+                "y": 9,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 9,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 15,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 1,
-                "y": 10,
-                "colorId": 9,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 1,
-                "y": 11,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 16,
-                "colorId": 14,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 14,
-                "colorId": 6,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 1,
-                "y": 12,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 0,
-                "y": 15,
                 "colorId": 2,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
-                "y": 13,
+                "y": 10,
                 "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 1,
+                "y": 11,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 10,
+                "colorId": 5,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 1,
+                "y": 12,
+                "colorId": 0,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 1,
+                "y": 13,
+                "colorId": 0,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 8,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 14,
-                "colorId": 9,
+                "colorId": 14,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 9,
+                "colorId": 14,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 11,
+                "colorId": 21,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
                 "y": 15,
-                "colorId": 6,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 2,
-                "y": 17,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false
-            },
-            {
-                "x": 1,
-                "y": 16,
                 "colorId": 13,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 1,
-                "y": 17,
-                "colorId": 14,
+                "y": 16,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false
             },
             {
                 "x": 0,
+                "y": 10,
+                "colorId": 21,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 12,
+                "colorId": 2,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 13,
+                "colorId": 2,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 11,
+                "colorId": 2,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 14,
+                "colorId": 14,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 1,
+                "y": 17,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 12,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 15,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
                 "y": 16,
                 "colorId": 14,
                 "capacity": 3,
@@ -838,7 +803,7 @@
             },
             {
                 "x": 0,
-                "y": 17,
+                "y": 13,
                 "colorId": 8,
                 "capacity": 3,
                 "question": false
@@ -846,7 +811,42 @@
             {
                 "x": 1,
                 "y": 18,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 14,
+                "colorId": 21,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 15,
                 "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 2,
+                "y": 17,
+                "colorId": 13,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 16,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false
+            },
+            {
+                "x": 0,
+                "y": 17,
+                "colorId": 21,
                 "capacity": 3,
                 "question": false
             },
