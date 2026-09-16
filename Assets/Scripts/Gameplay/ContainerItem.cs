@@ -148,6 +148,7 @@ namespace CrowdMatch
         private float _rollMoveSpeed;             // 补位移动速度（ContainerGroup 传入）
         private Vector3 _rollMoveStart;           // roll 轴在 ContainerGroup 空间的移动起点
         private Vector3 _rollMoveTarget;          // roll 轴在 ContainerGroup 空间的移动终点
+        private Vector3 _rollMoveTargetPlain;     // 车身在 ContainerGroup 空间的移动终点（不含轴偏移）
         private float _rollMoveDuration;
         private float _rollMoveTimer;
         private Coroutine _rollRoutine;
@@ -388,10 +389,7 @@ namespace CrowdMatch
 
             // 落到车上
             if (AudioManager.Instance != null)
-            {
                 AudioManager.Instance.Play("Geton");
-                AudioManager.Instance.Play("Geton2");
-            }
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(0);
 
@@ -556,6 +554,7 @@ namespace CrowdMatch
 
             _rollOnComplete = onComplete;
             bool active = _rollRoutine != null && _rollPhase != 0;
+            bool startRoutine = false;
 
             if (!active)
             {
@@ -566,7 +565,7 @@ namespace CrowdMatch
                 _rollOutDur = Mathf.Max(refillRollOutDuration, 0.0001f);
                 _rollTimer = 0f;
                 _rollMoveDone = false;
-                _rollRoutine = StartCoroutine(RefillRollRoutine());
+                startRoutine = true;
             }
             else if (_rollPhase == 2)
             {
@@ -585,18 +584,31 @@ namespace CrowdMatch
             // 移动目标在 ContainerGroup 空间（车身目标 + 轴偏移）；起点/时长延迟到换轴后按实际位置计算
             _rollMoveSpeed = refillSpeed;
             _rollMoveTarget = targetLocalPos + _rollAxleLocalOffset;
+            _rollMoveTargetPlain = targetLocalPos;
             _rollMoveTimer = 0f;
             _rollMovePending = true;
             _rollMoving = true;
+
+            // 协程必须放在以上字段赋值之后再启动：StartCoroutine 会同步执行到第一个 yield，
+            // 被启动的协程第一帧就要读 _rollMoving / _rollMovePending。
+            if (startRoutine)
+                _rollRoutine = StartCoroutine(RefillRollRoutine());
+
             return true;
         }
 
         private IEnumerator RefillRollRoutine()
         {
-            // 等上车弹性结束并收起轴（弹性换轴会改车身父物体，必须等车身回到 ContainerGroup 才能换侧倾轴）。
-            // 侧倾不再等待跳跃中的像素落定——落定后触发的弹性由 PlayBoardElastic 内的互斥判断直接忽略。
-            while (_elasticPhase != 0 || _elasticAxleSwapped)
-                yield return null;
+            // 上车形变进行中：车身此刻挂在弹性轴下，不能换 roll 轴——SwapRollAxle 会把 _rollAxleParent 记成弹性轴，
+            // 随后 RestoreElasticAxle 会把车身从 roll 轴链上拽回 ContainerGroup，导致瞬移。
+            // 故本次「忽略侧倾」，改为不换轴、把车身带着弹性轴一起匀速前移（形变照常播完，整列得以同帧起步）。
+            // 收尾沿用原规则：等形变结束（轴已归还）才回调，后续出库时 cartParent 才仍是 ContainerGroup。
+            // 弹性只会起于 roll 之前（PlayBoardElastic 被 _rollPhase != 0 挡住），所以这里不需要再等弹性。
+            if (_elasticPhase != 0 || _elasticAxleSwapped)
+            {
+                yield return RefillRoutineViaElasticAxle();
+                yield break;
+            }
 
             SwapRollAxle();
 
@@ -685,6 +697,92 @@ namespace CrowdMatch
 
                 yield return null;
             }
+        }
+
+        /// <summary>
+        /// 上车形变进行中时的补位前移：不换 roll 轴（车身此刻挂在弹性轴下，换轴会与弹性互抢车身父物体），
+        /// 改为把车身带着弹性轴一起匀速带到目标格——形变照常播完，整列不再被各自的上车形变错峰。
+        /// 车身挂在轴下时其 ContainerGroup 局部位置 = 轴位置 + 轴缩放 ⊙ 车身局部位置，故每帧按**当帧** scale 反解轴位置。
+        /// 形变在前移途中结束会把轴归还给车身，此时自动切回直接驱动车身并重新锚定（剩余距离 ÷ 速度，总时长不变）。
+        /// 收尾条件 = 移动完成 **且** 形变结束：ElasticRoutine 是先 RestoreElasticAxle 再置 _elasticPhase = 0，
+        /// 所以这等价于「轴已归还」，后续出库时 ContainerExitDriver 取到的 cartParent 才仍是 ContainerGroup。
+        /// 期间置 _rollPhase = 1，维持与 PlayBoardElastic 的互斥。
+        /// </summary>
+        private IEnumerator RefillRoutineViaElasticAxle()
+        {
+            _rollPhase = 1;
+
+            bool underAxle = IsCarUnderElasticAxle();
+            Vector3 startCar = Vector3.zero;
+            float duration = 0f;
+            float timer = 0f;
+            bool anchored = false;
+
+            while (true)
+            {
+                bool nowUnderAxle = IsCarUnderElasticAxle();
+
+                // 初次 / 新的移动请求 / 形变刚结束归还轴：按当前实际位置重新锚定
+                if (!anchored || _rollMovePending || nowUnderAxle != underAxle)
+                {
+                    underAxle = nowUnderAxle;
+                    startCar = CarGroupLocalPosition();
+                    duration = _rollMoveSpeed > 0.0001f
+                        ? Vector3.Distance(startCar, _rollMoveTargetPlain) / _rollMoveSpeed
+                        : 0f;
+                    timer = 0f;
+                    _rollMovePending = false;
+                    anchored = true;
+                }
+
+                if (_rollMoving)
+                {
+                    timer += Time.deltaTime;
+                    float k = Mathf.Clamp01(duration > 0.0001f ? timer / duration : 1f);
+                    SetCarGroupLocalPosition(Vector3.Lerp(startCar, _rollMoveTargetPlain, k));
+                    if (k >= 1f)
+                    {
+                        _rollMoving = false;
+                        _rollMoveDone = true;
+                    }
+                }
+
+                // 移动完成且形变结束（轴已归还）才收尾
+                if (_rollMoveDone && _elasticPhase == 0 && !_elasticAxleSwapped)
+                {
+                    _rollPhase = 0;
+                    _rollRoutine = null;
+                    var cb = _rollOnComplete;
+                    _rollOnComplete = null;
+                    cb?.Invoke();
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+
+        /// <summary>车身此刻是否挂在弹性轴下（上车形变换轴期间为 true）。</summary>
+        private bool IsCarUnderElasticAxle()
+        {
+            return elasticScaleAxle != null && transform.parent == elasticScaleAxle;
+        }
+
+        /// <summary>车身在 ContainerGroup 局部空间的位置；挂在弹性轴下时需把轴的缩放算进车身局部偏移。</summary>
+        private Vector3 CarGroupLocalPosition()
+        {
+            if (IsCarUnderElasticAxle())
+                return elasticScaleAxle.localPosition + Vector3.Scale(elasticScaleAxle.localScale, transform.localPosition);
+            return transform.localPosition;
+        }
+
+        /// <summary>把车身摆到 ContainerGroup 局部空间的目标位置（按是否挂在弹性轴下自动反解驱动对象）。</summary>
+        private void SetCarGroupLocalPosition(Vector3 pos)
+        {
+            if (IsCarUnderElasticAxle())
+                elasticScaleAxle.localPosition = pos - Vector3.Scale(elasticScaleAxle.localScale, transform.localPosition);
+            else
+                transform.localPosition = pos;
         }
 
         /// <summary>换轴（幂等）：roll 轴脱离车身挂到原始父物体并重置 scale，车身挂到 roll 轴下（世界位姿保持，无瞬移）。</summary>
