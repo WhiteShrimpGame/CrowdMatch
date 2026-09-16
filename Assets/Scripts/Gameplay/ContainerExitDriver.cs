@@ -130,7 +130,7 @@ namespace CrowdMatch
             // 开始倒车
             PlayCarLeaveSfx();
 
-            SpawnConfetti();
+            //SpawnConfetti();
 
             float t = 0f;
             float prevS = 0f;
@@ -374,16 +374,16 @@ namespace CrowdMatch
 
         /// <summary>倒车起点就地生成 Confetti，3 秒后由 SpawnPool 自动回收。
         /// 不挂到小车下：避免继承倒车挤压缩放，也让彩带留在原地作为爆发点。</summary>
-        private void SpawnConfetti()
-        {
-            var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
-            if (pool == null)
-                return;
+        //private void SpawnConfetti()
+        //{
+        //    var pool = GameManager.Instance != null ? GameManager.Instance.spawnPool : null;
+        //    if (pool == null)
+        //        return;
 
-            var fx = pool.SpawnDuration("Confetti", 3f);
-            if (fx != null)
-                fx.transform.position = transform.position;
-        }
+        //    var fx = pool.SpawnDuration("Confetti", 3f);
+        //    if (fx != null)
+        //        fx.transform.position = transform.position;
+        //}
 
         /// <summary>把拖尾归还对象池。可重复调用：已回收或未生成时为空操作。</summary>
         private void DespawnTrail()
