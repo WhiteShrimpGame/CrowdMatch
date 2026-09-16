@@ -80,6 +80,12 @@ namespace CrowdMatch
                 return;
             }
 
+            // 进入传送带：播放音效 + 轻震动
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("OnBelt");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(0);
+
             StartCoroutine(SettleRoutine(pixel, slotIndex));
 
             // 关键事件点：有小人进入传送带 → 尝试失败判定
