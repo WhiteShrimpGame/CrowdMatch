@@ -29,3 +29,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 5506fbc14e8b50643aa3fcbddd7a8c51, type: 3}
     volume: 1
     isBGM: 0
+  - tag: CarLeave
+    clip: {fileID: 8300000, guid: bed4639a139bd5749999647049548e24, type: 3}
+    volume: 1
+    isBGM: 0
