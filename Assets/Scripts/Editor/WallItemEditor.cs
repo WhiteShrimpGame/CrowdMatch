@@ -11,6 +11,8 @@ namespace CrowdMatch
         public override void OnInspectorGUI()
         {
             var wall = (WallItem)target;
+            if (wall == null)   // 「转为 Pixel」可能已在延后回调里把本物体销毁
+                return;
 
             serializedObject.Update();
             DrawDefaultInspector();
@@ -28,6 +30,23 @@ namespace CrowdMatch
             if (GUILayout.Button("取消闭环"))
                 CancelLoop(wall);
             EditorGUILayout.EndHorizontal();
+
+            // 点击后障碍物会被销毁，故这些值必须在注册延后回调前先取出来
+            var wallGo = wall.gameObject;
+            var group = wall.Group;
+            var cells = new List<Vector2Int>();
+            if (group != null)
+            {
+                foreach (var cell in wall.EnumerateOccupiedCells())
+                {
+                    if (group.IsInRange(cell.x, cell.y))
+                        cells.Add(cell);
+                }
+            }
+
+            GridFillUtility.DrawFillSection("移除墙体并用 Pixel 填满其范围",
+                colorId => GridFillUtility.RemoveAndFillPixels(
+                    wallGo, group, cells, colorId, "移除墙体并填充 Pixel"));
 
             if (wall.points == null || wall.points.Count < 2)
             {
