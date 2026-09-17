@@ -20,7 +20,8 @@
       "Bash(xargs grep -l \"167bbe0942e8d9846a622a014ad22a57\")",
       "Bash(awk '/PrefabInstance:/{p=1} p{print} /m_Modification:/{if\\(p\\)exit}' Assets/Scenes/GameScene.unity)",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Bash(timeout 300 dotnet build Assembly-CSharp.csproj -v q --nologo)"
     ]
   }
 }

@@ -61,7 +61,7 @@ namespace CrowdMatch
         public ConveyorBeltZone conveyorZone;
 
         [Header("Record 模式")]
-        [Tooltip("勾选后运行时新建序列文件；小球到达传送带远侧时直接消失并把颜色写入文件，不进入容器")]
+        [Tooltip("勾选后运行时新建序列文件；点击后像素原地消失并把颜色写入文件（不进入缓冲区/传送带），且允许点击被阻挡的组")]
         public bool recordMode = false;
 
         [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
@@ -676,7 +676,8 @@ namespace CrowdMatch
             List<PixelItem> matched = FloodFill(start);
 
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
-            if (!CanReachFront(matched))
+            // 记录模式不做此限制：被包围的组也允许点击（记录的是取出顺序，与组能否寻路无关）
+            if (!recordMode && !CanReachFront(matched))
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
@@ -723,7 +724,8 @@ namespace CrowdMatch
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
                 item.SetExposed(false);
                 item.SetClickable(false);
-                item.SetWalking(true);
+                if (!recordMode)
+                    item.SetWalking(true);   // 记录模式下像素随即原地消失，不需要走动画
             }
 
             // 匹配移除后，先让箱子/升降台释放像素占格（占格同步、动画异步），
@@ -732,6 +734,17 @@ namespace CrowdMatch
             pixelGroup.TryAdvanceElevators();
             pixelGroup.RefreshExposed();
             RefreshFrame();
+
+            // 记录模式：像素原地消失，按取出顺序（前到后、中间优先）写入序列文件，不进入缓冲区 / 传送带
+            if (recordMode)
+            {
+                for (int i = 0; i < matched.Count; i++)
+                {
+                    RecordBall(matched[i].colorId);
+                    Destroy(matched[i].gameObject);
+                }
+                return;
+            }
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
