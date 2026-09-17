@@ -1337,7 +1337,7 @@ MonoBehaviour:
   belt: {fileID: 782126357}
   containerGroup: {fileID: 1428373511}
   crowdBuffer: {fileID: 424865907}
-  matchRangeX: 0.6
+  matchGateOffsetX: -0.6
   matchRangeZ: 2
   settleRotateSpeed: 360
 --- !u!4 &1582382722
