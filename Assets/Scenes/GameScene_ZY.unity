@@ -4250,6 +4250,14 @@ PrefabInstance:
       propertyPath: points.Array.data[8].y
       value: 7
       objectReference: {fileID: 0}
+    - target: {fileID: 1421268536526698159, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421268536526698159, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 1
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
 --- !u!4 &436691087 stripped
@@ -11147,6 +11155,14 @@ PrefabInstance:
       propertyPath: points.Array.data[8].y
       value: 7
       objectReference: {fileID: 0}
+    - target: {fileID: 1421268536526698159, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421268536526698159, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 1
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
 --- !u!4 &1140682162 stripped
@@ -15254,7 +15270,7 @@ MonoBehaviour:
   belt: {fileID: 782126357}
   containerGroup: {fileID: 0}
   crowdBuffer: {fileID: 424865907}
-  matchRangeX: 0.6
+  matchGateOffsetX: 0
   matchRangeZ: 2
   settleRotateSpeed: 360
 --- !u!4 &1582382722
