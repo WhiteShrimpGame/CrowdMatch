@@ -68,17 +68,18 @@ namespace CrowdMatch
         private float[] _prevSlotX;
 
         /// <summary>
-        /// 离开判定钩子：返回 true 表示该物体应当离开传送带。
-        /// 由业务端注入（例如「与目标位置满足某种关系」）。
-        /// Leave-check hook: return true if the item should leave the belt.
+        /// 离开判定钩子（参数 = 槽位索引、乘员）：返回 true 表示该物体应当离开传送带。
+        /// 由业务端注入（例如「越过匹配闸口且正前方有同色容器」）。槽位索引供业务端按槽记录上一帧状态（闸口跨越检测）。
+        /// Leave-check hook: return true if the item should leave the belt. The slot index lets the host
+        /// keep per-slot previous-frame state (gate-crossing detection).
         /// </summary>
-        public Func<IConveyorItem, bool> ShouldLeave;
+        public Func<int, IConveyorItem, bool> ShouldLeave;
 
         /// <summary>
-        /// 离开回调钩子：物体离开传送带时触发，由业务端注入处理逻辑。
+        /// 离开回调钩子（参数 = 槽位索引、乘员）：物体离开传送带时触发，由业务端注入处理逻辑。
         /// Leave callback: invoked when an item leaves the belt. Injected by the host.
         /// </summary>
-        public Action<IConveyorItem> OnLeave;
+        public Action<int, IConveyorItem> OnLeave;
 
         [Header("Catch-up / 追赶")]
         [Tooltip("是否启用追赶：每周期把「队首直接相连占用块」之外的所有槽位整体向前平移一格，把空隙挤到队尾。/ Enable catch-up: each cycle shifts every slot outside the leader's contiguous occupied block one step forward, pushing gaps to the tail.")]
@@ -297,6 +298,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 每帧检查每个槽位是否满足离开条件，满足则解绑（从 carrier 下取出，保持世界位置）并回调。
+        /// 判定交给宿主：宿主可在 ShouldLeave 内部做闸口跨越检测，只在跨越的那一帧返回 true。
         /// Checks every slot against ShouldLeave each frame; on true, unparents the item and invokes OnLeave.
         /// </summary>
         private void CheckLeave()
@@ -321,11 +323,11 @@ namespace CrowdMatch
                     continue;
                 }
 
-                if (ShouldLeave(item))
+                if (ShouldLeave(i, item))
                 {
                     item.Transform.SetParent(null, true);   // 解绑 carrier（保持世界位置），交给宿主吸收
                     VacateSlot(i);                          // 清槽 + 队首更替
-                    OnLeave?.Invoke(item);
+                    OnLeave?.Invoke(i, item);
                 }
             }
         }

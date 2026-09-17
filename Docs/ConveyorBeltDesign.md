@@ -1,7 +1,7 @@
 # CrowdMatch「传送带」功能设计文档
 
 > 状态：**已实现（槽位直接收集版）**。本文描述"像素离开缓冲区出口后，不再进入单点集结点，而是进入一个闭环传送带；
-> 传送带带着像素循环，当像素到达传送带对侧、并进入某 Container 正前方的一定范围时，才与同色 Container 匹配并被吸收"的完整玩法效果，
+> 传送带带着像素循环，当像素到达传送带对侧、并越过某 Container 所在列的匹配闸口（且该列有同色可匹配容器）时，才与该 Container 匹配并被吸收"的完整玩法效果，
 > 以及它与现有 `CrowdBufferZone` / `ContainerGroup` / `GameController` 的集成方式。
 >
 > 底层复用 skill `unity-conveyorbelt`（`ArcPath` + `ArcPathController` + `ArcPathEditor` + `ConveyorBelt` + `IConveyorItem`），
@@ -19,7 +19,7 @@
 1. 像素留在缓冲区出口（物理队列）排队；传送带每个**空槽位**越过**入口关口**时，直接从出口取最近的一颗像素上车。
 2. 像素在入口处 `reparent` 到该槽位的**承载物（carrier）**上（保持世界位置不瞬移），`localPosition` 平滑到 0，成为该槽位的乘员。
 3. 传送带带动 carrier（以及其上的像素）在**闭环轨迹**上循环（近侧直线 → 180°圆弧 → 远侧直线 → 180°圆弧）。
-4. 当像素到达**对侧（远侧直线）**、并进入某个**同色非空前排 Container 的正前方范围**时，`ShouldLeave` 触发 → 像素离开传送带。
+4. 当像素到达**对侧（远侧直线）**、并**越过某个同色非空前排 Container 所在列的匹配闸口**时，`ShouldLeave` 触发 → 像素离开传送带。
 5. 离开的像素被同色 Container 吸收：`Consume()` 扣容量 → 像素 Lerp 进容器 → 销毁 → 容器耗尽则 `DisappearAndRefill`。
 
 匹配方向由「容器从 gatheredItems 里拉」反转为「传送带把像素推到正前方的容器」。
@@ -39,7 +39,7 @@
 - 不做性能优化（闭环轨迹采样 + 槽位定位，Demo 规模无压力）。
 - 不做像素在传送带上的碰撞/变道（槽位等距、天然排队）。
 - 不改 `ContainerGroup` 的容器生成逻辑。
-- 不做"匹配失败兜底"（像素到远侧但正前方无同色前排容器时，无限绕圈等待——见 §11）。
+- 不做"匹配失败兜底"（像素越过闸口时该列无可匹配容器，则继续绕圈，下一圈再判——见 §11）。
 
 ---
 
@@ -52,7 +52,7 @@
 | **承载物（Carrier）** | 每个槽位对应的 Transform（`ConveyorBelt` 的子物体，scale=1），传送带每帧移动 carrier 的世界坐标，像素作为 carrier 的子物体被带着走 |
 | **近侧（Entry Side）** | 闭环的其中一条直线段，紧邻缓冲区缺口，像素在此上车 |
 | **对侧 / 远侧（Match Side）** | 闭环的另一条直线段，正对 ContainerGroup 前排，像素在此匹配 |
-| **正前方范围（Match Range）** | 以 Container 前排位置为中心的 2D 判定范围（`matchRangeX` 横向 + `matchRangeZ` 纵向），像素落入且同色即匹配 |
+| **匹配闸口（Match Gate）** | 每列一个、由世界 X 标定的位置：闸口 X = 该列前排容器 X + `matchGateOffsetX`。像素世界 X 从闸口之前跨到之后的那一帧才检测该列是否匹配（`matchRangeZ` 仍作为「确实在远侧」的纵向兜底） |
 | **入口关口（Entry Gate）** | 一个由世界 X 坐标标定的位置；近侧槽位世界 X 从 > gateX 跨到 ≤ gateX 时触发一次收集 |
 | **背压（Backpressure）** | 槽位过关口时出口无球（或该槽被占）则跳过收集，像素留在缓冲区出口物理队列里等待 |
 
@@ -101,7 +101,7 @@ InGrid ──(点击/FloodFill)──▶ Matched
                OnBelt（槽位循环）             Arrived(gatheredItems)
                     │
                     ▼
-               远侧 + 同色前排容器正前方?
+               远侧 + 越过某列匹配闸口?
                     │ 否 → 继续循环（无限绕圈）
                     │ 是 → OnLeave（解绑 carrier）
                     ▼
@@ -156,7 +156,8 @@ belt.TryEnter(pixel, slotIndex);   // 内部：pixel.Transform.SetParent(carrier
 
 ### 6.2 离开（解绑 + 吸收）
 
-`CheckLeave` 每帧对每个占用槽调 `ShouldLeave`；命中后**先把像素从 carrier 解绑**（`SetParent(null, true)`）再清槽、再回调 `OnLeave`，
+`CheckLeave` 每帧对每个占用槽调 `ShouldLeave`（宿主内部做闸口跨越检测，只有越过闸口的那一帧才可能返回 true）；
+命中后**先把像素从 carrier 解绑**（`SetParent(null, true)`）再清槽、再回调 `OnLeave`，
 宿主 `OnLeave` 里做吸收（见 §7）。
 
 ### 6.3 追赶机制（catch-up）：整体平移相位、空隙挤到队尾
@@ -184,44 +185,61 @@ belt.TryEnter(pixel, slotIndex);   // 内部：pixel.Transform.SetParent(carrier
 ---
 
 
-## 7. 匹配与离开（ShouldLeave / OnLeave）
+## 7. 匹配与离开（闸口法 / ShouldLeave / OnLeave）
 
-匹配语义（R3 确认 + 颜色一致）：
+匹配语义：**远侧每列有一个闸口，只在像素越过闸口的瞬间检测该列**（颜色一致且该列存在可匹配容器）。
+
+远侧直线沿 **+X** 运动，因此跨越判据固定为「上一帧 X < 闸口 X ≤ 本帧 X」。判定所需的逐槽上一帧 X 由宿主
+`ConveyorBeltZone` 自己维护（`_prevMatchX[]`），槽位索引经 `ShouldLeave(int slotIndex, IConveyorItem)` 钩子传入；
+槽位换人（`OnSlotPassedEntry`）、离开（`OnLeave`）、清空（`ClearBelt` / `DrainBeltKeep`）时复位为 `NaN`（本帧只锚定、不判定）。
 
 ```csharp
-// ConveyorBeltZone.Start 注入
-belt.ShouldLeave = item =>
+// ConveyorBeltZone.ShouldLeave(slotIndex, item)
+if (!IsAtFarSide(pixel)) return false;            // matchRangeZ 纵向兜底：不在远侧不判定
+float currX = pixel.transform.position.x;
+float prevX = _prevMatchX[slotIndex];
+_prevMatchX[slotIndex] = currX;
+if (float.IsNaN(prevX)) return false;             // 该槽首次记录
+
+for (int col = 0; col < _gateX.Length; col++)     // 列序 = 远侧行进顺序
 {
-    var pixel = (PixelItem)item;
-    return containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ) != null;
-};
-belt.OnLeave = item =>
-{
-    var pixel = (PixelItem)item;
-    var container = containerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ);
-    if (container != null) containerGroup.ConsumePixel(pixel, container);
-};
+    float gateX = _gateX[col];                    // 该列前排容器 X + matchGateOffsetX（惰性缓存）
+    if (prevX >= gateX || currX < gateX) continue;   // 本帧没跨过这个闸口
+    var container = containerGroup.FindMatchableInColumn(col, pixel.colorId);
+    if (container != null) { _pendingContainer = container; return true; }
+}
+return false;
 ```
 
-`ContainerGroup.FindFrontContainerInFrontOf(pixel, matchRangeX, matchRangeZ)`：
+`_gateX[]` 由 `EnsureGates()` 惰性构建并缓存（容器组静止；位置 / 列数 / 偏移变化时重建，便于运行时调参），
+因此逐帧判定只剩浮点比较，不再做 `TransformPoint` + 全列距离扫描。
+
+`ContainerGroup.FindMatchableInColumn(int col, int colorId)`（public）：
 
 ```
-遍历每列 col：
-    front = GetItem(col, 0)
-    if front == null || front.IsEmpty || front.colorId != pixel.colorId: continue
-    dx = |front.transform.position.x - pixel.x|
-    dz = |front.transform.position.z - pixel.z|
-    if dx <= matchRangeX && dz <= matchRangeZ: 记为候选
-返回候选里 dx 最小者（正前方最近），无则 null
+该列从最前排（row 0）向后，找第一个「可匹配（IsOpen）且非空且同色」的容器（最多 maxOpenRows 排）
+无则 null
 ```
 
-`ContainerGroup.ConsumePixel(pixel, container)`：沿用现有 `MovePixelToContainer` 抽掉"找像素"后的逻辑——
-`Consume()` 扣容量 → 协程 Lerp 像素到容器位置 → 销毁像素 → 若 `isLast` 则 `DisappearAndRefill`。
+> **补位移动中的车（`isRefilling`）也算可匹配**：`RefillColumn` 在前移开始时就已把该车的格子改写成前排，
+> 座位（`posList`）挂在车身下，所以像素上车后随车继续前移，jump 落点自动跟随座位，无需额外处理。
+> 代价有两条，均为已知取舍：这期间上车的像素**不播落地弹性**（`PlayBoardElastic` 被 `_rollPhase != 0` 挡下，
+> 该守卫不能去掉——弹性轴与 roll 轴会抢车身父物体），且**出库要等这辆车补位结束**
+> （`TryExitIfAtFront` 的 `isRefilling` 门控挡下，由 roll 完成回调 `OnCarArrivedFront` 补触发）。
+> 注意 `ProcessConsumption`（无传送带的拉取路径）与复活深排路径仍各自排除 `isRefilling`，未一并放开。
 
-> **匹配以像素实际位置为准**：`FindFrontContainerInFrontOf` / `IsAtFarSide` 读的是 `pixel.transform.position`——
+命中后 `ShouldLeave` 把容器暂存到 `_pendingContainer`，由紧随其后的 `OnLeave` 直接吸收，不再重复查找：
+`ConsumePixel(pixel, container)` → `Consume()` 扣容量 → `TryBoardPixel` 挂到车上空闲座位并 `DOLocalJump` 到 0 点
+（无空闲座位则回退旧的 Lerp 并销毁像素）→ 落定后保留为乘客 → 座位用尽时启动出库。
+
+> **匹配以像素实际位置为准**：`ShouldLeave` / `IsAtFarSide` 读的是 `pixel.transform.position`——
 > 像素是 carrier 的子物体，其世界坐标 = carrier 位置 + 旋转后的 `localPosition` 偏移。追赶动画中 `localPosition` 非零，
 > 实际位置滞后于逻辑槽位，因此必须用实际位置判定（否则追赶动画还没到位就提前匹配）。`CheckLeave` 在 `AdvanceCatchUp`
 > 之后执行，读到的是当前帧最新位置，无滞后。
+
+> **闸口法与原「范围判定」的差别**：原实现是「像素处于某列前排 ± `matchRangeX` 内、且纵向在 `matchRangeZ` 内」时**每帧**判定，
+> 容器只要在像素经过窗口期间空出来就能匹配；闸口法只在**越过闸口的那一帧**判定一次，若该瞬间该列无可用同色容器，
+> 像素继续绕圈、下一圈该闸口再判。一帧内跨过多个闸口（低帧率/卡顿）时按列序取第一个命中的列。
 
 > 由于传送带按槽位等距错开、且 `CheckLeave` 一帧对同一槽位最多触发一次，
 > 两像素同帧抢同一容器的竞态概率低；仍建议 `ConsumePixel` 开头加 `if (container.IsEmpty) return;` 兜底（见 review H1/M1）。
@@ -266,8 +284,8 @@ public PixelItem CollectNearest()   // 由 ConveyorBeltZone.OnSlotPassedEntry �
 | 槽位 | `int slotCount = 12` | 槽位总数（= 传送带总容量） |
 | 入口 | `Transform entryGate` | 收集关口（只用其世界 X 坐标） |
 | 入口 | `Action<int> SlotPassedEntry` | 槽位过关口时触发（参数 = 槽位索引），由宿主注入 |
-| 钩子 | `Func<IConveyorItem,bool> ShouldLeave` | 离开判定（宿主注入） |
-| 钩子 | `Action<IConveyorItem> OnLeave` | 离开回调（宿主注入） |
+| 钩子 | `Func<int,IConveyorItem,bool> ShouldLeave` | 离开判定（宿主注入，参数 = 槽位索引 + 乘员；宿主据此做逐槽闸口跨越检测） |
+| 钩子 | `Action<int,IConveyorItem> OnLeave` | 离开回调（宿主注入） |
 | 追赶 | `bool catchUpEnabled = true` | 是否启用追赶 |
 | 追赶 | `float catchUpInterval = 0.5` | 追赶周期秒数（= 追赶一步时长） |
 | 方法 | `Initialize()` | 建 `slots[]` + `carriers[]`，`path.InitializePaths()` |
@@ -285,12 +303,13 @@ public PixelItem CollectNearest()   // 由 ConveyorBeltZone.OnSlotPassedEntry �
 | 引用 | `ConveyorBelt belt` | — | 传送带 |
 | 引用 | `ContainerGroup containerGroup` | — | 容器组（匹配/吸收目标） |
 | 引用 | `CrowdBufferZone crowdBuffer` | — | 缓冲区（出口像素来源） |
-| 匹配 | `float matchRangeX` | 0.6 | 正前方横向判定（约半列间距） |
-| 匹配 | `float matchRangeZ` | 0.8 | 正前方纵向判定（远侧到容器前排的间隙） |
+| 匹配 | `float matchGateOffsetX` | 0 | 匹配闸口 X 偏移：闸口 X = 该列前排容器 X + 该值 |
+| 匹配 | `float matchRangeZ` | 0.8 | 远侧纵向兜底：不在远侧范围内不判定 |
 | 方法 | `Start()` | 注入 `ShouldLeave` / `OnLeave`，订阅 `SlotPassedEntry` |
-| 方法 | `OnSlotPassedEntry(int)` | 槽位过关口：取最近像素 `TryEnter` 上车 + 起 `SettleRoutine` |
+| 方法 | `OnSlotPassedEntry(int)` | 槽位过关口：取最近像素 `TryEnter` 上车 + 起 `SettleRoutine`；复位该槽闸口跟踪 |
 | 方法 | `SettleRoutine(PixelItem)` | localPosition 平滑到 0（每像素一条协程，互不阻塞） |
-| 方法 | `ShouldLeave(IConveyorItem)` / `OnLeave(IConveyorItem)` | 远侧同色前排容器匹配判定 / 吸收 |
+| 方法 | `ShouldLeave(int, IConveyorItem)` | 闸口跨越检测 + 该列同色可匹配容器判定（命中即暂存目标容器） |
+| 方法 | `OnLeave(int, IConveyorItem)` | 吸收 `ShouldLeave` 暂存的容器 / 记录模式下记录并销毁 |
 | 属性 | `int OccupiedSlots` / `int TotalSlots` | 供 UI |
 
 ### 9.3 其余改动
@@ -298,7 +317,7 @@ public PixelItem CollectNearest()   // 由 ConveyorBeltZone.OnSlotPassedEntry �
 | 位置 | 改动 |
 |---|---|
 | `PixelItem` | 实现 `IConveyorItem`（加 `public Transform Transform => transform;`） |
-| `ContainerGroup` | 新增 `FindFrontContainerInFrontOf` / `ConsumePixel`；`ProcessConsumption` 保留为 fallback（gatheredItems 空时天然 no-op） |
+| `ContainerGroup` | 新增 `FindMatchableInColumn` / `ConsumePixel`；`ProcessConsumption` 保留为 fallback（gatheredItems 空时天然 no-op） |
 | `CrowdBufferZone` | 新增 `conveyorZone` 字段、`CollectNearest()`、`DetachPhysics()`；`TryRelease` 在 conveyor 模式下直接 return，`Release` 退化为 fallback-only |
 | `GameController` | 新增 `conveyorZone` 字段；`UpdateCountText` 改为显示占用/总容量 |
 | `ArcPathController` | 不加 Gizmos；由 `Editor/ArcPathEditor.cs`（skill 的 Editor 模块）提供 Scene 预览 + Inspector 测试控制 |
@@ -330,9 +349,9 @@ ConveyorBeltZone.OnSlotPassedEntry(i)
     │  → belt.TryEnter(pixel, i)（reparent，不瞬移）→ SettleRoutine（localPosition→0）
     ▼
 ConveyorBelt 继续循环 → 像素随 carrier 循环
-    │  CheckLeave 每帧对占用槽调 ShouldLeave
+    │  CheckLeave 每帧对占用槽调 ShouldLeave（宿主内部做闸口跨越检测）
     ▼
-ShouldLeave = 远侧 + 同色前排容器正前方（2D 范围）
+ShouldLeave = 越过某列匹配闸口（该列前排容器 X + matchGateOffsetX）且该列有同色可匹配容器
     │  true → 解绑 carrier → OnLeave
     ▼
 ContainerGroup.ConsumePixel(pixel, container)
@@ -351,7 +370,9 @@ ContainerGroup.ConsumePixel(pixel, container)
 | 槽位过关口但该槽仍被占（异常） | `GetItem(slotIndex) != null` → 直接 return，跳过本次收集 |
 | 上一像素尚未到 local0，下一槽位过关口 | 每个槽位独立收集、`SettleRoutine` 每像素一条协程，互不阻塞，立即取新像素 |
 | 多个像素同时在远侧正前方 | 各自命中各自列的容器；同列同色由 `CheckLeave` 逐槽位触发，`ConsumePixel` 开头 `IsEmpty` 兜底 |
-| 像素到远侧但正前方无同色前排容器 | `ShouldLeave=false`，像素无限绕圈等待（R3 确认接受） |
+| 越过闸口瞬间该列无可用同色容器 | 本次不匹配，像素继续绕圈，下一圈经过该闸口时再判（R3 确认接受） |
+| 越过闸口时该列的车正在补位前移 | 视为可匹配，像素 jump 上车后随车继续前移（不播落地弹性；该车出库等补位结束才启动） |
+| 一帧内跨过多个闸口（卡顿/低帧率） | 按列序（= 远侧行进顺序）取第一个命中的列匹配 |
 | 某颜色容器全部耗尽 | 该颜色像素永久绕圈（既有边界，传送带下更显眼，本期不兜底） |
 | 传送带空 | `Update` 只推进 offset，无槽位写操作，零开销 |
 | 队首离开传送带 | 向旋转反向（递减槽位）找最近占用槽为新队首；全空则 `_leaderSlot = -1` |
@@ -361,7 +382,7 @@ ContainerGroup.ConsumePixel(pixel, container)
 | 像素在传送带上被销毁（异常） | `ApplyPositions` 用 `slots[i].Transform == null` 跳过；正常流程只在 `OnLeave` 后销毁（槽已先清），不触发 |
 | carrier scale 非 1 | 会导致像素世界尺寸缩放；实现时强制 carrier scale=1 |
 | `entryGate` 未赋值 | 关口 X 回退用 `transform.position.x`（belt 根 X）；建议显式放置一个空 GameObject 标定 |
-| 传送带反向（近侧沿 +X） | 把 `ConveyorBelt.ApplyPositions` 的过关口判断号翻转（`< gateX && currX >= gateX`） |
+| 传送带反向（近侧沿 +X） | 把 `ConveyorBelt.ApplyPositions` 的过关口判断号翻转（`< gateX && currX >= gateX`），同时翻转 `ConveyorBeltZone.ShouldLeave` 的闸口跨越判据 |
 | `conveyorZone` 未赋值 | `CrowdBufferZone` 回退到旧 `collectPoint`+`gatheredItems`（向后兼容） |
 
 ---
@@ -373,8 +394,8 @@ ContainerGroup.ConsumePixel(pixel, container)
 | `slotCount` | 传送带总容量 / 承载上限 | 更宽裕、更少背压等待 | 更挤、更像排队 |
 | `cycleTime` | 循环一周时长 | 更慢、更从容 | 更快、节奏更紧 |
 | `speed` | 运动倍率（等价于 `1/cycleTime` 缩放） | 更快 | 更慢 |
-| `matchRangeX` | 正前方横向判定 | 更易命中（跨列） | 更严格对齐列 |
-| `matchRangeZ` | 正前方纵向判定 | 更易命中 | 只在紧贴容器时才匹配 |
+| `matchGateOffsetX` | 匹配闸口相对该列前排容器的偏移 | 闸口后移，更晚判定 | 闸口前移，更早判定 |
+| `matchRangeZ` | 远侧纵向兜底范围 | 更宽松（弧段上也可能判定） | 更严格（只在紧贴容器 Z 时判定） |
 | `entryGate.x` | 收集关口位置 | 越靠缓冲区缺口越早收集 | 越靠传送带远侧越晚收集 |
 | `catchUpInterval` | 追赶一步/周期时长 | 更慢、更从容 | 更快、压实更急促 |
 | 直线段长度 | 覆盖容器横向跨度 | — | 需 ≥ `columns × xSpacing` |
@@ -392,6 +413,9 @@ ContainerGroup.ConsumePixel(pixel, container)
 6. **UI（R5）**：`gatherCountText` 显示「占用槽位数 / 传送带总容量」。
 7. **闭环 + 颜色一致**：闭环体育场传送带，近侧上车、远侧匹配，匹配仍要求 `colorId` 相同。
 8. **槽位直接收集（R6）**：把「能进传送带」与「进哪个槽」合并——由「哪个槽过关口」天然决定进哪个槽；每槽独立收集，去掉全局单飞 `_boarding`。
+9. **匹配闸口法（R7）**：远侧匹配判定从「每帧对每个像素做全列横向/纵向距离扫描」改为「每列一个闸口，只在像素越过闸口的瞬间检测该列」。
+   远侧沿 +X 运动，跨越判据固定为「上一帧 X < 闸口 X ≤ 本帧 X」；`ShouldLeave` 钩子带上槽位索引，逐槽上一帧 X 由宿主维护（换人 / 离开 / 清空时复位）。
+   代价：容器在像素经过窗口期间空出来不再能「顺路」匹配，需等下一圈经过该闸口；换来判定时机确定、逐帧只剩浮点比较。
 
 ---
 
@@ -402,9 +426,9 @@ ContainerGroup.ConsumePixel(pixel, container)
 3. `ConveyorBelt` 改造：加 `carriers[]`、`OccupiedCount`、`GetSlotWorldPosition`、`entryGate`、`SlotPassedEntry`、`_prevSlotX[]`；`ApplyPositions` 写 carrier + 过关口检测；`TryEnter`/`ClearSlot`/`CheckLeave` 处理 reparent/解绑。
 4. 新增 `ConveyorBeltZone.cs`：注入钩子、订阅 `SlotPassedEntry`；`OnSlotPassedEntry`/`SettleRoutine`。
 5. `PixelItem` 实现 `IConveyorItem`。
-6. `ContainerGroup` 新增 `FindFrontContainerInFrontOf` + `ConsumePixel`（复用现有 `MovePixelToContainer`/`DisappearAndRefill`）。
+6. `ContainerGroup` 新增 `FindMatchableInColumn`（public）+ `ConsumePixel`（复用现有 `MovePixelToContainer`/`DisappearAndRefill`）。
 7. `CrowdBufferZone` 加 `conveyorZone` 字段、`CollectNearest()`/`DetachPhysics()`；`TryRelease` 在 conveyor 模式下 return，`Release` 退化为 fallback-only。
 8. `GameController` 加 `conveyorZone` 字段，`UpdateCountText` 改显示（§9.4）。
 9. 场景配置：`Path`（ArcPathController，4 段闭环）→ `ConveyorBelt`（belt，连 path + 放 `entryGate` 空物体）→ `ConveyorBeltZone`（连 belt/containerGroup/crowdBuffer）→ `CrowdBufferZone.conveyorZone`、`GameController.conveyorZone` 连线；`gatherCountText` 保持。
-10. 自测：过闸释放 → 槽位过关口直接上车（无瞬移）→ 循环到远侧 → 同色前排容器正前方匹配 → 吸收进容器 → 容器耗尽补位；出口无球或槽位满时像素在 gap 排队；UI 显示「占用/总容量」。
+10. 自测：过闸释放 → 槽位过关口直接上车（无瞬移）→ 循环到远侧 → 越过某列闸口且该列有同色可匹配容器 → 吸收进容器 → 容器耗尽补位；出口无球或槽位满时像素在 gap 排队；UI 显示「占用/总容量」。
 11. 按 §12 调参，达到"上车 → 运送 → 远侧被吸收"的节奏感。

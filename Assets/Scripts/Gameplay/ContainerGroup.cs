@@ -168,44 +168,21 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 传送带推送模式：找某像素正前方（远侧）的同色「可匹配」容器；无则 null。
-        /// 每列从最前排（row 0）向后逐排找第一个「可匹配（IsOpen）且非空且同色」的容器（最多 maxOpenRows 排）；
-        /// 横向 / 纵向距离统一以前排（row 0）槽位位置判定——像素始终被送到前排，后排只是接力匹配，
-        /// 用后排自身位置会因 Z 距离太远匹配不上。
+        /// 传送带推送模式：找某列正前方（远侧）同色的「可匹配」容器；无则 null。
+        /// 从最前排（row 0）向后逐排找第一个「可匹配（IsOpen）且非空且同色」的容器（最多 maxOpenRows 排）。
+        /// 由 ConveyorBeltZone 在像素越过该列匹配闸口的瞬间按列调用（闸口法，不再做逐帧横向距离判定）；
+        /// 判定以前排（row 0）槽位为准——像素始终被送到前排，后排只是接力匹配。
+        /// 补位移动中的车（isRefilling）也算可匹配：它的格子在前移开始时就已改写为前排，座位挂在车身下，
+        /// 像素上车后会随车继续前移（jump 落点跟随座位，无需额外处理）；代价是这期间上车的像素不播落地弹性
+        /// （PlayBoardElastic 被 _rollPhase 挡住），且出库仍要等这辆车补位结束（TryExitIfAtFront 的 isRefilling 门控）。
         /// </summary>
-        public ContainerItem FindMatchableContainer(PixelItem pixel, float matchRangeX, float matchRangeZ)
-        {
-            if (pixel == null || grid == null)
-                return null;
-
-            ContainerItem best = null;
-            float bestDx = float.MaxValue;
-            for (int col = 0; col < columns; col++)
-            {
-                var item = FindMatchableInColumn(col, pixel.colorId);
-                if (item == null)
-                    continue;
-
-                Vector3 frontWorld = transform.TransformPoint(GetLocalPosition(col, 0));
-                float dx = Mathf.Abs(frontWorld.x - pixel.transform.position.x);
-                float dz = Mathf.Abs(frontWorld.z - pixel.transform.position.z);
-                if (dx <= matchRangeX && dz <= matchRangeZ && dx < bestDx)
-                {
-                    bestDx = dx;
-                    best = item;
-                }
-            }
-            return best;
-        }
-
-        /// <summary>某列从最前排向后，找第一个「可匹配（IsOpen）且非空且同色且非补位中」的容器（最多 maxOpenRows 排）；无则 null。</summary>
-        private ContainerItem FindMatchableInColumn(int col, int colorId)
+        public ContainerItem FindMatchableInColumn(int col, int colorId)
         {
             int limit = Mathf.Min(rows, maxOpenRows);
             for (int row = 0; row < limit; row++)
             {
                 var item = GetItem(col, row);
-                if (item == null || item.IsEmpty || item.isRefilling || item.colorId != colorId)
+                if (item == null || item.IsEmpty || item.colorId != colorId)
                     continue;
                 if (!IsOpen(col, row))
                     continue;
