@@ -32,8 +32,52 @@ namespace CrowdMatch
         [Tooltip("上车收敛的旋转角速度（度/秒）：平滑到槽位途中前半段归 0、后半段转至 localEulerY = -90")]
         public float settleRotateSpeed = 360f;
 
+        [Header("犯困检测")]
+        [Tooltip("每次检测的触发概率系数：触发概率 = 该系数 × 犯困候选数（≥ 100% 必然触发）")]
+        [Range(0f, 1f)] public float sleepChancePerPixel = 0.1f;
+
+        [Tooltip("已在车上等待超过该秒数的乘客，也计入犯困候选")]
+        public float sleepCarWaitSeconds = 3f;
+
+        [Tooltip("只检查前几排的车上乘客（0 = 完全不检查车上乘客）")]
+        public int sleepCarCheckRows = 3;
+
+        [Header("排队生气检测")]
+        [Tooltip("两次排队生气检测的间隔范围（秒）：每次检测后在该范围内随机取下次间隔（与犯困检测各自独立计时）")]
+        public float queueAngryCheckIntervalMin = 3f;
+
+        [Tooltip("两次排队生气检测的间隔上限（秒）")]
+        public float queueAngryCheckIntervalMax = 6f;
+
+        [Tooltip("两次检测的间隔范围（秒）：每次检测后在该范围与上限之间随机取下次间隔")]
+        public float sleepCheckIntervalMin = 3f;
+
+        [Tooltip("两次检测的间隔上限（秒）")]
+        public float sleepCheckIntervalMax = 6f;
+
         private const float ArriveEpsilon = 0.05f;
         private const float BoardSmoothRate = 10f;   // localPosition 收敛速率（指数平滑）
+
+        /// <summary>每槽乘员绕过的整圈数（相位回绕计数）；该槽换人 / 空置时归零。</summary>
+        private int[] _laps;
+
+        /// <summary>每槽上一帧的归一化相位（NaN = 尚未锚定，本帧只记录不计数）。</summary>
+        private float[] _prevPhase;
+
+        /// <summary>距下次犯困检测的剩余秒数。</summary>
+        private float _sleepTimer;
+
+        /// <summary>距下次排队生气检测的剩余秒数。</summary>
+        private float _queueAngryTimer;
+
+        /// <summary>犯困检测的候选像素（复用，避免每次检测都新建列表）。</summary>
+        private readonly List<PixelItem> _boredBuffer = new List<PixelItem>();
+
+        /// <summary>收集车上乘客时的复用缓冲。</summary>
+        private readonly List<PixelItem> _passengerBuffer = new List<PixelItem>();
+
+        /// <summary>收集缓冲区等待像素时的复用缓冲。</summary>
+        private readonly List<PixelItem> _waitingBuffer = new List<PixelItem>();
 
         /// <summary>每列闸口的世界 X（容器组静止，惰性构建；容器组位置 / 列数 / 偏移变化时重建）。</summary>
         private float[] _gateX;
@@ -65,6 +109,149 @@ namespace CrowdMatch
                 belt.SlotPassedEntry += OnSlotPassedEntry;
                 belt.SlotCatchUpChanged += OnSlotCatchUpChanged;
             }
+
+            _sleepTimer = NextInterval(sleepCheckIntervalMin, sleepCheckIntervalMax);
+            _queueAngryTimer = NextInterval(queueAngryCheckIntervalMin, queueAngryCheckIntervalMax);
+        }
+
+        private void Update()
+        {
+            UpdateLaps();
+            UpdateSleepCheck();
+            UpdateQueueAngryCheck();
+        }
+
+        /// <summary>
+        /// 逐槽统计「绕过的整圈数」：相位每回绕一次 +1（追赶平移也真的把槽位沿轨迹往前推，同样计入）。
+        /// 空槽归零、换人时由 ResetLapTracking 归零。
+        /// </summary>
+        private void UpdateLaps()
+        {
+            int slotCount = belt != null ? belt.slotCount : 0;
+            if (slotCount <= 0)
+                return;
+
+            if (_laps == null || _laps.Length != slotCount)
+            {
+                _laps = new int[slotCount];
+                _prevPhase = new float[slotCount];
+                for (int i = 0; i < slotCount; i++)
+                    _prevPhase[i] = float.NaN;
+            }
+
+            for (int i = 0; i < slotCount; i++)
+            {
+                if (belt.GetItem(i) == null)
+                {
+                    _laps[i] = 0;                  // 空槽不计数
+                    _prevPhase[i] = float.NaN;
+                    continue;
+                }
+
+                float phase = belt.GetSlotPhase(i);
+                if (!float.IsNaN(_prevPhase[i]) && phase < _prevPhase[i])
+                    _laps[i]++;                    // 相位回绕 = 走完一圈
+                _prevPhase[i] = phase;
+            }
+        }
+
+        /// <summary>
+        /// 犯困表情：每隔一段随机间隔检测一次，统计犯困候选数 N（传送带上绕圈一圈以上的 + 已在车上等太久的乘客），
+        /// 以 概率系数 × N 触发一次（≥ 100% 必然触发）；命中则在这些候选里随机一个，用跟随模式播犯困表情。
+        /// </summary>
+        private void UpdateSleepCheck()
+        {
+            if (belt == null)
+                return;
+
+            _sleepTimer -= Time.deltaTime;
+            if (_sleepTimer > 0f)
+                return;
+
+            _sleepTimer = NextInterval(sleepCheckIntervalMin, sleepCheckIntervalMax);
+
+            CollectBoredPixels(_boredBuffer);
+            if (_boredBuffer.Count == 0)
+                return;
+
+            float chance = sleepChancePerPixel * _boredBuffer.Count;
+            if (chance < 1f && Random.value > chance)
+                return;
+
+            var pixel = _boredBuffer[Random.Range(0, _boredBuffer.Count)];
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.PlaySleepEmoji(pixel);
+        }
+
+        /// <summary>
+        /// 收集犯困候选：传送带上已绕圈一圈以上的像素，以及已在车上等待超过 sleepCarWaitSeconds 的乘客。
+        /// 只收配了表情节点的（没节点就没法显示）。
+        /// </summary>
+        private void CollectBoredPixels(List<PixelItem> outList)
+        {
+            outList.Clear();
+
+            // 传送带上绕圈超过一圈的
+            if (belt != null && _laps != null)
+            {
+                int slotCount = Mathf.Min(_laps.Length, belt.slotCount);
+                for (int i = 0; i < slotCount; i++)
+                {
+                    if (_laps[i] < 1)
+                        continue;
+
+                    var pixel = belt.GetItem(i) as PixelItem;
+                    if (pixel != null && pixel.emojiNode != null)
+                        outList.Add(pixel);
+                }
+            }
+
+            // 已在车上等了太久的乘客（只看前 sleepCarCheckRows 排）
+            if (containerGroup == null)
+                return;
+
+            int checkRows = Mathf.Min(containerGroup.rows, Mathf.Max(0, sleepCarCheckRows));
+            for (int col = 0; col < containerGroup.columns; col++)
+            {
+                for (int row = 0; row < checkRows; row++)
+                {
+                    var car = containerGroup.GetItem(col, row);
+                    if (car == null)
+                        continue;
+
+                    _passengerBuffer.Clear();
+                    car.CollectPassengers(_passengerBuffer);
+
+                    for (int i = 0; i < _passengerBuffer.Count; i++)
+                    {
+                        var pixel = _passengerBuffer[i];
+                        if (pixel.emojiNode == null || float.IsNaN(pixel.boardedAt))
+                            continue;   // 没表情节点 / 还在上车途中
+                        if (Time.time - pixel.boardedAt < sleepCarWaitSeconds)
+                            continue;
+                        outList.Add(pixel);
+                    }
+                }
+            }
+        }
+
+        /// <summary>检测间隔：在给定的两个值之间随机（顺序填反也能用，下限兜到 0.01 秒）。</summary>
+        private static float NextInterval(float a, float b)
+        {
+            float min = Mathf.Max(0.01f, Mathf.Min(a, b));
+            float max = Mathf.Max(0.01f, Mathf.Max(a, b));
+            return Random.Range(min, max);
+        }
+
+        /// <summary>把某槽位的圈数统计复位（该槽换人 / 被清空）。</summary>
+        private void ResetLapTracking(int slotIndex)
+        {
+            if (_laps == null || slotIndex < 0 || slotIndex >= _laps.Length)
+                return;
+
+            _laps[slotIndex] = 0;
+            _prevPhase[slotIndex] = float.NaN;
         }
 
         /// <summary>槽位追赶状态变化：驱动该槽位乘员的走/停动画（追赶 = Walking，否则 = Idle）。</summary>
@@ -96,8 +283,9 @@ namespace CrowdMatch
                 return;
             }
 
-            // 新乘员上车：闸口跨越检测重新锚定，避免沿用上一乘员留下的旧 X 造成误判
+            // 新乘员上车：闸口跨越检测与圈数统计重新锚定，避免沿用上一乘员留下的旧值
             ResetSlotTracking(slotIndex);
+            ResetLapTracking(slotIndex);
 
             // 进入传送带：播放音效 + 轻震动
             if (AudioManager.Instance != null)
@@ -105,12 +293,65 @@ namespace CrowdMatch
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(0);
 
+            // 上传送带：收掉该像素的生气表情（跟随模式下它是像素的子物体，不主动收会跟着一起上带）
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.RemoveAngryEmoji(pixel);
+
+            // 插队判定：本像素上车时，缓冲区里是否还有比它更早点击、且颜色不同的像素在等
+            CheckQueueJump(pixel);
+
             StartCoroutine(SettleRoutine(pixel, slotIndex));
 
             // 关键事件点：有小人进入传送带 → 尝试失败判定
             var gc = GameController.Instance;
             if (gc != null)
                 gc.TryCheckFail();
+        }
+
+        /// <summary>
+        /// 排队生气：每隔一段随机间隔检查一次缓冲区里「排队超过阈值」的像素，交给表情管理器按 概率系数 × 人数
+        /// 决定是否在其中随机一个上播生气表情（判定上与插队相互独立，复用同一个 emoji；无 CD，节流靠这个间隔）。
+        /// </summary>
+        private void UpdateQueueAngryCheck()
+        {
+            if (crowdBuffer == null)
+                return;
+
+            _queueAngryTimer -= Time.deltaTime;
+            if (_queueAngryTimer > 0f)
+                return;
+
+            _queueAngryTimer = NextInterval(queueAngryCheckIntervalMin, queueAngryCheckIntervalMax);
+
+            _waitingBuffer.Clear();
+            crowdBuffer.CollectWaiting(_waitingBuffer);
+            if (_waitingBuffer.Count == 0)
+                return;
+
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.TryPlayAngryEmojiForQueue(_waitingBuffer);
+        }
+
+        /// <summary>
+        /// 插队判定：本像素刚上带，若缓冲区里还有「比它更早被点击、且颜色不同」的像素仍在排队（后点的先上了带），
+        /// 就把等待队列与这个上带像素交给表情管理器——按 概率系数 × 人数 决定是否在其中随机一个上播生气表情。
+        /// 概率与 CD 都在管理器里（与「点击阻挡」复用同一个 emoji，但各自独立 CD）。
+        /// </summary>
+        private void CheckQueueJump(PixelItem boardingPixel)
+        {
+            if (boardingPixel == null || crowdBuffer == null)
+                return;
+
+            _waitingBuffer.Clear();
+            crowdBuffer.CollectWaiting(_waitingBuffer);
+            if (_waitingBuffer.Count == 0)
+                return;
+
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.TryPlayAngryEmojiForJumped(_waitingBuffer, boardingPixel);
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
@@ -220,10 +461,16 @@ namespace CrowdMatch
         private void OnLeave(int slotIndex, IConveyorItem item)
         {
             ResetSlotTracking(slotIndex);
+            ResetLapTracking(slotIndex);
 
             var pixel = item as PixelItem;
             if (pixel == null)
                 return;
+
+            // 匹配上车：立刻收掉犯困表情——跟随模式下它是像素的子物体，不主动收会跟着像素一起进车
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.RemoveSleepEmoji(pixel);
 
             var gc = GameController.Instance;
             if (gc != null && gc.recordMode)
@@ -283,13 +530,24 @@ namespace CrowdMatch
                 _prevMatchX[slotIndex] = float.NaN;
         }
 
-        /// <summary>把所有槽位的闸口跟踪复位（整条传送带被清空）。</summary>
+        /// <summary>把所有槽位的闸口跟踪与圈数统计复位（整条传送带被清空）。</summary>
         private void ResetAllTracking()
         {
-            if (_prevMatchX == null)
-                return;
-            for (int i = 0; i < _prevMatchX.Length; i++)
-                _prevMatchX[i] = float.NaN;
+            if (_prevMatchX != null)
+            {
+                for (int i = 0; i < _prevMatchX.Length; i++)
+                    _prevMatchX[i] = float.NaN;
+            }
+
+            if (_laps != null)
+            {
+                for (int i = 0; i < _laps.Length; i++)
+                {
+                    _laps[i] = 0;
+                    _prevPhase[i] = float.NaN;
+                }
+            }
+
             _pendingContainer = null;
         }
 
@@ -343,6 +601,7 @@ namespace CrowdMatch
                     removed.Add(pixel);
                 belt.ClearSlot(slot);
                 ResetSlotTracking(slot);
+                ResetLapTracking(slot);
             }
             return removed;
         }

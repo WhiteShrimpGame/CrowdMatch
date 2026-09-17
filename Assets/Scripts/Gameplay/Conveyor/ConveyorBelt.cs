@@ -425,6 +425,14 @@ namespace CrowdMatch
             return path.GetGlobalPosition(samplePhase * path.GetTotalPathLength());
         }
 
+        /// <summary>某槽位当前的归一化循环相位 [0,1)（含追赶平移），供宿主做「绕了几圈」之类的统计。</summary>
+        public float GetSlotPhase(int slotIndex)
+        {
+            if (!_initialized || slotIndex < 0 || slotIndex >= _slotPhase.Length)
+                return 0f;
+            return (offset + _slotPhase[slotIndex]) % 1f;
+        }
+
         /// <summary>某槽位当前是否处于追赶（相位平移）中。</summary>
         public bool IsSlotCatchingUp(int slotIndex)
         {

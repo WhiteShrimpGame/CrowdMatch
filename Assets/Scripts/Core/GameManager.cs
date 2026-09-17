@@ -39,6 +39,10 @@ namespace CrowdMatch
 
         public SpawnPool spawnPool;
 
+        [Header("表情")]
+        [Tooltip("表情包管理器（场景里单独建一个物体挂上，再拖到这里）；留空则所有表情播放自动跳过")]
+        public EmojiManager emojiManager;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
