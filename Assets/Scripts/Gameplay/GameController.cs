@@ -49,6 +49,9 @@ namespace CrowdMatch
         [Tooltip("晃动单程时长（秒）；去与回同速，故两段时长相同")]
         public float blockedNudgeDuration = 0.08f;
 
+        /// <summary>点击序号发号器：每次成功点击移出递增一次，同一次移出的整组共用同一个序号（供传送带入口的插队判定）。</summary>
+        private int _clickSeq;
+
         [Header("过闸缓冲区（可选）")]
         [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
         public CrowdBufferZone crowdBuffer;
@@ -58,7 +61,7 @@ namespace CrowdMatch
         public ConveyorBeltZone conveyorZone;
 
         [Header("Record 模式")]
-        [Tooltip("勾选后运行时新建序列文件；小球到达传送带远侧时直接消失并把颜色写入文件，不进入容器")]
+        [Tooltip("勾选后运行时新建序列文件；点击后像素原地消失并把颜色写入文件（不进入缓冲区/传送带），且允许点击被阻挡的组。按住 S 点击则只移除被点的那一颗，不整组移出")]
         public bool recordMode = false;
 
         [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
@@ -80,7 +83,9 @@ namespace CrowdMatch
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
         private StreamWriter _recordWriter;
-        private string _recordFilePath;
+        private string _recordFilePath;   // 当前记录文件路径（关闭时会改名，只在写入期间有效）
+        private string _recordFileBase;   // 记录文件名前缀（不含 _rec<N> 与扩展名）
+        private int _recordedCount;       // 当前记录文件已写入的像素数
         private bool _transitioning;
 
         /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
@@ -110,9 +115,6 @@ namespace CrowdMatch
 
             _clickMask = LayerMask.GetMask("Click");
 
-            if (recordMode)
-                BeginRecord();
-
             Init();
         }
 
@@ -128,6 +130,7 @@ namespace CrowdMatch
         /// <summary>按关卡序号加载并应用关卡：清理上一关残留 → 解析 JSON → 应用到两个网格 → 统计像素总数。</summary>
         private void InitLevel(int level)
         {
+            CloseRecord();   // 切关：先把上一关的记录文件落盘改名，本关的文件在下面另开
             CleanupLevel();
 
             var gm = GameManager.Instance;
@@ -165,6 +168,9 @@ namespace CrowdMatch
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
+
+            if (recordMode)
+                BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
         }
 
         /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
@@ -387,8 +393,11 @@ namespace CrowdMatch
 #endif
         }
 
-        /// <summary>开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建带时间戳的序列文件。</summary>
-        private void BeginRecord()
+        /// <summary>
+        /// 开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建一个以「关卡 JSON 文件名 + 关卡像素总数」
+        /// 命名的序列文件。文件名里的「记录像素数」只有关闭时才知道，故由 <see cref="CloseRecord"/> 改名补上。
+        /// </summary>
+        private void BeginRecord(string levelName, int totalPixels)
         {
             string dir = string.IsNullOrEmpty(recordOutputDir)
                 ? DefaultRecordDir()
@@ -399,8 +408,10 @@ namespace CrowdMatch
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                string name = "Record_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt";
-                _recordFilePath = Path.Combine(dir, name);
+                _recordedCount = 0;
+                _recordFileBase = "Record_" + levelName + "_total" + totalPixels + "_" +
+                    DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                _recordFilePath = Path.Combine(dir, _recordFileBase + ".txt");
                 _recordWriter = new StreamWriter(_recordFilePath, false, System.Text.Encoding.UTF8);
                 Debug.Log("[GameController] Record 模式已开启，序列文件：" + _recordFilePath);
             }
@@ -411,23 +422,54 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。由 ConveyorBeltZone 在记录模式下调用。</summary>
+        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。</summary>
         public void RecordBall(int colorId)
         {
             if (_recordWriter == null)
                 return;
             _recordWriter.WriteLine(colorId);
             _recordWriter.Flush();
+            _recordedCount++;
         }
 
+        /// <summary>
+        /// 关闭记录文件：落盘后改名带上「记录像素数」；若一个像素都没记录到（例如进关就立刻切走），
+        /// 直接删掉这个空文件，不留无意义的空 txt。无文件时为空操作。
+        /// </summary>
         private void CloseRecord()
         {
             if (_recordWriter == null)
                 return;
+
             _recordWriter.Flush();
             _recordWriter.Close();
             _recordWriter = null;
-            Debug.Log("[GameController] 已关闭记录文件：" + _recordFilePath);
+
+            try
+            {
+                if (_recordedCount == 0)
+                {
+                    File.Delete(_recordFilePath);
+                    Debug.Log("[GameController] 未记录到任何像素，已删除空记录文件：" + _recordFilePath);
+                }
+                else
+                {
+                    string finalPath = Path.Combine(
+                        Path.GetDirectoryName(_recordFilePath),
+                        _recordFileBase + "_rec" + _recordedCount + ".txt");
+                    File.Move(_recordFilePath, finalPath);
+                    Debug.Log("[GameController] 已关闭记录文件：" + finalPath + "（记录 " + _recordedCount + " 个像素）");
+                }
+            }
+            catch (System.Exception e)
+            {
+                // 改名 / 删除失败不影响已写入的内容，保留原文件即可
+                Debug.LogWarning("[GameController] 记录文件收尾失败（内容完整，保留原文件）：" + e.Message);
+            }
+
+            _recordFilePath = null;
+            _recordFileBase = null;
+            _recordedCount = 0;
         }
 
         private void OnApplicationQuit()
@@ -631,7 +673,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
-        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动。
+        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
+        /// 并按概率在组内随机一个像素上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
         private void PlayBlockedFeedback(List<PixelItem> blocked)
@@ -640,6 +683,10 @@ namespace CrowdMatch
                 AudioManager.Instance.Play("TapBlocked");
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
+
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.TryPlayAngryEmoji(blocked);
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
             float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
@@ -666,10 +713,13 @@ namespace CrowdMatch
 
         private void ResolveMatch(PixelItem start)
         {
-            List<PixelItem> matched = FloodFill(start);
+            // 记录模式下按住 S 点击：只移除被点的这一颗，不做同色整组展开
+            bool singleRemove = recordMode && Input.GetKey(KeyCode.S);
+            List<PixelItem> matched = singleRemove ? new List<PixelItem> { start } : FloodFill(start);
 
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
-            if (!CanReachFront(matched))
+            // 记录模式不做此限制：被包围的组也允许点击（记录的是取出顺序，与组能否寻路无关）
+            if (!recordMode && !CanReachFront(matched))
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
@@ -683,6 +733,14 @@ namespace CrowdMatch
                 AudioManager.Instance.Play("Tap");
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
+
+            // 移出前先收掉组内像素的生气表情（跟随模式下它是像素的子物体，不主动收会跟着一起走）
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+            {
+                for (int i = 0; i < matched.Count; i++)
+                    emoji.RemoveAngryEmoji(matched[i]);
+            }
 
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
@@ -700,12 +758,16 @@ namespace CrowdMatch
             });
 
             // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
+            // 同一次点击移出的整组共享一个点击序号，用于传送带入口的「插队」判定
+            int clickSeq = ++_clickSeq;
             foreach (var item in matched)
             {
+                item.clickSeq = clickSeq;
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
                 item.SetExposed(false);
                 item.SetClickable(false);
-                item.SetWalking(true);
+                if (!recordMode)
+                    item.SetWalking(true);   // 记录模式下像素随即原地消失，不需要走动画
             }
 
             // 匹配移除后，先让箱子/升降台释放像素占格（占格同步、动画异步），
@@ -714,6 +776,17 @@ namespace CrowdMatch
             pixelGroup.TryAdvanceElevators();
             pixelGroup.RefreshExposed();
             RefreshFrame();
+
+            // 记录模式：像素原地消失，按取出顺序（前到后、中间优先）写入序列文件，不进入缓冲区 / 传送带
+            if (recordMode)
+            {
+                for (int i = 0; i < matched.Count; i++)
+                {
+                    RecordBall(matched[i].colorId);
+                    Destroy(matched[i].gameObject);
+                }
+                return;
+            }
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集

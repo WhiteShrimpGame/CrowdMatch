@@ -25,6 +25,10 @@ namespace CrowdMatch
         [Tooltip("问号物体（如头顶问号标志）：问号未揭晓时显示，揭晓后隐藏。留空则无问号视觉。")]
         public GameObject questionObject;
 
+        [Header("表情")]
+        [Tooltip("表情节点：播放表情时表情挂在该 Transform 下（通常放在头顶）；留空则该 Pixel 不参与表情播放")]
+        public Transform emojiNode;
+
         [Tooltip("网格列坐标（横，X 方向），0 = 最小 X（最左）")]
         public int gridX;
 
@@ -89,6 +93,15 @@ namespace CrowdMatch
 
         /// <summary>是否已到达聚集点（运行时标记，供 ContainerGroup 消费）</summary>
         [System.NonSerialized] public bool arrivedAtGatherPoint;
+
+        /// <summary>上车落定的时刻（Time.time）；NaN = 尚未上车。供「在车上等了多久」之类的判定用。</summary>
+        [System.NonSerialized] public float boardedAt = float.NaN;
+
+        /// <summary>被点击移出时的点击序号（同一次点击移出的整组共用）；0 = 不是点击移出的。供传送带入口的插队判定用。</summary>
+        [System.NonSerialized] public int clickSeq;
+
+        /// <summary>进入缓冲区物理队列排队的时刻（Time.time）；NaN = 尚未进入缓冲区。供「排队太久」之类的判定用。</summary>
+        [System.NonSerialized] public float bufferedAt = float.NaN;
 
         /// <summary>进入物理缓冲区时随机到的个人前进速度（世界单位/秒，由 CrowdBufferZone 赋值，进入后保持不变）</summary>
         [System.NonSerialized] public float bufferCrowdSpeed;

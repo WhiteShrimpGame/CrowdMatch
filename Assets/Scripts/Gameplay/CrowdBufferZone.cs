@@ -1005,6 +1005,7 @@ namespace CrowdMatch
             if (Mathf.Abs(curScale - physicalTargetScale) > physicalTargetScale * scaleTolerance)
                 StartCoroutine(SmoothScaleToTarget(item));
 
+            item.bufferedAt = Time.time;   // 进入缓冲区排队的时刻（供「排队太久」这类判定用）
             _physical.Add(item);
         }
 
@@ -1087,6 +1088,22 @@ namespace CrowdMatch
             _lastReleaseTime = Time.time;
             DetachPhysics(item);
             StartCoroutine(MoveToCollect(item));
+        }
+
+        /// <summary>
+        /// 把仍在缓冲区物理队列里等待（已走到缺口前排队、尚未被传送带取走）的像素收集到 outList。
+        /// 不含还在网格里往外走的提取中像素。供「后点的像素先上了传送带」这类插队判定。
+        /// </summary>
+        public void CollectWaiting(List<PixelItem> outList)
+        {
+            if (outList == null)
+                return;
+
+            for (int i = 0; i < _physical.Count; i++)
+            {
+                if (_physical[i] != null)
+                    outList.Add(_physical[i]);
+            }
         }
 
         /// <summary>从物理队列取出距缺口最近（且在 releaseRadius 内）的小球并解除物理约束；无则 null。供传送带「槽位过关口」直接收集。</summary>
