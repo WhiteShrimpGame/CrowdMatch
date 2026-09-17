@@ -1340,6 +1340,13 @@ MonoBehaviour:
   matchGateOffsetX: -0.6
   matchRangeZ: 2
   settleRotateSpeed: 360
+  sleepChancePerPixel: 0.1
+  sleepCarWaitSeconds: 3
+  sleepCarCheckRows: 3
+  queueAngryCheckIntervalMin: 3
+  queueAngryCheckIntervalMax: 6
+  sleepCheckIntervalMin: 3
+  sleepCheckIntervalMax: 6
 --- !u!4 &1582382722
 Transform:
   m_ObjectHideFlags: 0
@@ -1698,10 +1705,11 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 4c01b0540d5f278409940251f954b2d8, type: 3}
+  - {fileID: 4900000, guid: c56538c6f15167b4282d745608a4fff9, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
+  emojiManager: {fileID: 0}
 --- !u!4 &1940794605
 Transform:
   m_ObjectHideFlags: 0
