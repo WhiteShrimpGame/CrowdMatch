@@ -49,6 +49,9 @@ namespace CrowdMatch
         [Tooltip("晃动单程时长（秒）；去与回同速，故两段时长相同")]
         public float blockedNudgeDuration = 0.08f;
 
+        /// <summary>点击序号发号器：每次成功点击移出递增一次，同一次移出的整组共用同一个序号（供传送带入口的插队判定）。</summary>
+        private int _clickSeq;
+
         [Header("过闸缓冲区（可选）")]
         [Tooltip("像素离开网格后进入的扇形缓冲区；留空则回退到旧的直接散布聚集")]
         public CrowdBufferZone crowdBuffer;
@@ -630,7 +633,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
-        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动。
+        /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
+        /// 并按概率在组内随机一个像素上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
         private void PlayBlockedFeedback(List<PixelItem> blocked)
@@ -639,6 +643,10 @@ namespace CrowdMatch
                 AudioManager.Instance.Play("TapBlocked");
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
+
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.TryPlayAngryEmoji(blocked);
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
             float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
@@ -683,6 +691,14 @@ namespace CrowdMatch
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(1);
 
+            // 移出前先收掉组内像素的生气表情（跟随模式下它是像素的子物体，不主动收会跟着一起走）
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+            {
+                for (int i = 0; i < matched.Count; i++)
+                    emoji.RemoveAngryEmoji(matched[i]);
+            }
+
             // 同一次匹配内排序：前排优先（gridZ 小），同排靠中心优先（供 CrowdBufferZone 提取阶段前到后寻路使用）
             matched.Sort((a, b) =>
             {
@@ -699,8 +715,11 @@ namespace CrowdMatch
             });
 
             // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
+            // 同一次点击移出的整组共享一个点击序号，用于传送带入口的「插队」判定
+            int clickSeq = ++_clickSeq;
             foreach (var item in matched)
             {
+                item.clickSeq = clickSeq;
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
                 item.SetExposed(false);
                 item.SetClickable(false);
