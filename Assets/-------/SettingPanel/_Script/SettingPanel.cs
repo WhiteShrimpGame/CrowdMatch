@@ -1,35 +1,34 @@
-﻿/*using DG.Tweening;
+﻿using DG.Tweening;
 using DG.Tweening.Core.Easing;
-using PufferMiniGame;
+//using PufferMiniGame;
 using System.Collections;
 using System.Collections.Generic;
-using MetaSystem.BeadPixelSystem;
-using MetaSystem.OnlineReward;
+using CrowdMatch;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-public class SettingData
+/*public class SettingData
 {
     public static int MusicSet
     {
-        get { return MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.GetInt(GameData.MusicState, 1); }
-        set { MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.SetInt(GameData.MusicState, value != 0 ? 1 : 0); }
+        get { return PlayerPrefs.GetInt(GameData.MusicState, 1); }
+        set { PlayerPrefs.SetInt(GameData.MusicState, value != 0 ? 1 : 0); }
     }
 
     public static int SoundSet
     {
-        get { return MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.GetInt(GameData.SoundState, 1); }
-        set { MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.SetInt(GameData.SoundState, value != 0 ? 1 : 0); }
+        get { return PlayerPrefs.GetInt(GameData.SoundState, 1); }
+        set { PlayerPrefs.SetInt(GameData.SoundState, value != 0 ? 1 : 0); }
     }
 
     public static int VibrateSet
     {
-        get { return MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.GetInt(GameData.VibrateState, VibrateValue()); }
+        get { return PlayerPrefs.GetInt(GameData.VibrateState, VibrateValue()); }
         set
         {
-            MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.SetInt(GameData.VibrateState, value != 0 ? 1 : 0);
+            PlayerPrefs.SetInt(GameData.VibrateState, value != 0 ? 1 : 0);
         }
     }
     public static int VibrateValue()
@@ -41,67 +40,10 @@ public class SettingData
         }
         return 1;
     }
-}
+}*/
 
 public class SettingPanel : MonoBehaviour
 {
-    /*[HideInInspector] public static string[] OnlineParams =
-    {
-        "jdpx_stratification_open",
-        "jdpx_stratification_fail",
-        "jdpx_stratification_win",
-        "jdpx_performance",
-        "jdpx_tapeSpeed",
-        "jdpx_skin",
-        "jdpx_Race",
-        "jdpx_Life_Config"
-    };
-
-    public static string[] OnlineParamsP2 =
-    {
-        "jdpx_giftpackage_open",
-        "jdpx_Guide",
-        "jdpx_drop",
-        "jdpx_item_free",
-        "jdpx_click",
-        "jdpx_insertAD_show",
-        "jdpx_hardinfo"
-    };
-
-    public static string[] OnlineParamsP3 =
-    {
-        "jdpx_giftpackage_show",
-        "jdpx_item_price",
-        "jdpx_gold_num",
-        "jdpx_gold_revive",
-        "jdpx_ADConfig",
-        "jdpx_MissionBlast",
-        "jdpx_unlock",
-        "jdpx_KeepWin",
-        "jdpx_tiezhiAB"
-    };
-
-    public static string[] OnlineParamsP4 =
-    {
-        "jdpx_reconnectAB",
-        "jdpx_ModuleAB",
-        "jdpx_BannerAD",
-        "jdpx_insertAD_end",
-        "jdpx_BaseAB",
-        "jdpx_levelAB",
-        "jdpx_RetryAB",
-        "jdpx_MissionModel",
-        "jdpx_reviveAB",
-        "jdpx_speed"
-    };
-
-    public static string[] OnlineParamsP5 =
-    {
-        "jdpx_colorinfo",
-        "jdpx_MissionTarget",
-        "jdpx_MissionSequence",
-        "jdpx_DifficultyAB"
-    };#1#
 
 #if UNITY_EDITOR || NoAds
     public static bool isShowTestPanel = true;
@@ -110,7 +52,6 @@ public class SettingPanel : MonoBehaviour
 #endif
 
     public static bool isForbidTestPanel = false;
-    private OnlineParamsConfig onlineParamsConfig =>GameManager.Instance.onlineParamsConfig;
     Transform _musicBtn, _soundBtn, _vibrateBtn, _resumeBtn, _backBtn, _retryBtn;
 
     public InputField testInput, levelInput;
@@ -150,8 +91,8 @@ public class SettingPanel : MonoBehaviour
 
     public void InitSettingPanel()
     {
-        paramsNext.onClick.AddListener(ShowOnlineParamsNext);
-        paramsLast.onClick.AddListener(ShowOnlineParamsLast);
+        /*paramsNext.onClick.AddListener(ShowOnlineParamsNext);
+        paramsLast.onClick.AddListener(ShowOnlineParamsLast);*/
         _musicBtn = transform.Find("BG/MusicPart/MusicBtn");
         _soundBtn = transform.Find("BG/SoundPart/SoundBtn");
         _vibrateBtn = transform.Find("BG/VibratePart/VibrateBtn");
@@ -187,26 +128,14 @@ public class SettingPanel : MonoBehaviour
                 btn.onClick.AddListener(() => { _OnTestBtnClk(index); });
         }
 
-        _musicBtn.GetComponent<Button>().onClick.AddListener(OnMusicBtnClk);
+        /*_musicBtn.GetComponent<Button>().onClick.AddListener(OnMusicBtnClk);
         _soundBtn.GetComponent<Button>().onClick.AddListener(OnSoundBtnClk);
-        _vibrateBtn.GetComponent<Button>().onClick.AddListener(OnVibrateBtnClk);
+        _vibrateBtn.GetComponent<Button>().onClick.AddListener(OnVibrateBtnClk);*/
 
         _retryBtn.GetComponent<Button>().onClick.AddListener(OnRetryBtnClk);
         _backBtn.GetComponent<Button>().onClick.AddListener(OnBackBtnClk);
         _resumeBtn.GetComponent<Button>().onClick.AddListener(OnCloseBtnClk);
-
-        var skipBtn = transform.Find("BG/SkipBtn").GetComponent<Button>();
-        if (!UIManager.Instance.isMainPanelActive && GameData.FailCount >= 2 && GameData.IsAdUnlock(AdId.Skip))
-        {
-            Reporter.VideoShow("Skip");
-            skipBtn.onClick.AddListener(_OnSkipBtnClk);
-        }
-        else
-        {
-            skipBtn.gameObject.SetActive(false);
-        }
-
-
+        
         //ShowSettingState(); 
 
         if (isShowTestPanel)
@@ -214,7 +143,7 @@ public class SettingPanel : MonoBehaviour
             testInput.gameObject.SetActive(false);
             testPanel.SetActive(!isForbidTestPanel);
             levelShowText.gameObject.SetActive(true);
-            ShowLevelText();
+            //ShowLevelText();
         }
         else
         {
@@ -239,7 +168,7 @@ public class SettingPanel : MonoBehaviour
 
     private void OnEnable()
     {
-        ShowSettingState();
+        //ShowSettingState();
         //UIManager.Instance.HideBanner();
 
         // if (isShowTestPanel)
@@ -253,22 +182,18 @@ public class SettingPanel : MonoBehaviour
         //     testPanel.SetActive(false);
         // }
 
-        UIManager.Instance.GetComponentInChildren<MainPanel>()?.ShowOrHideGameClub(false);
     }
 
     private void OnDisable()
     {
-        UIManager.Instance.GetComponentInChildren<MainPanel>()?.ShowOrHideGameClub(true);
         if (UIManager.Instance.isMainPanelActive)
         {
-            UIManager.Instance.mainPanel.GetComponent<MainPanel>().UpdateDogState(true);
             UIManager.Instance.settingPanel = null;
         }
-
         Destroy(gameObject);
     }
 
-    public void ShowSettingState()
+    /*public void ShowSettingState()
     {
         if (!_musicBtn)
             _musicBtn = transform.Find("BG/MusicPart/MusicBtn");
@@ -440,13 +365,13 @@ public class SettingPanel : MonoBehaviour
 
         vibrateLevelText.text = "振动等级 " + GameData.VibrateLevel;
         vibrateTickText.text = "振动间隔 " + GameData.VibrateTick;
-    }
+    }*/
 
     public void OnCloseBtnClk()
     {
         if (!UIManager.Instance.isMainPanelActive)
         {
-            Reporter.GameContinue();
+ 
             if (GameState.IsGamePause)
             {
                 GameState.GameStart();
@@ -454,7 +379,7 @@ public class SettingPanel : MonoBehaviour
             }
         }
 
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
         //UIManager.Instance.HidePanel(transform);
         UIManager.Instance.ShowSettingPanel(false);
@@ -462,31 +387,31 @@ public class SettingPanel : MonoBehaviour
 
     public void OnBackBtnClk()
     {
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
         gameObject.SetActive(false);
 
-        GameManager.Instance.ReloadScene(false);
+        //GameManager.Instance.ReloadScene(false);
         //SceneManager.LoadScene("GameScene");
     }
 
     public void OnRetryBtnClk()
     {
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
 
-        GameManager.Instance.ReloadScene();
+        GameController.Instance.ReloadLevel();
         //SceneManager.LoadScene("GameScene");
     }
 
 
-    public void OnMusicBtnClk()
+    /*public void OnMusicBtnClk()
     {
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
         if (SettingData.MusicSet == 1)
         {
-            AudioManager.Instance.stopClip(0);
+            //AudioManager.Instance.stopClip(0);
             SettingData.MusicSet = 0;
             _musicBtn.Find("Open").gameObject.SetActive(false);
             _musicBtn.Find("Close").gameObject.SetActive(true);
@@ -496,7 +421,7 @@ public class SettingPanel : MonoBehaviour
         else
         {
             SettingData.MusicSet = 1;
-            AudioManager.Instance.playClip(0, 1, true);
+            //AudioManager.Instance.playClip(0, 1, true);
             _musicBtn.Find("Open").gameObject.SetActive(true);
             _musicBtn.Find("Close").gameObject.SetActive(false);
 
@@ -518,7 +443,7 @@ public class SettingPanel : MonoBehaviour
         else
         {
             SettingData.SoundSet = 1;
-            AudioManager.Instance.playClip(1);
+            ////AudioManager.Instance.playClip(1);
             _soundBtn.Find("Open").gameObject.SetActive(true);
             _soundBtn.Find("Close").gameObject.SetActive(false);
 
@@ -528,7 +453,7 @@ public class SettingPanel : MonoBehaviour
 
     public void OnVibrateBtnClk()
     {
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         if (SettingData.VibrateSet == 1)
         {
             SettingData.VibrateSet = 0;
@@ -546,24 +471,8 @@ public class SettingPanel : MonoBehaviour
 
             _vibrateBtn.GetComponent<Button>().targetGraphic = _vibrateBtn.Find("Open").GetComponent<Image>();
         }
-    }
-
-    public void _OnSkipBtnClk()
-    {
-        AudioManager.Instance.PlayButtonAudioAndVibrate();
-
-        MiniGameSolution.Ad.ShowRewardAd(() =>
-        {
-            Debug.Log("激励回调成功, 发放奖励");
-            GameData.AdCount++;
-            Debug.Log("跳关");
-            GameManager.Instance.GameWin();
-            GameManager.Instance.ReloadScene();
-            UIManager.Instance.showRacePopupPanel(false);
-            UIManager.Instance.showRacePopupWinPanel(false);
-        }, sceneId: "Skip");
-        
-    }
+    }*/
+    
 
     public void _OnTestBtnDown(BaseEventData eventData)
     {
@@ -602,7 +511,7 @@ public class SettingPanel : MonoBehaviour
             isShowTestPanel = true;
             testPanel.SetActive(!isForbidTestPanel);
             levelShowText.gameObject.SetActive(true);
-            ShowLevelText();
+            //ShowLevelText();
         }
     }
 
@@ -611,24 +520,24 @@ public class SettingPanel : MonoBehaviour
         int level = int.Parse(levelInput.text);
         if (level > 0)
         {
-            GameData.FailCount = 0;
-            GameData.RetryCount = 0;
+            /*GameData.FailCount = 0;
+            GameData.RetryCount = 0;*/
             GameData.CurrentLevel = level;
-            GameManager.Instance.ReloadScene();
-
+            //GameManager.Instance.ReloadScene();
+            GameController.Instance.ReloadLevel();
             //SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
     }
 
     public void _OnTestBtnClk(int index)
     {
-        AudioManager.Instance.playClip(1);
+        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
 
-        switch (index)
+        /*switch (index)
         {
             case 0:
-                MiniGameSolution.Instance.MiniGameUtilities.PlayerPrefs.DeleteAll();
+                PlayerPrefs.DeleteAll();
                 GameData.ClearPlayerPref();
                 HandBookData.ClearData();
                 CollectionPanelData.ResetData();
@@ -909,10 +818,10 @@ public class SettingPanel : MonoBehaviour
                 break;
             default:
                 break;
-        }
+        }*/
     }
 
-    private void ShowOnlineParamsLast()
+    /*private void ShowOnlineParamsLast()
     {
         onlineParamsPageIndex--;
         if (onlineParamsPageIndex < 0)
@@ -1010,9 +919,9 @@ public class SettingPanel : MonoBehaviour
         }
 
         onlineParams.text = res;#1#
-    }
+    }*/
 
-    private void ShowLevelText()
+    /*private void ShowLevelText()
     {
         var curLevel = GameController.Instance.curLevel;
         if (curLevel == null)
@@ -1026,5 +935,5 @@ public class SettingPanel : MonoBehaviour
                 " Judge: " + StratifPlayerData.JudgeLevel +
                 " Win: " + StratifPlayerData.WinCount + " Fail: " + StratifPlayerData.FailCount;
         }
-    }
-}*/
+    }*/
+}

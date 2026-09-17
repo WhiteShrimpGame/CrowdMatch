@@ -257,7 +257,8 @@ namespace CrowdMatch
             {
                 _transitioning = true;
                 GameState.GameFail();
-                Invoke(nameof(DoRevive), 1.5f);
+                UIManager.Instance.showFailPanel(true);
+                //Invoke(nameof(DoRevive), 1.5f);
             }
         }
 

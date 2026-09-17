@@ -3247,6 +3247,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6386999704969479179}
   - component: {fileID: 6386999704969479178}
+  - component: {fileID: 6784580834354105894}
   m_Layer: 5
   m_Name: GamePanel
   m_TagString: Untagged
@@ -3295,6 +3296,45 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6386999704969479172}
   m_CullTransparentMesh: 1
+--- !u!114 &6784580834354105894
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6386999704969479172}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf5fe5e9a92779744b72431083467c84, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  setttingButton: {fileID: 6386999703924397346}
+  homeButton: {fileID: 1117521194139929451}
+  levelText: {fileID: 0}
+  goldCountText: {fileID: 0}
+  addSlotBtn: {fileID: 0}
+  clearWaitSlotBtn: {fileID: 0}
+  removeAimTapBtn: {fileID: 0}
+  removeAimTapeCloseBtn: {fileID: 0}
+  removeTip: {fileID: 0}
+  GuideTip: {fileID: 0}
+  levelMaxScale: 1.5
+  levelMinScale: 0.5
+  hardTipBgImg: {fileID: 0}
+  hardTipBgHard: {fileID: 0}
+  hardTipBgSuperHard: {fileID: 0}
+  levelBgHardImg: {fileID: 0}
+  levelBgSuperHardImg: {fileID: 0}
+  hardTip: {fileID: 0}
+  hardTipHardText: {fileID: 0}
+  hardTipSuperHardText: {fileID: 0}
+  hardTipHardImg: {fileID: 0}
+  hardTipSuperHardImg: {fileID: 0}
+  alertImg: {fileID: 0}
+  arrowTipsImg: {fileID: 0}
+  unLuckSprite: {fileID: 0}
+  luckSprite: {fileID: 0}
+  isGuide: 0
 --- !u!1 &6386999705287666516
 GameObject:
   m_ObjectHideFlags: 0
