@@ -431,7 +431,10 @@ namespace CrowdMatch
             _recordedCount++;
         }
 
-        /// <summary>关闭记录文件：落盘后改名为「..._rec&lt;记录像素数&gt;.txt」。无文件时为空操作。</summary>
+        /// <summary>
+        /// 关闭记录文件：落盘后改名带上「记录像素数」；若一个像素都没记录到（例如进关就立刻切走），
+        /// 直接删掉这个空文件，不留无意义的空 txt。无文件时为空操作。
+        /// </summary>
         private void CloseRecord()
         {
             if (_recordWriter == null)
@@ -441,18 +444,26 @@ namespace CrowdMatch
             _recordWriter.Close();
             _recordWriter = null;
 
-            string finalPath = Path.Combine(
-                Path.GetDirectoryName(_recordFilePath),
-                _recordFileBase + "_rec" + _recordedCount + ".txt");
             try
             {
-                File.Move(_recordFilePath, finalPath);
-                Debug.Log("[GameController] 已关闭记录文件：" + finalPath + "（记录 " + _recordedCount + " 个像素）");
+                if (_recordedCount == 0)
+                {
+                    File.Delete(_recordFilePath);
+                    Debug.Log("[GameController] 未记录到任何像素，已删除空记录文件：" + _recordFilePath);
+                }
+                else
+                {
+                    string finalPath = Path.Combine(
+                        Path.GetDirectoryName(_recordFilePath),
+                        _recordFileBase + "_rec" + _recordedCount + ".txt");
+                    File.Move(_recordFilePath, finalPath);
+                    Debug.Log("[GameController] 已关闭记录文件：" + finalPath + "（记录 " + _recordedCount + " 个像素）");
+                }
             }
             catch (System.Exception e)
             {
-                // 改名失败不影响文件内容，保留原名即可
-                Debug.LogWarning("[GameController] 记录文件改名失败（内容完整，保留原名）：" + e.Message);
+                // 改名 / 删除失败不影响已写入的内容，保留原文件即可
+                Debug.LogWarning("[GameController] 记录文件收尾失败（内容完整，保留原文件）：" + e.Message);
             }
 
             _recordFilePath = null;
