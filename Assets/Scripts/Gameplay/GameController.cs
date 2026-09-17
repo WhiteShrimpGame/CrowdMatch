@@ -61,7 +61,7 @@ namespace CrowdMatch
         public ConveyorBeltZone conveyorZone;
 
         [Header("Record 模式")]
-        [Tooltip("勾选后运行时新建序列文件；点击后像素原地消失并把颜色写入文件（不进入缓冲区/传送带），且允许点击被阻挡的组")]
+        [Tooltip("勾选后运行时新建序列文件；点击后像素原地消失并把颜色写入文件（不进入缓冲区/传送带），且允许点击被阻挡的组。按住 S 点击则只移除被点的那一颗，不整组移出")]
         public bool recordMode = false;
 
         [Tooltip("序列文件输出目录；留空使用工程目录下的 Record 文件夹（编辑器），构建时回退 Application.persistentDataPath")]
@@ -83,7 +83,9 @@ namespace CrowdMatch
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
         private StreamWriter _recordWriter;
-        private string _recordFilePath;
+        private string _recordFilePath;   // 当前记录文件路径（关闭时会改名，只在写入期间有效）
+        private string _recordFileBase;   // 记录文件名前缀（不含 _rec<N> 与扩展名）
+        private int _recordedCount;       // 当前记录文件已写入的像素数
         private bool _transitioning;
 
         /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
@@ -113,9 +115,6 @@ namespace CrowdMatch
 
             _clickMask = LayerMask.GetMask("Click");
 
-            if (recordMode)
-                BeginRecord();
-
             Init();
         }
 
@@ -131,6 +130,7 @@ namespace CrowdMatch
         /// <summary>按关卡序号加载并应用关卡：清理上一关残留 → 解析 JSON → 应用到两个网格 → 统计像素总数。</summary>
         private void InitLevel(int level)
         {
+            CloseRecord();   // 切关：先把上一关的记录文件落盘改名，本关的文件在下面另开
             CleanupLevel();
 
             var gm = GameManager.Instance;
@@ -168,6 +168,9 @@ namespace CrowdMatch
             GameData.Init(true);
             GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
+
+            if (recordMode)
+                BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
         }
 
         /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
@@ -389,8 +392,11 @@ namespace CrowdMatch
 #endif
         }
 
-        /// <summary>开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建带时间戳的序列文件。</summary>
-        private void BeginRecord()
+        /// <summary>
+        /// 开启记录：在指定目录（默认工程目录下的 Record 文件夹）新建一个以「关卡 JSON 文件名 + 关卡像素总数」
+        /// 命名的序列文件。文件名里的「记录像素数」只有关闭时才知道，故由 <see cref="CloseRecord"/> 改名补上。
+        /// </summary>
+        private void BeginRecord(string levelName, int totalPixels)
         {
             string dir = string.IsNullOrEmpty(recordOutputDir)
                 ? DefaultRecordDir()
@@ -401,8 +407,10 @@ namespace CrowdMatch
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                string name = "Record_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt";
-                _recordFilePath = Path.Combine(dir, name);
+                _recordedCount = 0;
+                _recordFileBase = "Record_" + levelName + "_total" + totalPixels + "_" +
+                    DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                _recordFilePath = Path.Combine(dir, _recordFileBase + ".txt");
                 _recordWriter = new StreamWriter(_recordFilePath, false, System.Text.Encoding.UTF8);
                 Debug.Log("[GameController] Record 模式已开启，序列文件：" + _recordFilePath);
             }
@@ -413,23 +421,43 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。由 ConveyorBeltZone 在记录模式下调用。</summary>
+        /// <summary>记录一颗离开的小球颜色（每行一个 colorId）。</summary>
         public void RecordBall(int colorId)
         {
             if (_recordWriter == null)
                 return;
             _recordWriter.WriteLine(colorId);
             _recordWriter.Flush();
+            _recordedCount++;
         }
 
+        /// <summary>关闭记录文件：落盘后改名为「..._rec&lt;记录像素数&gt;.txt」。无文件时为空操作。</summary>
         private void CloseRecord()
         {
             if (_recordWriter == null)
                 return;
+
             _recordWriter.Flush();
             _recordWriter.Close();
             _recordWriter = null;
-            Debug.Log("[GameController] 已关闭记录文件：" + _recordFilePath);
+
+            string finalPath = Path.Combine(
+                Path.GetDirectoryName(_recordFilePath),
+                _recordFileBase + "_rec" + _recordedCount + ".txt");
+            try
+            {
+                File.Move(_recordFilePath, finalPath);
+                Debug.Log("[GameController] 已关闭记录文件：" + finalPath + "（记录 " + _recordedCount + " 个像素）");
+            }
+            catch (System.Exception e)
+            {
+                // 改名失败不影响文件内容，保留原名即可
+                Debug.LogWarning("[GameController] 记录文件改名失败（内容完整，保留原名）：" + e.Message);
+            }
+
+            _recordFilePath = null;
+            _recordFileBase = null;
+            _recordedCount = 0;
         }
 
         private void OnApplicationQuit()
@@ -673,7 +701,9 @@ namespace CrowdMatch
 
         private void ResolveMatch(PixelItem start)
         {
-            List<PixelItem> matched = FloodFill(start);
+            // 记录模式下按住 S 点击：只移除被点的这一颗，不做同色整组展开
+            bool singleRemove = recordMode && Input.GetKey(KeyCode.S);
+            List<PixelItem> matched = singleRemove ? new List<PixelItem> { start } : FloodFill(start);
 
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
             // 记录模式不做此限制：被包围的组也允许点击（记录的是取出顺序，与组能否寻路无关）
