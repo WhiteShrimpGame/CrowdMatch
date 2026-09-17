@@ -17,6 +17,32 @@ namespace CrowdMatch
             DrawDefaultInspector();
             serializedObject.ApplyModifiedProperties();
 
+            // 「转为 Pixel」：移除箱子并用本体矩形填满 Pixel。箱内隐藏 Pixel 挂在 PixelGroup 下（不在箱子上），
+            // 一并清掉，避免移除箱子后留下孤立的隐藏像素。点击后箱子会被销毁，故这些值先取出来
+            var boxGo = box.gameObject;
+            var cells = new List<Vector2Int>();
+            if (pg != null)
+            {
+                var body = new List<Vector2Int>();
+                box.EnumerateBody(body);
+                foreach (var c in body)
+                {
+                    if (pg.IsInRange(c.x, c.y))
+                        cells.Add(c);
+                }
+            }
+
+            var hidden = new List<GameObject>();
+            foreach (var p in box.hiddenPixels)
+            {
+                if (p != null)
+                    hidden.Add(p.gameObject);
+            }
+
+            GridFillUtility.DrawFillSection("移除箱子并用 Pixel 填满其范围",
+                colorId => GridFillUtility.RemoveAndFillPixels(
+                    boxGo, pg, cells, colorId, "移除箱子并填充 Pixel", hidden));
+
             int bodyCount = box.BodyCount;
             int colorCount = box.colorIds != null ? box.colorIds.Length : 0;
 

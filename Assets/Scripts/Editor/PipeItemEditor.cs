@@ -11,10 +11,23 @@ namespace CrowdMatch
         public override void OnInspectorGUI()
         {
             var pipe = (PipeItem)target;
+            var group = pipe.GetComponentInParent<PixelGroup>();
 
             serializedObject.Update();
             DrawDefaultInspector();
             serializedObject.ApplyModifiedProperties();
+
+            // 「转为 Pixel」：移除管道并用它覆盖的格（管道格 + 轨道格）填满 Pixel。
+            // 点击后管道会被销毁，故这些值必须在注册延后回调前先取出来
+            var pipeGo = pipe.gameObject;
+            var pipeCell = PipeItem.GetPipeCell(pipe.points);
+            var cells = new List<Vector2Int>();
+            cells.Add(pipeCell);                  // 空轨迹时为 (-1,-1)，由填充流程按网格范围过滤掉
+            cells.AddRange(pipe.TrackCells());    // 轨道格已按网格范围过滤，且不含管道格
+
+            GridFillUtility.DrawFillSection("移除管道并用 Pixel 填满其范围",
+                colorId => GridFillUtility.RemoveAndFillPixels(
+                    pipeGo, group, cells, colorId, "移除管道并填充 Pixel"));
 
             if (pipe.points == null || pipe.points.Count < 2)
             {
@@ -22,12 +35,10 @@ namespace CrowdMatch
                 return;
             }
 
-            var group = pipe.GetComponentInParent<PixelGroup>();
             int track = group != null
                 ? PipeItem.CountTrackCells(pipe.points, group.columns, group.TotalRows)
                 : pipe.points.Count - 1;
 
-            var pipeCell = PipeItem.GetPipeCell(pipe.points);
             string waves = pipe.colors != null ? pipe.colors.Count.ToString() : "0";
 
             EditorGUILayout.HelpBox(

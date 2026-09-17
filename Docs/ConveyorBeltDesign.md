@@ -217,12 +217,20 @@ return false;
 `ContainerGroup.FindMatchableInColumn(int col, int colorId)`（public）：
 
 ```
-该列从最前排（row 0）向后，找第一个「可匹配（IsOpen）且非空且同色且非补位中」的容器（最多 maxOpenRows 排）
+该列从最前排（row 0）向后，找第一个「可匹配（IsOpen）且非空且同色」的容器（最多 maxOpenRows 排）
 无则 null
 ```
 
+> **补位移动中的车（`isRefilling`）也算可匹配**：`RefillColumn` 在前移开始时就已把该车的格子改写成前排，
+> 座位（`posList`）挂在车身下，所以像素上车后随车继续前移，jump 落点自动跟随座位，无需额外处理。
+> 代价有两条，均为已知取舍：这期间上车的像素**不播落地弹性**（`PlayBoardElastic` 被 `_rollPhase != 0` 挡下，
+> 该守卫不能去掉——弹性轴与 roll 轴会抢车身父物体），且**出库要等这辆车补位结束**
+> （`TryExitIfAtFront` 的 `isRefilling` 门控挡下，由 roll 完成回调 `OnCarArrivedFront` 补触发）。
+> 注意 `ProcessConsumption`（无传送带的拉取路径）与复活深排路径仍各自排除 `isRefilling`，未一并放开。
+
 命中后 `ShouldLeave` 把容器暂存到 `_pendingContainer`，由紧随其后的 `OnLeave` 直接吸收，不再重复查找：
-`ConsumePixel(pixel, container)` → `Consume()` 扣容量 → 协程 Lerp 像素到容器位置 → 销毁像素 → 若 `isLast` 则补位。
+`ConsumePixel(pixel, container)` → `Consume()` 扣容量 → `TryBoardPixel` 挂到车上空闲座位并 `DOLocalJump` 到 0 点
+（无空闲座位则回退旧的 Lerp 并销毁像素）→ 落定后保留为乘客 → 座位用尽时启动出库。
 
 > **匹配以像素实际位置为准**：`ShouldLeave` / `IsAtFarSide` 读的是 `pixel.transform.position`——
 > 像素是 carrier 的子物体，其世界坐标 = carrier 位置 + 旋转后的 `localPosition` 偏移。追赶动画中 `localPosition` 非零，
@@ -363,6 +371,7 @@ ContainerGroup.ConsumePixel(pixel, container)
 | 上一像素尚未到 local0，下一槽位过关口 | 每个槽位独立收集、`SettleRoutine` 每像素一条协程，互不阻塞，立即取新像素 |
 | 多个像素同时在远侧正前方 | 各自命中各自列的容器；同列同色由 `CheckLeave` 逐槽位触发，`ConsumePixel` 开头 `IsEmpty` 兜底 |
 | 越过闸口瞬间该列无可用同色容器 | 本次不匹配，像素继续绕圈，下一圈经过该闸口时再判（R3 确认接受） |
+| 越过闸口时该列的车正在补位前移 | 视为可匹配，像素 jump 上车后随车继续前移（不播落地弹性；该车出库等补位结束才启动） |
 | 一帧内跨过多个闸口（卡顿/低帧率） | 按列序（= 远侧行进顺序）取第一个命中的列匹配 |
 | 某颜色容器全部耗尽 | 该颜色像素永久绕圈（既有边界，传送带下更显眼，本期不兜底） |
 | 传送带空 | `Update` 只推进 offset，无槽位写操作，零开销 |
