@@ -19,7 +19,7 @@ MonoBehaviour:
     assetLoadType: 1
     compressDataPackage: 1
     VideoUrl: 
-    DST: F:/CrowdMatch/ExportProj
+    DST: F:/CrowdMatch_wxtest/ExportProj
     StreamCDN: 
     bundleHashLength: 32
     bundlePathIdentifier: StreamingAssets;
