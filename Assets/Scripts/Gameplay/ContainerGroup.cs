@@ -151,6 +151,8 @@ namespace CrowdMatch
 
                     gc.gatheredItems.Remove(pixel);
                     bool isLast = item.Consume();
+                    if (isLast)
+                        OnLastBoarding(item, pixel);   // 最后一个像素准备上车
                     StartCoroutine(MovePixelToContainer(pixel, item, col, isLast));
                 }
             }
@@ -202,9 +204,26 @@ namespace CrowdMatch
 
             bool isLast = container.Consume();
             if (isLast)
+            {
                 OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
+                OnLastBoarding(container, pixel);   // 最后一个像素准备上车
+            }
             consumingCount++;
             StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
+        }
+
+        /// <summary>
+        /// 车上最后一个像素匹配到、准备上车时：先收掉车上其它乘客的犯困表情（乘客即将出发，不再犯困），
+        /// 再让表情管理器尝试播开心表情（是否真的播由管理器判断——只有前排车会播）。
+        /// </summary>
+        private static void OnLastBoarding(ContainerItem container, PixelItem boardingPixel)
+        {
+            var emoji = EmojiManager.Instance;
+            if (emoji == null)
+                return;
+
+            emoji.ClearSleepEmojis(container);
+            emoji.TryPlayHappyEmoji(container, boardingPixel);
         }
 
         /// <summary>

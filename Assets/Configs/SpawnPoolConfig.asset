@@ -16,3 +16,12 @@ MonoBehaviour:
   - tag: Trail
     item: {fileID: 1897174840349734895, guid: f2693e04641fc0c439a4f38a152053b6, type: 3}
     preloadCount: 0
+  - tag: EmojiHappy
+    item: {fileID: 180048, guid: 4a9bb31a555add44ba9d0dbc0c220e70, type: 3}
+    preloadCount: 0
+  - tag: EmojiAngry
+    item: {fileID: 1801004341784822, guid: de89eb4d167e00b4fab157953b8d3894, type: 3}
+    preloadCount: 0
+  - tag: EmojiSleep
+    item: {fileID: 1978455369297776, guid: e74f011ec89ded74aaac3cefd05cdc61, type: 3}
+    preloadCount: 0
