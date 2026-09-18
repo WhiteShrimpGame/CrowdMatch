@@ -57,6 +57,43 @@ namespace CrowdMatch
             else
                 EditorGUILayout.HelpBox("将按「排 → 列」位置把 颜色 " + colorA + " 与 颜色 " + colorB +
                     " 各 " + countEach + " 辆一一配对互换；交换后所属 ContainerGroup 会标记为不洗牌。", MessageType.Info);
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("绳子连接（仅非运行模式）", EditorStyles.boldLabel);
+
+            string ropeError = ValidateRopeSelection(cars);
+            string unropeError = ValidateUnropeSelection(cars);
+
+            using (new EditorGUI.DisabledScope(ropeError != null || Application.isPlaying))
+            {
+                if (GUILayout.Button(new GUIContent("标记选中车为连接",
+                    "选中的车需分处相邻的 N 列、每列恰好 1 个；标记后按列序两两成绳（N 辆车 = N-1 条绳）")))
+                {
+                    MarkRope(cars);
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(unropeError != null || Application.isPlaying))
+            {
+                if (GUILayout.Button(new GUIContent("取消选中车的连接",
+                    "选中任意一个被连接的车即可取消它所在的整个绳组")))
+                {
+                    UnmarkRope(cars);
+                }
+            }
+
+            if (Application.isPlaying)
+                EditorGUILayout.HelpBox("运行模式下不可用，请先停止运行。", MessageType.Info);
+            else
+            {
+                string text = ropeError == null
+                    ? "标记：将把 " + cars.Count + " 辆车按列序连成一条绳链（共 " + (cars.Count - 1) +
+                        " 条绳），并关闭所属 ContainerGroup 的洗牌。"
+                    : "标记：" + ropeError;
+                if (unropeError != null)
+                    text += "\n取消：" + unropeError;
+                EditorGUILayout.HelpBox(text, MessageType.Info);
+            }
         }
 
         /// <summary>选中集合里的车（跳过被销毁的引用）。</summary>
@@ -232,6 +269,196 @@ namespace CrowdMatch
                 item.RefreshQuestionObject();
                 EditorUtility.SetDirty(item);
             }
+        }
+
+        // ===== 绳子连接 =====
+
+        /// <summary>
+        /// 校验「标记为连接」的选中集合；返回错误描述（null = 通过）。
+        /// 规则：至少 2 辆车、同列唯一、列号连续、同一 ContainerGroup、均未连接、两端点已配置，
+        /// 且与已有绳组不交叉（交叉会导致两组互相等待 → 死锁）。
+        /// </summary>
+        private static string ValidateRopeSelection(List<ContainerItem> cars)
+        {
+            if (cars.Count < 2)
+                return "请选中至少 2 辆车。";
+
+            var byCol = new Dictionary<int, ContainerItem>();
+            foreach (var car in cars)
+            {
+                if (byCol.ContainsKey(car.gridX))
+                    return "同一列只能选 1 个车：第 " + car.gridX + " 列选了多个。";
+                byCol[car.gridX] = car;
+            }
+
+            int minCol = int.MaxValue;
+            int maxCol = int.MinValue;
+            foreach (var col in byCol.Keys)
+            {
+                if (col < minCol) minCol = col;
+                if (col > maxCol) maxCol = col;
+            }
+            if (maxCol - minCol != byCol.Count - 1)
+            {
+                for (int col = minCol; col <= maxCol; col++)
+                {
+                    if (!byCol.ContainsKey(col))
+                        return "选中的车必须处在相邻的 " + byCol.Count + " 列：缺少第 " + col + " 列。";
+                }
+                return "选中的车必须处在相邻的 " + byCol.Count + " 列。";
+            }
+
+            var group = cars[0].GetComponentInParent<ContainerGroup>();
+            if (group == null)
+                return "选中的车不在任何 ContainerGroup 下。";
+
+            foreach (var car in cars)
+            {
+                if (car.GetComponentInParent<ContainerGroup>() != group)
+                    return "选中的车不属于同一个 ContainerGroup。";
+                if (car.ropeGroupId != 0)
+                    return car.name + " 已属于绳组 " + car.ropeGroupId + "，请先取消它的连接。";
+                if (car.ropeAnchorLeft == null || car.ropeAnchorRight == null)
+                    return car.name + " 未配置 ropeAnchorLeft / ropeAnchorRight（车预制体上需有两个端点空物体），无法建绳。";
+            }
+
+            return ValidateNoRopeCrossing(cars, group);
+        }
+
+        /// <summary>
+        /// 交叉校验：两个绳组若在同一对相邻列上「行序相反」（一条从前往后、另一条从后往前），
+        /// 两组的出库条件会互相等待——A 的车要等 B 的车离开某列，B 的车又要等 A 的车离开另一列 → 死锁。
+        /// 逐对已有绳组检查。
+        /// </summary>
+        private static string ValidateNoRopeCrossing(List<ContainerItem> cars, ContainerGroup group)
+        {
+            var newRows = new Dictionary<int, int>();   // 列 → 行
+            foreach (var car in cars)
+                newRows[car.gridX] = car.gridZ;
+
+            // 已有绳组：组 id → (列 → 行)。选中的车此时必然 ropeGroupId == 0（上面已拦），故不会混进来。
+            var existing = new Dictionary<int, Dictionary<int, int>>();
+            foreach (var car in group.GetComponentsInChildren<ContainerItem>())
+            {
+                if (car == null || car.ropeGroupId == 0)
+                    continue;
+
+                Dictionary<int, int> map;
+                if (!existing.TryGetValue(car.ropeGroupId, out map))
+                {
+                    map = new Dictionary<int, int>();
+                    existing[car.ropeGroupId] = map;
+                }
+                map[car.gridX] = car.gridZ;
+            }
+
+            foreach (var pair in existing)
+            {
+                var other = pair.Value;
+                for (int col = 0; col + 1 < group.columns; col++)
+                {
+                    int newFront, newRear, otherFront, otherRear;
+                    if (!newRows.TryGetValue(col, out newFront) || !newRows.TryGetValue(col + 1, out newRear))
+                        continue;   // 新组没跨这一对列
+                    if (!other.TryGetValue(col, out otherFront) || !other.TryGetValue(col + 1, out otherRear))
+                        continue;   // 该组没跨这一对列
+
+                    // 同一格不可能有两辆车，故 newFront≠otherFront、newRear≠otherRear，符号判断成立
+                    if ((newFront - otherFront > 0) != (newRear - otherRear > 0))
+                        return "与已有绳组 " + pair.Key + " 在第 " + col + "–" + (col + 1) +
+                            " 列之间交叉（一个从前往后、一个从后往前），两组会互相等待造成死锁。";
+                }
+            }
+            return null;
+        }
+
+        /// <summary>校验「取消连接」的选中集合；返回错误描述（null = 通过）。</summary>
+        private static string ValidateUnropeSelection(List<ContainerItem> cars)
+        {
+            if (cars.Count == 0)
+                return "请先选中至少 1 辆车。";
+
+            int id = 0;
+            foreach (var car in cars)
+            {
+                if (car.ropeGroupId == 0)
+                    return car.name + " 没有连接，无需取消。";
+                if (id == 0)
+                    id = car.ropeGroupId;
+                else if (car.ropeGroupId != id)
+                    return "选中的车分属多个绳组，请一次只取消一组。";
+            }
+            return null;
+        }
+
+        /// <summary>标记选中车为同一个新绳组，并强制关闭所属 ContainerGroup 的洗牌（洗牌会打乱列位置，绳组关系随即失效）。</summary>
+        private static void MarkRope(List<ContainerItem> cars)
+        {
+            var group = cars[0].GetComponentInParent<ContainerGroup>();
+            if (group == null)
+                return;
+
+            int id = NextRopeGroupId(group);
+
+            const string undoName = "标记绳子连接";
+            Undo.SetCurrentGroupName(undoName);
+            int undoGroup = Undo.GetCurrentGroup();
+
+            foreach (var car in cars)
+            {
+                Undo.RecordObject(car, undoName);
+                car.ropeGroupId = id;
+                EditorUtility.SetDirty(car);
+            }
+
+            bool marked = MarkShuffleOff(cars[0]);
+
+            Undo.CollapseUndoOperations(undoGroup);
+
+            Debug.Log("[ContainerItemEditor] 已把 " + cars.Count + " 辆车标记为绳组 " + id + "（相邻 " + cars.Count +
+                " 列，共 " + (cars.Count - 1) + " 条绳）；" +
+                (marked ? "并把所属 ContainerGroup 标记为不洗牌。" : "但未找到所属 ContainerGroup，洗牌开关未改动。"));
+        }
+
+        /// <summary>取消选中车所属的**整个**绳组（遍历同组下所有车清零）。</summary>
+        private static void UnmarkRope(List<ContainerItem> cars)
+        {
+            var group = cars[0].GetComponentInParent<ContainerGroup>();
+            if (group == null)
+                return;
+
+            int id = cars[0].ropeGroupId;
+
+            const string undoName = "取消绳子连接";
+            Undo.SetCurrentGroupName(undoName);
+            int undoGroup = Undo.GetCurrentGroup();
+
+            int cleared = 0;
+            foreach (var car in group.GetComponentsInChildren<ContainerItem>())
+            {
+                if (car == null || car.ropeGroupId != id)
+                    continue;
+                Undo.RecordObject(car, undoName);
+                car.ropeGroupId = 0;
+                EditorUtility.SetDirty(car);
+                cleared++;
+            }
+
+            Undo.CollapseUndoOperations(undoGroup);
+
+            Debug.Log("[ContainerItemEditor] 已取消绳组 " + id + "，共清除 " + cleared + " 辆车的连接。");
+        }
+
+        /// <summary>取该 ContainerGroup 下现有绳组的最大 id + 1（id 只需在单关内唯一）。</summary>
+        private static int NextRopeGroupId(ContainerGroup group)
+        {
+            int max = 0;
+            foreach (var car in group.GetComponentsInChildren<ContainerItem>())
+            {
+                if (car != null && car.ropeGroupId > max)
+                    max = car.ropeGroupId;
+            }
+            return max + 1;
         }
     }
 }

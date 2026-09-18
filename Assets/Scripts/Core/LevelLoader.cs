@@ -253,7 +253,7 @@ namespace CrowdMatch
                         Debug.LogWarning("[LevelLoader] 容器越界被忽略：x=" + it.x + " y=" + it.y);
                         continue;
                     }
-                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question);
+                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question, it.ropeGroupId);
                 }
             }
 

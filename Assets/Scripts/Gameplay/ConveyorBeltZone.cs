@@ -293,11 +293,7 @@ namespace CrowdMatch
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(0);
 
-            // 上传送带：收掉该像素的生气表情（跟随模式下它是像素的子物体，不主动收会跟着一起上带）
-            var emoji = EmojiManager.Instance;
-            if (emoji != null)
-                emoji.RemoveAngryEmoji(pixel);
-
+            // 生气表情**保留**：缓冲区 → 传送带不收，直到「上车」才移除（见 OnLeave）。
             // 插队判定：本像素上车时，缓冲区里是否还有比它更早点击、且颜色不同的像素在等
             CheckQueueJump(pixel);
 
@@ -467,10 +463,14 @@ namespace CrowdMatch
             if (pixel == null)
                 return;
 
-            // 匹配上车：立刻收掉犯困表情——跟随模式下它是像素的子物体，不主动收会跟着像素一起进车
+            // 上车：收掉犯困表情与生气表情——跟随模式下它们是像素的子物体，不主动收会跟着像素一起进车。
+            // 生气表情在缓冲区 → 传送带这一段是**保留**的（只在这里、也就是真正上车时才移除）。
             var emoji = EmojiManager.Instance;
             if (emoji != null)
+            {
                 emoji.RemoveSleepEmoji(pixel);
+                emoji.RemoveAngryEmoji(pixel);
+            }
 
             var gc = GameController.Instance;
             if (gc != null && gc.recordMode)

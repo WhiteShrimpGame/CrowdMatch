@@ -55,6 +55,35 @@ namespace CrowdMatch
         [Tooltip("容器补位速度")]
         public float refillSpeed = 10f;
 
+        [Header("绳子连接")]
+        [Tooltip("绳子材质（Assets/CrowdMatch/Materials/Rope.mat）")]
+        public Material ropeMaterial;
+
+        [Tooltip("每条绳的绳节数量：越大越顺滑，代价是蒙皮开销")]
+        public int ropeLinkCount = 8;
+
+        [Tooltip("绳子直径（世界单位）")]
+        public float ropeDiameter = 0.15f;
+
+        [Tooltip("绳节所在层名。该层需先在 Tags and Layers 中创建，否则绳节会回退到 Default 并与像素互撞")]
+        public string ropeLayerName = "Rope";
+
+        [Tooltip("绳子总开关（调试用：关掉可先单独验证出库逻辑）")]
+        public bool ropeEnabled = true;
+
+        [Tooltip("绳组出库间隔（秒）：最左边那辆先出，之后每辆比前一辆晚这么多（0 = 全组同一帧出库）")]
+        public float ropeExitStagger = 0.2f;
+
+        /// <summary>
+        /// 运行时绳组：ropeGroupId → 组内车（按列 gridX 升序，便于相邻两两成链）。
+        /// 洗牌开启 / 未启用绳子时保持为空——此时绳组不参与任何判定，车各自独立出库。
+        /// </summary>
+        [System.NonSerialized] private readonly Dictionary<int, List<ContainerItem>> _ropeGroups =
+            new Dictionary<int, List<ContainerItem>>();
+
+        /// <summary>运行时生成的绳根，关卡重建时一并清掉。</summary>
+        [System.NonSerialized] private readonly List<GameObject> _ropeRoots = new List<GameObject>();
+
         /// <summary>运行时网格 [column, row]，row 0 为最前排</summary>
         [System.NonSerialized] public ContainerItem[,] grid;
 
@@ -237,7 +266,8 @@ namespace CrowdMatch
                 return;
 
             bool isLast = container.Consume();
-            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1;   // 视野外更严格 1 排：完成匹配 → 原地销毁
+            // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车除外——原地销毁会连带删掉绳子锚点。
+            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !IsRopeCar(container);
             if (isLast)
                 OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
             consumingCount++;
@@ -329,6 +359,9 @@ namespace CrowdMatch
         /// <summary>
         /// 小车在前排且容量耗尽时启动出库。幂等：grid[col,0] 已非本车（或已开始出库）时跳过，
         /// 避免「后排满但未补位」或「补位完成 / 像素到达」同帧竞态下重复触发。
+        ///
+        /// 绳组车额外一条门槛：**必须等同组全部装满且都停在前排**才一起出库。
+        /// 未就绪时直接返回——本车留在前排占住格子，从而该列不补位（这正是「留在前排等待」的实现）。
         /// </summary>
         private void TryExitIfAtFront(ContainerItem item, int col)
         {
@@ -336,9 +369,72 @@ namespace CrowdMatch
                 return;
             if (item.isRefilling)
                 return;   // 补位移动中，等 MoveContainer 完成后由它触发
+
+            List<ContainerItem> chain;
+            if (item.ropeGroupId != 0 && _ropeGroups.TryGetValue(item.ropeGroupId, out chain))
+            {
+                if (!IsRopeGroupReady(chain))
+                    return;   // 组未齐：留在此处等待，不做任何补位
+                ExitRopeGroup(chain);
+                return;
+            }
+
             if (grid == null || grid[col, 0] != item)
                 return;   // 不在前排（或已开始出库）
             StartContainerExit(item, col);
+        }
+
+        /// <summary>绳组是否全部就绪：组内每辆车都已装满、都在前排、且都不在补位移动中。</summary>
+        private bool IsRopeGroupReady(List<ContainerItem> chain)
+        {
+            if (grid == null)
+                return false;
+
+            for (int i = 0; i < chain.Count; i++)
+            {
+                var car = chain[i];
+                if (car == null || !car.IsEmpty || car.isRefilling)
+                    return false;
+                if (!IsInRange(car.gridX, 0) || grid[car.gridX, 0] != car)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 全组出库：链首（列最小 = 最左边）那辆立即出发，其余按 <see cref="ropeExitStagger"/> 依次延迟固定间隔，
+        /// 形成「前面的车把后面的车依次拽出去」的观感。间隔为 0 时等价于全组同一帧出发。
+        /// 期间各组车逐辆出库，绳长仍在每帧同步，所以延迟窗口内绳子会被拉长后逐段消失。
+        /// </summary>
+        private void ExitRopeGroup(List<ContainerItem> chain)
+        {
+            StartCoroutine(ExitRopeGroupRoutine(chain));
+        }
+
+        private IEnumerator ExitRopeGroupRoutine(List<ContainerItem> chain)
+        {
+            float delay = Mathf.Max(0f, ropeExitStagger);
+
+            for (int i = 0; i < chain.Count; i++)
+            {
+                if (i > 0 && delay > 0f)
+                    yield return new WaitForSeconds(delay);
+
+                var car = chain[i];
+                if (car == null || grid == null)
+                    yield break;   // 关卡已重建 / 车已被销毁：剩下的交给重建流程
+
+                if (!IsInRange(car.gridX, 0) || grid[car.gridX, 0] != car)
+                    continue;      // 已被移走 / 已开始出库：幂等兜底
+
+                StartContainerExit(car, car.gridX);
+            }
+        }
+
+        /// <summary>该车是否属于一个**生效中**的绳组。绳组车不能走「深排原地销毁」路径，否则绳子锚点会当场消失。</summary>
+        private bool IsRopeCar(ContainerItem item)
+        {
+            return item != null && item.ropeGroupId != 0 && _ropeGroups.ContainsKey(item.ropeGroupId);
         }
 
         /// <summary>
@@ -439,6 +535,7 @@ namespace CrowdMatch
         public void ClearContainers()
         {
             consumingCount = 0;
+            ClearRopes();   // 绳根引用着车，必须随车一起清掉
             var items = GetComponentsInChildren<ContainerItem>();
             for (int i = items.Length - 1; i >= 0; i--)
             {
@@ -454,7 +551,7 @@ namespace CrowdMatch
         }
 
         /// <summary>在指定格子生成一个 ContainerItem 并应用颜色/容量（供运行时关卡加载使用）。</summary>
-        public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config, bool isQuestion = false)
+        public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config, bool isQuestion = false, int ropeGroupId = 0)
         {
             GameObject go = containerPrefab != null
                 ? PrefabSpawner.Instantiate(containerPrefab.gameObject, transform)
@@ -474,6 +571,7 @@ namespace CrowdMatch
             item.gridZ = row;
             item.colorId = colorId;
             item.isQuestion = isQuestion;
+            item.ropeGroupId = ropeGroupId;
             item.RefreshQuestionObject();   // Awake 时 isQuestion 尚未赋值，补刷新问号物体显隐
             item.SetCapacity(capacity);
             item.ApplyMaterial(config);
@@ -577,6 +675,96 @@ namespace CrowdMatch
                     return it;
                 }
             return null;
+        }
+
+        // ===== 绳子连接 =====
+
+        /// <summary>
+        /// 建立绳子：把 ropeGroupId 相同（且非 0）的车按列升序成链，相邻两车之间生成一条绳。
+        /// 由 GameController 在关卡应用完成后调用。
+        /// </summary>
+        /// <param name="shuffleEnabled">
+        /// 本次关卡是否启用了洗牌。开启时**完全不建绳**、绳组也不参与任何判定——
+        /// 对应「运行模式下洗牌激活时，所有绳子失效」（洗牌会打乱车的列位置，绳组关系已无意义）。
+        /// </param>
+        public void BuildRopes(bool shuffleEnabled)
+        {
+            ClearRopes();
+
+            if (!ropeEnabled || shuffleEnabled)
+                return;
+
+            CollectRopeGroups();
+
+            foreach (var list in _ropeGroups.Values)
+            {
+                for (int i = 0; i + 1 < list.Count; i++)
+                    CreateRope(list[i], list[i + 1]);
+            }
+        }
+
+        /// <summary>销毁所有绳根并清空绳组（关卡重建 / 清空容器时调用）。</summary>
+        public void ClearRopes()
+        {
+            for (int i = 0; i < _ropeRoots.Count; i++)
+            {
+                var root = _ropeRoots[i];
+                if (root == null)
+                    continue;
+                if (Application.isPlaying)
+                    Destroy(root);
+                else
+                    DestroyImmediate(root);
+            }
+            _ropeRoots.Clear();
+            _ropeGroups.Clear();
+        }
+
+        /// <summary>按 ropeGroupId 归组：只收网格内确有位置的当前车，组内按列（gridX）升序。</summary>
+        private void CollectRopeGroups()
+        {
+            var all = GetComponentsInChildren<ContainerItem>();
+            for (int i = 0; i < all.Length; i++)
+            {
+                var item = all[i];
+                if (item == null || item.ropeGroupId == 0)
+                    continue;
+                if (grid == null || !IsInRange(item.gridX, item.gridZ) || grid[item.gridX, item.gridZ] != item)
+                    continue;   // 跳过预制体模板 / 已脱离网格的残留对象
+
+                List<ContainerItem> list;
+                if (!_ropeGroups.TryGetValue(item.ropeGroupId, out list))
+                {
+                    list = new List<ContainerItem>();
+                    _ropeGroups[item.ropeGroupId] = list;
+                }
+                list.Add(item);
+            }
+
+            foreach (var list in _ropeGroups.Values)
+                list.Sort((a, b) => a.gridX.CompareTo(b.gridX));
+        }
+
+        private void CreateRope(ContainerItem left, ContainerItem right)
+        {
+            var go = new GameObject("Rope_" + left.gridX + "_" + right.gridX);
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;   // 骨骼按世界坐标铺，绳根必须无缩放
+
+            var link = go.AddComponent<ContainerRopeLink>();
+            link.leftCar = left;
+            link.rightCar = right;
+            link.material = ropeMaterial;
+            link.linkCount = ropeLinkCount;
+            link.diameter = ropeDiameter;
+            link.ropeLayerName = ropeLayerName;
+
+            if (link.Build())
+                _ropeRoots.Add(go);
+            else
+                Destroy(go);   // 端点缺失 / 生成失败：不留空壳
         }
     }
 }
