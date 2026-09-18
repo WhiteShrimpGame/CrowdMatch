@@ -1134,11 +1134,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b942e5ef6b950f6458c8671dd472e821, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  emojiDuration: 3
-  emojiScale: 0.6
-  speeds:
+  emojiDuration: 2
+  emojiScale: 0.0012
+  speeds: []
+  durations:
   - tag: EmojiHappy
-    speed: 2
+    duration: 1
   happyChance: 0.6
   happyTag: EmojiHappy
   sleepTag: EmojiSleep
@@ -1149,6 +1150,16 @@ MonoBehaviour:
   angryJumpCooldown: 3
   queueAngryChancePerPixel: 0.1
   queueAngryWaitSeconds: 5
+  clickAngryWave:
+    candidatesPerEmoji: 4
+    chainChance: 0.9
+    delayMin: 0.2
+    delayMax: 0.5
+  queueAngryWave:
+    candidatesPerEmoji: 5
+    chainChance: 0.7
+    delayMin: 0.2
+    delayMax: 0.5
 --- !u!4 &1287049120
 Transform:
   m_ObjectHideFlags: 0

@@ -338,6 +338,13 @@ namespace CrowdMatch
 
             _overflowClickCount = 0;   // 复活清空堆积点击计数
 
+            // 复活会重排缓冲区、把溢出像素直接送上车：先把场上的生气表情全收掉。
+            // 跟随模式下表情是像素的子物体，不收就会跟着像素一起进车（乘客头上顶着生气脸）；
+            // 网格上残留的「点击受阻」生气脸在复活之后也没有意义了。
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.ClearAngryEmojis();
+
             // 1. 收集溢出像素：传送带溢出（保留 reviveKeepBeltCount 个）+ 缓冲区全部（含未上传送带的）
             var overflow = new List<PixelItem>();
             overflow.AddRange(conveyorZone.DrainBeltKeep(reviveKeepBeltCount));
@@ -678,10 +685,10 @@ namespace CrowdMatch
         /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
         /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
-        /// 并按概率在组内随机一个像素上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
+        /// 并按概率在**被点的那一个像素**上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
-        private void PlayBlockedFeedback(List<PixelItem> blocked)
+        private void PlayBlockedFeedback(List<PixelItem> blocked, PixelItem clicked)
         {
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("TapBlocked");
@@ -690,7 +697,7 @@ namespace CrowdMatch
 
             var emoji = EmojiManager.Instance;
             if (emoji != null)
-                emoji.TryPlayAngryEmoji(blocked);
+                emoji.TryPlayAngryEmoji(clicked);   // 点谁谁生气（触发概率与 CD 不变）
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
             float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
@@ -728,7 +735,7 @@ namespace CrowdMatch
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
                         "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
-                PlayBlockedFeedback(matched);
+                PlayBlockedFeedback(matched, start);
                 return;
             }
 
