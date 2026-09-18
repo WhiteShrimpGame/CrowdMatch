@@ -685,7 +685,7 @@ namespace CrowdMatch
         /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
         /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
-        /// 并按概率在**被点的那一个像素**上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
+        /// 并在**被点的那一个像素**上播生气表情（点谁谁生气；必出，同一像素上一张还没播完则忽略——判定在表情管理器里）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
         private void PlayBlockedFeedback(List<PixelItem> blocked, PixelItem clicked)
@@ -697,7 +697,7 @@ namespace CrowdMatch
 
             var emoji = EmojiManager.Instance;
             if (emoji != null)
-                emoji.TryPlayAngryEmoji(clicked);   // 点谁谁生气（触发概率与 CD 不变）
+                emoji.TryPlayAngryEmoji(clicked);   // 点谁谁生气：必出、无全局 CD
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
             float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
