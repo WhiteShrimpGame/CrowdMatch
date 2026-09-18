@@ -58,13 +58,7 @@ namespace CrowdMatch
         [Tooltip("犯困表情在 SpawnPool 配置里的 tag（由传送带宿主按间隔检测播放）")]
         public string sleepTag = "EmojiSleep";
 
-        [Header("点击受阻生气表情")]
-        [Tooltip("点击无法移出的像素时触发生气表情的概率（0 = 不触发，1 = 必触发）")]
-        [Range(0f, 1f)] public float angryChance = 0.5f;
-
-        [Tooltip("生气表情的全局冷却（秒）：冷却期内不再检查、也不再播放")]
-        public float angryCooldown = 3f;
-
+        [Header("生气的 tag（三条来源共用）")]
         [Tooltip("生气表情在 SpawnPool 配置里的 tag")]
         public string angryTag = "EmojiAngry";
 
@@ -104,9 +98,6 @@ namespace CrowdMatch
 
         private readonly List<Booking> _bookings = new List<Booking>();
         private int _nextBookingId;
-
-        /// <summary>生气表情下一次可播放的时刻（全局 CD）。</summary>
-        private float _angryReadyTime;
 
         /// <summary>插队生气表情下一次可触发的时刻（全局 CD）。</summary>
         private float _angryJumpReadyTime;
@@ -168,23 +159,46 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 点击无法移出的像素时调用：按 angryChance 概率在**被点的那一个像素**上播生气表情（跟随模式）——点谁谁生气。
-        /// 全局 CD：距上次播放不足 angryCooldown 秒时直接返回，连概率都不掷。
+        /// 点击无法移出的像素时调用：在**被点的那一个像素**上播生气表情（跟随模式）——点谁谁生气。
+        /// **必出**（不掷概率），也**没有全局 CD**；唯一的抑制是「同一像素上一张生气还没播完就忽略本次」，
+        /// 避免连点时在同一颗头上反复叠同一张脸。
         /// </summary>
         public void TryPlayAngryEmoji(PixelItem clicked)
         {
-            if (angryChance <= 0f)
-                return;
-            if (Time.time < _angryReadyTime)
-                return;   // CD 中：不检查也不播
             if (clicked == null || clicked.emojiNode == null)
                 return;   // 被点的像素没配表情节点：没法显示
+            if (HasEmoji(clicked.emojiNode, angryTag))
+                return;   // 该像素上一张生气还没播完：忽略本次
 
-            if (Random.value > angryChance)
-                return;
-
-            _angryReadyTime = Time.time + Mathf.Max(0f, angryCooldown);
             PlayEmoji(clicked.emojiNode, angryTag, follow: true);
+        }
+
+        /// <summary>
+        /// 该锚点上是否还有 tag 匹配的表情在播（尚未到期、也未被提前回收）。返回时顺手清掉已随锚点销毁的登记。
+        /// </summary>
+        public bool HasEmoji(Transform anchor, string tag)
+        {
+            if (anchor == null)
+                return false;
+
+            for (int i = _bookings.Count - 1; i >= 0; i--)
+            {
+                var booking = _bookings[i];
+
+                // 先判 emoji：已随锚点销毁的登记直接丢掉（与 RemoveBookings 同因：销毁对象之间会被 == 判为相等）
+                if (booking.emoji == null)
+                {
+                    _bookings.RemoveAt(i);
+                    continue;
+                }
+                if (booking.anchor != anchor)
+                    continue;
+                if (!string.IsNullOrEmpty(tag) && booking.tag != tag)
+                    continue;
+
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
