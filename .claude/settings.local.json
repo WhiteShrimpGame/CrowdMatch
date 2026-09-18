@@ -21,7 +21,18 @@
       "Bash(awk '/PrefabInstance:/{p=1} p{print} /m_Modification:/{if\\(p\\)exit}' Assets/Scenes/GameScene.unity)",
       "Skill(claude-api)",
       "Skill(claude-api:*)",
-      "Bash(timeout 300 dotnet build Assembly-CSharp.csproj -v q --nologo)"
+      "Bash(timeout 300 dotnet build Assembly-CSharp.csproj -v q --nologo)",
+      "Bash(timeout 400 dotnet build Assembly-CSharp.csproj -v q --nologo)",
+      "Bash(git check-ignore *)",
+      "Bash(cp Assembly-CSharp.csproj /tmp/Assembly-CSharp.csproj.bak)",
+      "Bash(python -c ' *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(sed -i '83s|.*|    <Compile Include=\"Assets/Scripts/Gameplay/ContainerRopeLink.cs\" />|' Assembly-CSharp.csproj)",
+      "Bash(timeout 400 dotnet build Assembly-CSharp-Editor.csproj -v q --nologo)",
+      "Bash(cp /tmp/Assembly-CSharp.csproj.bak Assembly-CSharp.csproj)",
+      "Bash(rm -f /tmp/Assembly-CSharp.csproj.bak)",
+      "Bash(grep -nE \"ContainerRopeLink|Scripts/Rope|Scripts\\\\\\\\\\\\\\\\Rope\" Assembly-CSharp.csproj)",
+      "Bash(awk 'NR>=470 && NR<=500' Docs/ContainerRopeDesign.md)"
     ]
   }
 }

@@ -1238,6 +1238,12 @@ MonoBehaviour:
   maxOpenRows: 4
   consumeSpeed: 10
   refillSpeed: 10
+  ropeMaterial: {fileID: 2100000, guid: 9f884cd5b7afe874fa04f41242a8c7d9, type: 2}
+  ropeLinkCount: 8
+  ropeDiameter: 0.15
+  ropeLayerName: Rope
+  ropeEnabled: 1
+  ropeExitStagger: 0.08
 --- !u!4 &1428373512
 Transform:
   m_ObjectHideFlags: 0

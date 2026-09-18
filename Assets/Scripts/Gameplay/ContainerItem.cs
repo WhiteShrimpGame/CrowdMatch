@@ -37,6 +37,16 @@ namespace CrowdMatch
         [Tooltip("网格行坐标（纵，Z 方向），0 为最前排，越大越靠后")]
         public int gridZ;
 
+        [Header("绳子连接")]
+        [Tooltip("绳子组 id：0 = 未连接。同 id（且非 0）的车分处相邻的 N 列、按列序成链，必须全部匹配完毕才可同时出库")]
+        public int ropeGroupId;
+
+        [Tooltip("绳子左端点（空物体，挂在车体根节点下；留空则该车不建绳）")]
+        public Transform ropeAnchorLeft;
+
+        [Tooltip("绳子右端点（空物体，挂在车体根节点下；留空则该车不建绳）")]
+        public Transform ropeAnchorRight;
+
         [Header("小车出库轴（可选）")]
         [Tooltip("前轴（空子物体，出车时的驱动轴）")]
         public Transform frontAxle;
