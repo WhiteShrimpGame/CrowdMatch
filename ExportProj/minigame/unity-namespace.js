@@ -50,7 +50,7 @@ const unityNamespace = {
     // 是否用了多线程brotli压缩
     useBrotliMT: true,
     // Boot config配置，包含例如wait-for-native-debugger、player-connection-ip等信息
-    bootConfig: 'player-connection-ip=192.168.3.65',
+    bootConfig: 'player-connection-ip=26.26.26.1',
     // 是否以Development Build构建
     isDevelopmentBuild: false,
     // 是否以Profiling Build导出
