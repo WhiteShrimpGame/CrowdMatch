@@ -1143,8 +1143,6 @@ MonoBehaviour:
   happyChance: 0.6
   happyTag: EmojiHappy
   sleepTag: EmojiSleep
-  angryChance: 0.7
-  angryCooldown: 3
   angryTag: EmojiAngry
   angryJumpChancePerPixel: 0.1
   angryJumpCooldown: 3
