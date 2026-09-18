@@ -37,6 +37,16 @@ namespace CrowdMatch
         [Tooltip("网格行坐标（纵，Z 方向），0 为最前排，越大越靠后")]
         public int gridZ;
 
+        [Header("绳子连接")]
+        [Tooltip("绳子组 id：0 = 未连接。同 id（且非 0）的车分处相邻的 N 列、按列序成链，必须全部匹配完毕才可同时出库")]
+        public int ropeGroupId;
+
+        [Tooltip("绳子左端点（空物体，挂在车体根节点下；留空则该车不建绳）")]
+        public Transform ropeAnchorLeft;
+
+        [Tooltip("绳子右端点（空物体，挂在车体根节点下；留空则该车不建绳）")]
+        public Transform ropeAnchorRight;
+
         [Header("小车出库轴（可选）")]
         [Tooltip("前轴（空子物体，出车时的驱动轴）")]
         public Transform frontAxle;
@@ -366,9 +376,31 @@ namespace CrowdMatch
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
             pixel.transform.localPosition = Vector3.zero;
             pixel.transform.localRotation = Quaternion.identity;
+            pixel.boardedAt = Time.time;            // 记录上车时刻（供「在车上等了多久」判定）
             pixel.SetWalking(false);            // 落定即 Idle（同 BoardRoutine）
             pixel.SitDownExposeTarget();
             return true;
+        }
+
+        /// <summary>
+        /// 把车上所有乘客像素收集到 outList：遍历座位取挂在座位下的 PixelItem（含仍在跳跃上车的）。
+        /// 走无座位回退路径、还没挂上座位的像素不在其中，需要时由调用方另行补入。
+        /// </summary>
+        public void CollectPassengers(List<PixelItem> outList)
+        {
+            if (outList == null || posList == null)
+                return;
+
+            for (int i = 0; i < posList.Count; i++)
+            {
+                var seat = posList[i];
+                if (seat == null)
+                    continue;
+
+                var pixel = seat.GetComponentInChildren<PixelItem>(true);
+                if (pixel != null)
+                    outList.Add(pixel);
+            }
         }
 
         private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onBoarded)
@@ -397,6 +429,7 @@ namespace CrowdMatch
             {
                 GameData.ClearedPixelCount++;
                 pixel.transform.localPosition = Vector3.zero;   // 落定在落点上：不销毁，保留为乘客
+                pixel.boardedAt = Time.time;                     // 记录上车时刻（供「在车上等了多久」判定）
                 _boardingPixels.Remove(pixel);   // 已落定，成为乘客；侧倾时不再锁定其世界角度
             }
             // 落点不释放：该座位被该像素永久占用，直到整辆车出库销毁时一并带走

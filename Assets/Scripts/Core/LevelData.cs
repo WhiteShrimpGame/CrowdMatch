@@ -57,6 +57,12 @@ namespace CrowdMatch
 
             /// <summary>true = 问号车（开盖揭晓前隐藏真实颜色）。旧 JSON 无此字段时为 false。</summary>
             public bool question;
+
+            /// <summary>
+            /// 绳子组 id：0 = 未连接。同 id（且非 0）的车分处相邻的 N 列、按列序成链，必须全部匹配完毕才可同时出库。
+            /// 旧 JSON 无此字段时为 0（无绳子）；洗牌开启时运行时忽略该字段。
+            /// </summary>
+            public int ropeGroupId;
         }
 
         /// <summary>一段墙体：端点序列（网格坐标，x = 列 col，y = 行 row），相邻两点构成一段，每段平行于 X 或 Z 轴。</summary>

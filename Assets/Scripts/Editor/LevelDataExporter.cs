@@ -259,6 +259,7 @@ namespace CrowdMatch
                         colorId = item.colorId,
                         capacity = item.capacity,
                         question = item.isQuestion,
+                        ropeGroupId = item.ropeGroupId,
                     });
                 }
             }
