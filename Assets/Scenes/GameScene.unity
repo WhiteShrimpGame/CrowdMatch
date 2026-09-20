@@ -461,6 +461,7 @@ MonoBehaviour:
   extractSpeed: 10
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
+  exitOnlyFromRow0: 0
   releaseRadius: 0.8
   minReleaseInterval: 0.3
   releaseSpeed: 8
