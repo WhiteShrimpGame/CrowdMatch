@@ -17,6 +17,7 @@ namespace CrowdMatch
         public PipeData[] pipes = new PipeData[0];
         public BoxData[] boxes = new BoxData[0];
         public ElevatorData[] elevators = new ElevatorData[0];
+        public GateData[] gates = new GateData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -123,6 +124,20 @@ namespace CrowdMatch
         public class ElevatorGroupData
         {
             public int[] cells = new int[0];
+        }
+
+        /// <summary>
+        /// 一道倍乘门：一条轴对齐的笔直线段（起点/终点格，网格坐标 x = 列 col、y = 行 row）+ 倍数 N。
+        /// 像素寻路离开 PixelGroup 时经过这道门会裂变，1 颗变 N 颗。门格在 pixel.cells 里是 -1（门格上没有像素）。
+        /// </summary>
+        [Serializable]
+        public class GateData
+        {
+            public Vector2 start;
+            public Vector2 end;
+
+            /// <summary>倍数 N（≥1；1 = 只当通道、不倍乘）。旧 JSON 无此字段时为 2。</summary>
+            public int multiplier = 2;
         }
     }
 

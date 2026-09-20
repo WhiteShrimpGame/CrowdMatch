@@ -115,6 +115,10 @@ namespace CrowdMatch
 
             _clickMask = LayerMask.GetMask("Click");
 
+            // 网格内寻路全部结束时的补一次失败检测（网格里还有像素时 IsFail 会跳过，见 IsFail 的静止门槛）
+            if (crowdBuffer != null)
+                crowdBuffer.OnGridPathfindingFinished += TryCheckFail;
+
             Init();
         }
 
@@ -171,7 +175,8 @@ namespace CrowdMatch
 #endif
 
             GameData.Init(true);
-            GameData.TotalPixelCount = CountPixels() + CountPipePixels();
+            // 倍乘门：额外产生的像素是真实像素、会被真实消费，总数少算就永远无法通关（与容器规划同一份口径）
+            GameData.TotalPixelCount = CountPixels() + CountPipePixels() + CountGateExtraPixels();
             GameData.ClearedPixelCount = 0;
 
             if (recordMode)
@@ -238,6 +243,15 @@ namespace CrowdMatch
             return n;
         }
 
+        /// <summary>
+        /// 统计倍乘门额外产生的像素总数（= Σ(所在格倍率 − 1)），计入胜利判定。
+        /// 与容器规划同源（PixelGroup.CollectPlanningPixels 的同一份底座），口径不会发散。
+        /// </summary>
+        private int CountGateExtraPixels()
+        {
+            return pixelGroup != null ? pixelGroup.CountGateExtraPixels() : 0;
+        }
+
         /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
         private void CheckWin()
         {
@@ -254,9 +268,10 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排）。
-        /// 判定在「静止且死锁」时成立：传送带满、无小车正在出库/补位/已开启匹配尚未抵达前排、
-        /// 无像素正在上车，且带上所有像素都没有同色可匹配容器。触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
+        /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排 /
+        /// 网格内寻路全部结束）。判定在「静止且死锁」时成立：传送带满、无像素还在网格内寻路、
+        /// 无小车正在出库/补位/已开启匹配尚未抵达前排、无像素正在上车，且带上所有像素都没有同色可匹配容器。
+        /// 触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
         /// </summary>
         public void TryCheckFail()
         {
@@ -282,6 +297,13 @@ namespace CrowdMatch
             if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
                 return false;   // 传送带未满
             if (containerGroup == null)
+                return false;
+
+            // 静止门槛：有像素还在网格内寻路 → 还有进度，不判失败。
+            // 关键原因是倍乘门：网格里没走完的像素可能还没穿过门（分身尚未生成），
+            // 此时判失败会让复活把它们直接收走，实际送出的像素数就与 TotalPixelCount 对不上。
+            // 最后一颗像素走出网格时 CrowdBufferZone 会回调 OnGridPathfindingFinished 补一次检测。
+            if (crowdBuffer != null && crowdBuffer.HasGridPathfindingPixels)
                 return false;
 
             // 静止门槛：有车正在出库/补位/已开启匹配尚未抵达前排 → 还有进度，不判失败
@@ -490,6 +512,8 @@ namespace CrowdMatch
 
         private void OnDestroy()
         {
+            if (crowdBuffer != null)
+                crowdBuffer.OnGridPathfindingFinished -= TryCheckFail;
             CloseRecord();
         }
 
