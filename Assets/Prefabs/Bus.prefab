@@ -911,6 +911,13 @@ MonoBehaviour:
   elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
   elasticScaleDuration: 0.05
   elasticRecoverDuration: 0.1
+  ropeRearExitEnabled: 1
+  ropeExitMaxAngle: 50
+  ropeExitAngularAcceleration: 600
+  ropeExitAcceleration: 10
+  ropeExitMaxSpeed: 18
+  ropeExitDriveDuration: 1.2
+  ropeExitDriveAcceleration: 70
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0

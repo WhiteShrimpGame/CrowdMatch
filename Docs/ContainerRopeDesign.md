@@ -20,7 +20,7 @@
 | 或取消连接（选中任意一个被连接的车，取消整组） | §4.3 |
 | 运行状态下绳子长度始终保持和端点实际距离完全一致 | 无物理「绷直驱动」，每帧铺骨骼（§5.2，核心） |
 | 当被链接的部分车完成匹配时，留在前排 | 组未齐时满车不出库、占住前排、该列不补位（§5.4） |
-| 全部匹配同时出车 | 全组一起满足出库条件，但**按列序依次延迟固定间隔**出库（最左先出）——§5.4 |
+| 全部匹配同时出车 | 全组一起满足出库条件，但**按列序依次延迟**出库（最左先出）：头车 → 第一个后车、后车 → 后车用**两段独立配置的间隔**；且头车走正常出车、被绳子连接的后车走「跳过倒车」的变体（§5.4） |
 | 绳子需要支持关卡 JSON 的导入导出 | `ContainerItemData.ropeGroupId`（§3.1、§3.3） |
 | 运行模式下洗牌激活时，所有绳子失效 | 标记时强制关洗牌 + 运行时兜底忽略（§4.4、§5.5） |
 | 按 Record 重排时，清除所有绳子信息 | 重排路径天然丢弃，另加显式兜底（§3.3） |
@@ -271,7 +271,9 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 若 item.ropeGroupId == 0          → 保持现状（无条件出库）
 否则：
     组就绪 = 组内每辆车都满足 IsEmpty && grid[car.gridX, 0] == car
-    就绪   → 链首（列最小 = 最左）立即出库，其余按 ropeExitStagger 依次延迟
+    就绪   → 链首（列最小 = 最左）立即出库（正常出车）；
+             第一个后车再等 ropeExitHeadGap，其余后车之间各等 ropeExitStagger；
+             后车一律走「跳过倒车、直接切前轴」的变体
     未就绪 → 直接 return（该满车留在前排，不补位、不出库）
 ```
 
@@ -281,7 +283,7 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 |---|---|
 | 组内车满但不在前排（`gridZ > 0`） | 它不满足就绪条件。它所在列的前车照常出库 → 它被 `RefillColumn` 推到前排，然后**停在前排等待**（该列不再补位，因为它占着 `grid[col,0]`） |
 | 组内部分车满、其余未满 | 满的那辆停在前排等；未满的照常收像素。玩家看到的正是「已匹配的先排着队等」 |
-| 全组都满且都在前排 | `TryExitIfAtFront` 被最后一次触发时启动出库协程：链首（最左）立即出库，其余按 `ropeExitStagger` 依次延迟。**不是同一帧**——前面的车先走，把后面的车依次拽出去 |
+| 全组都满且都在前排 | `TryExitIfAtFront` 被最后一次触发时启动出库协程：链首（最左）立即出库，第一个后车在 `ropeExitHeadGap` 之后、其余后车之间各间隔 `ropeExitStagger`。**不是同一帧**——前面的车先走，把后面的车依次拽出去 |
 | 全组出库完成 | 每辆车的 `ContainerExitDriver` 各自回调 `RefillColumn(自己的列)`。因为出库是错峰的，补位也**依次**发生（`onRefill` 在「转正瞬间」触发，所以补位比出库启动还要早一点） |
 
 **必须同时处理的既有路径**：
@@ -315,7 +317,8 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 
 | 阶段 | 表现 |
 |---|---|
-| 全组就绪 | 链首（最左）立即 `ContainerExitDriver.Play`，其余按 `ropeExitStagger` 依次延迟启动；绳子每帧跟着端点绷直 |
+| 全组就绪 | 链首（最左）立即 `ContainerExitDriver.Play(onRefill, ropeRearExit: false)` 走**正常出车**；后车按两段间隔依次 `Play(onRefill, ropeRearExit: true)` 走**跳过倒车的变体**（见 §6） |
+| 后车的出车方式 | **跳过倒车、直接切前轴**，从正姿（0°）先甩到 `ropeExitMaxAngle` 再归 0 出车；运动参数整组独立（`ContainerExitDriver` 的 Rope Rear Exit 那一组）。详见 `Docs/ContainerExitDesign.md` §6.8 |
 | 延迟窗口内 | 左边那辆已经开走、右边那辆还停在原地 → 绳子被拉长，但 tiling 补偿让它表现为「绳长被不断放出」而不是拉稀；车一离开销毁，对应那条绳也消失 |
 | 驶出途中 | 车被挂到各自的轴（前轴/后轴/侧翻/弹性）上，端点作为车体子物随车一起走 → 绳子被「拽」着走 |
 | 车销毁 | `ContainerExitDriver.Run` 末尾 `Destroy(gameObject)`（`:332`）。绳根由 `ContainerRopeLink` 每帧检测「任一锚点已销毁」→ 自行销毁 |
@@ -335,7 +338,8 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 | `ropeDiameter` | 车距的合理比例（建议先按实际间距试 0.1~0.2） | 绳子粗细 |
 | `ropeLayerName` | `"Rope"` | 绳节层 |
 | `ropeEnabled` | true | 总开关（调试用：关掉可先只验证出库逻辑） |
-| `ropeExitStagger` | 0.2 | 绳组出库间隔（秒）：最左先出，之后每辆比前一辆晚这么多；0 = 全组同一帧 |
+| `ropeExitHeadGap` | 0.2 | 出库间隔（秒）：**头车 → 第一个后车** |
+| `ropeExitStagger` | 0.2 | 出库间隔（秒）：**后车之间**（第 2 辆起）。与上一行独立配置；两段都为 0 = 全组同一帧 |
 
 ### 7.1 纹理密度补偿（「从一端放出」的观感）
 
@@ -428,8 +432,10 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 18. **长度不设上限**：已确认包围盒（`updateWhenOffscreen`）与断绳逻辑（`LinkJointBreakForce = Infinity`）都不构成限制，直线绳的纵向分段数也不影响观感（§7.1）。
 19. **末端漏一段靠骨节长度缩放修，而不是改摆位**：管体最后一节的长度是**建绳时烘焙**进顶点的常量（`fLength / nNumLinks`），摆位改不动它；改骨骼 `localScale.z` 能让蒙皮把那个 z 偏移一起放大，末端才回得到锚点。摆位公式（`t = i/n`）本身已经是对的（§7.2）。
 20. **只缩放 z、不缩放 x/y**：顶点径向偏移由 x/y 承载，动了就会让管子变粗变细。
-21. **绳组按列序错峰出库（`ropeExitStagger`）**：链首（列最小 = 最左）立即出库，其余依次延迟固定间隔。`Chain` 已按 `gridX` 升序排好，所以「最左先出」不需要额外判定。错峰还带来一个副作用：延迟窗口内左车已走、右车未动，绳子被拉长——正好由 §7.1 的 tiling 补偿表现为「绳长被放出」。
-22. **错峰用协程而不是逐车排队**：`TryExitIfAtFront` 的绳组门槛（`IsRopeGroupReady` 要求全组都在前排）在链首出库的瞬间就不再成立，所以协程只会被启动一次，天然幂等；不需要额外的「本组已开始出库」标记。
+21. **绳组按列序错峰出库**：链首（列最小 = 最左）立即出库，其余依次延迟。`Chain` 已按 `gridX` 升序排好，所以「最左先出」不需要额外判定。错峰还带来一个副作用：延迟窗口内左车已走、右车未动，绳子被拉长——正好由 §7.1 的 tiling 补偿表现为「绳长被放出」。
+22. **两段间隔独立配置**（`ropeExitHeadGap` 头车→第一个后车、`ropeExitStagger` 后车→后车）：头车要先倒车（`reverseDuration + reverseWait`）才开始前进，后车是直接出车，两者的「起步延迟」手感不同，共用一个值必然有一边不对。实现上就是协程里 `i == 1` 用前者、`i >= 2` 用后者。
+23. **后车用「跳过倒车」的出车变体**：后车本来是被前面的车拽出去的，再做一遍倒车会让整条链的节奏打架（后车先退再进，绳长反复伸缩）。变体的细节与参数见 `Docs/ContainerExitDesign.md` §6.8；这里只负责决定「谁是头车、谁是后车」——`chain[0]` 走正常出车，`chain[1..]` 走变体。
+24. **错峰用协程而不是逐车排队**：`TryExitIfAtFront` 的绳组门槛（`IsRopeGroupReady` 要求全组都在前排）在链首出库的瞬间就不再成立，所以协程只会被启动一次，天然幂等；不需要额外的「本组已开始出库」标记。
 
 ---
 
@@ -473,7 +479,9 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 8. **末端贴合**：距离变化后（含补位途中、出库途中）绳子的两端都要**正好落在 anchor 上**，不能差一段。
    重点看**终点端**（右车的左端点）——那正是 §7.2 修的偏差；起点端本来就在锚点上。
 9. 运行：让组内部分车先装满 → 满车停在前排不动、该列不补位；其余车继续收像素。
-10. 运行：全组装满 → **最左那辆先出库，其余依次延迟 `ropeExitStagger`**，绳子随车驶出并在车销毁后消失，Console 无空引用异常；补位也随之依次发生。
+10. 运行：全组装满 → **最左那辆先出库，其余依次延迟**（头车 → 第一个后车 = `ropeExitHeadGap`，后车之间 = `ropeExitStagger`）；
+    **头车有倒车段，后车没有**（直接切前轴、先甩到 `ropeExitMaxAngle` 再归 0）；绳子随车驶出并在车销毁后消失，
+    Console 无空引用异常；补位也随之依次发生。
 11. 运行：连续多次出库/补位，绳子不残留、不抖动、绳长始终贴合。
 12. 重排：跑一次「按 Record 重排容器」→ 输出 JSON 中所有 `ropeGroupId` 均为 0。
 13. 洗牌兜底：手改 JSON 让 `lockContainer = false` 且带绳组 → 运行时**不生成绳子**，车各自独立出库。
@@ -489,7 +497,8 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 | `Assets/Art/Textures/{rope_diffuseheight.tga,rope_normal.png}` + `.meta` | **新增**（skill 植入） | 连 `.meta` 一起 |
 | `Assets/Scripts/Gameplay/ContainerRopeLink.cs` | **新增** | 一条绳：建绳、建后清理、每帧绷直驱动、锚点消失自毁 |
 | `Assets/Scripts/Gameplay/ContainerItem.cs` | 改 | `ropeGroupId`、`ropeAnchorLeft/Right` 字段 |
-| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitStagger` 错峰出库；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参 |
+| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitHeadGap` / `ropeExitStagger` 错峰出库、头车正常出车 / 后车走变体；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参 |
+| `Assets/Scripts/Gameplay/ContainerExitDriver.cs` | 改 | `Play` 加 `ropeRearExit`；绳连后车跳过倒车直接切前轴、从 0° 甩头归 0；新增一组独立的 `ropeExit*` 参数；倒车段抽成 `ReverseAndSwitchAxle` |
 | `Assets/Scripts/Gameplay/LevelData.cs` | 改 | `ContainerItemData.ropeGroupId` |
 | `Assets/Scripts/Core/LevelLoader.cs` | 改 | 传 `ropeGroupId`；洗牌时忽略绳组 |
 | `Assets/Scripts/Editor/LevelDataExporter.cs` | 改 | 导出 `ropeGroupId` |

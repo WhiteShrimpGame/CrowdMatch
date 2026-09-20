@@ -71,7 +71,10 @@ namespace CrowdMatch
         [Tooltip("绳子总开关（调试用：关掉可先单独验证出库逻辑）")]
         public bool ropeEnabled = true;
 
-        [Tooltip("绳组出库间隔（秒）：最左边那辆先出，之后每辆比前一辆晚这么多（0 = 全组同一帧出库）")]
+        [Tooltip("绳组出库间隔（秒）：头车 → 第一个后车的间隔（与「后车之间」的间隔独立配置）。0 = 头车与第一个后车同一帧出")]
+        public float ropeExitHeadGap = 0.2f;
+
+        [Tooltip("绳组出库间隔（秒）：后车之间（第 2 辆起）每辆比前一辆晚这么多。0 = 全组后续同一帧出")]
         public float ropeExitStagger = 0.2f;
 
         /// <summary>
@@ -346,14 +349,17 @@ namespace CrowdMatch
         /// 前排容器耗尽：立即清空该格，启动小车出库动画；转正瞬间触发补位。
         /// 轴未配置时（ContainerExitDriver.Play 回退）等价旧的「直接销毁 + 补位」。
         /// </summary>
-        private void StartContainerExit(ContainerItem gone, int col)
+        /// <param name="ropeRearExit">
+        /// true = 绳组的非头车：出库跳过倒车、直接切前轴（运动参数走 ContainerExitDriver 里独立的那一组）。
+        /// </param>
+        private void StartContainerExit(ContainerItem gone, int col, bool ropeRearExit = false)
         {
             grid[col, 0] = null;
 
             var driver = gone.GetComponent<ContainerExitDriver>();
             if (driver == null)
                 driver = gone.gameObject.AddComponent<ContainerExitDriver>();
-            driver.Play(() => RefillColumn(col));
+            driver.Play(() => RefillColumn(col), ropeRearExit);
         }
 
         /// <summary>
@@ -402,9 +408,10 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 全组出库：链首（列最小 = 最左边）那辆立即出发，其余按 <see cref="ropeExitStagger"/> 依次延迟固定间隔，
-        /// 形成「前面的车把后面的车依次拽出去」的观感。间隔为 0 时等价于全组同一帧出发。
-        /// 期间各组车逐辆出库，绳长仍在每帧同步，所以延迟窗口内绳子会被拉长后逐段消失。
+        /// 全组出库：头车（列最小 = 最左边）立即出发；第一个后车在 <see cref="ropeExitHeadGap"/> 之后，
+        /// 其余后车之间再各自间隔 <see cref="ropeExitStagger"/>——两段间隔独立配置。
+        /// 出车方式也分两种：头车走正常出车（含倒车），被绳子连接的后车跳过倒车、直接切前轴（见 ContainerExitDriver）。
+        /// 期间绳长仍在每帧同步，所以延迟窗口内绳子会被拉长后逐段消失。
         /// </summary>
         private void ExitRopeGroup(List<ContainerItem> chain)
         {
@@ -413,12 +420,17 @@ namespace CrowdMatch
 
         private IEnumerator ExitRopeGroupRoutine(List<ContainerItem> chain)
         {
-            float delay = Mathf.Max(0f, ropeExitStagger);
+            float headGap = Mathf.Max(0f, ropeExitHeadGap);   // 头车 → 第一个后车
+            float rearGap = Mathf.Max(0f, ropeExitStagger);   // 后车 → 后车
 
             for (int i = 0; i < chain.Count; i++)
             {
-                if (i > 0 && delay > 0f)
-                    yield return new WaitForSeconds(delay);
+                if (i > 0)
+                {
+                    float gap = i == 1 ? headGap : rearGap;
+                    if (gap > 0f)
+                        yield return new WaitForSeconds(gap);
+                }
 
                 var car = chain[i];
                 if (car == null || grid == null)
@@ -427,7 +439,8 @@ namespace CrowdMatch
                 if (!IsInRange(car.gridX, 0) || grid[car.gridX, 0] != car)
                     continue;      // 已被移走 / 已开始出库：幂等兜底
 
-                StartContainerExit(car, car.gridX);
+                // i == 0 是头车：正常出车；i > 0 是「被绳子连接的后车」：跳过倒车、直接切前轴
+                StartContainerExit(car, car.gridX, i > 0);
             }
         }
 
