@@ -7,6 +7,9 @@ namespace CrowdMatch
     /// 相邻两车之间的一条绳：左车的 <see cref="ContainerItem.ropeAnchorRight"/> ↔ 右车的 <see cref="ContainerItem.ropeAnchorLeft"/>。
     /// 绳长在任意时刻都**恰好等于**两端点的实际距离。
     ///
+    /// 在这条「绷直」的基准之上再叠加一层**程序化微晃**（见 <see cref="ApplyTaut"/>）：
+    /// 只偏移中间骨节、两端零偏移，所以长度与两端位置都不受影响，纯粹是观感。
+    ///
     /// UltimateRope 只当网格/骨骼生成器用：建绳后立刻把绳节降级为纯 Transform（刚体转运动学 + 销毁关节），
     /// 之后每帧按 UltimateRope 自己的排布公式把骨骼重铺一遍。走这条自驱路径的原因（详见 Docs/ContainerRopeDesign.md §5.2）：
     ///   · <c>Rope.SetLength()</c> 会全量重建骨骼与蒙皮网格，补位期间距离逐帧变化时不可用；
@@ -33,6 +36,22 @@ namespace CrowdMatch
 
         [Tooltip("绳节所在层名。该层不存在时 Rope 会回退到 Default 并打 warning")]
         public string ropeLayerName = "Rope";
+
+        [Header("微晃（叠加在绷直驱动之上）")]
+        [Tooltip("绳中段的最大偏移（世界单位）。0 = 完全绷直、一动不动")]
+        public float swayAmplitude = 0.01f;
+
+        [Tooltip("摆动频率（Hz）：每秒往复多少次")]
+        public float swayFrequency = 0.5f;
+
+        [Tooltip("沿绳长的波数：1 = 一个弓形（钟摆感），>1 = 多段起伏。需要 linkCount ≥ 3 才看得出摆动")]
+        public float swayWaves = 0f;
+
+        [Tooltip("偏移在两个垂直方向上的分配：0 = 只左右摆，1 = 只上下摆")]
+        public float swayVerticalRatio = 5f;
+
+        [Tooltip("偏移上限占绳长的比例：短绳不会因为固定振幅而晃得夸张")]
+        public float swayMaxLengthFraction = 0.02f;
 
         private Rope _rope;
         private UltimateRope.RopeNode _node;
@@ -161,6 +180,10 @@ namespace CrowdMatch
         /// <summary>
         /// 把骨骼沿两端点连线重铺一遍。排布公式与 UltimateRope 生成时的一致（CreateRopeJoints 的 Reposition 段），
         /// 只是把当时的固定距离换成当帧的实际距离，因此绳长恒等于端点距离、且与生成瞬间的形态同构。
+        ///
+        /// 在直线排布之上叠加一层程序化微晃（<see cref="swayAmplitude"/> 系列参数）：
+        /// 中间骨节沿连线法向做正弦偏移。包络取 <c>sin(πu)</c>，**两端恒为 0**，
+        /// 所以两个锚点仍然精确落在端点上，绳长也不变——见下面循环里的注释。
         /// </summary>
         private void ApplyTaut()
         {
@@ -195,15 +218,40 @@ namespace CrowdMatch
             float remaining = Mathf.Max(0f, (distance - distance / links) / distance);   // = (dist - fLinkLength) / dist
             Quaternion facing = Quaternion.LookRotation(delta);
 
+            // 摆动基底：与绳向垂直的两个方向。绳向接近竖直时换参考轴，避免 Cross 退化。
+            Vector3 dir = delta / distance;
+            Vector3 reference = Mathf.Abs(Vector3.Dot(dir, Vector3.up)) > 0.99f ? Vector3.right : Vector3.up;
+            Vector3 side = Vector3.Cross(dir, reference).normalized;   // 水平方向（车同排时即前后向）
+            Vector3 normal = Vector3.Cross(side, dir).normalized;     // 竖直方向
+
+            float amp = Mathf.Min(swayAmplitude, distance * swayMaxLengthFraction);
+            // 相位只看 Time.time —— 所有绳共用同一个时间基准，因此**全局同步**（同频率的绳完全同相）。
+            float phase = Time.time * swayFrequency * (2f * Mathf.PI);
+            int last = count - 1;
+
             for (int i = 0; i < count; i++)
             {
                 var link = _node.segmentLinks[i];
                 if (link == null)
                     continue;
 
-                float t = (count == 1 ? 0f : (float)i / (count - 1)) * remaining;
-                link.transform.position = Vector3.Lerp(p0, p1, t);
-                link.transform.rotation = facing;
+                float u = count == 1 ? 0f : (float)i / last;
+                Vector3 pos = Vector3.Lerp(p0, p1, u * remaining);
+
+                // 微晃：只碰中间骨节，首尾两节一律不加偏移。
+                // 末端那节的偏移会**直接带走管体末端**——末环的 z 偏移（fLength / nNumLinks）是建绳时烘焙进顶点的，
+                // 出射方向就是 facing，所以「末端 = bone[last].position + facing × 该烘焙长度」。
+                // 把 bone[last] 推离连线，末端就跟着离开终点锚点。包络 sin(πu) 在 u=1 本就是 0，
+                // 这里显式跳过首尾是为了不依赖浮点误差。
+                if (amp > 0f && i > 0 && i < last)
+                {
+                    float theta = Mathf.PI * swayWaves * u - phase;
+                    Vector3 sway = side * Mathf.Sin(theta) + normal * (swayVerticalRatio * Mathf.Cos(theta));
+                    pos += sway * (amp * Mathf.Sin(Mathf.PI * u));
+                }
+
+                link.transform.position = pos;
+                link.transform.rotation = facing;   // 朝向必须保持 facing，否则末端的烘焙偏移会被转歪
             }
 
             _node.fLength = distance;   // 保持内部状态与实际一致

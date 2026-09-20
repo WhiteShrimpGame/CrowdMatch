@@ -332,8 +332,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 插队判定：本像素刚上带，若缓冲区里还有「比它更早被点击、且颜色不同」的像素仍在排队（后点的先上了带），
-        /// 就把等待队列与这个上带像素交给表情管理器——按 概率系数 × 人数 决定是否在其中随机一个上播生气表情。
-        /// 概率与 CD 都在管理器里（与「点击阻挡」复用同一个 emoji，但各自独立 CD）。
+        /// 就把等待队列与这个上带像素交给表情管理器，由它按各自的概率 / 门槛 / CD 决定是否触发：
+        /// 生气表情落在**被插队者**中随机一个头上、开心表情落在**插队者（本像素）**头上，两者相互独立（可能同帧一起出现）。
         /// </summary>
         private void CheckQueueJump(PixelItem boardingPixel)
         {
@@ -346,8 +346,11 @@ namespace CrowdMatch
                 return;
 
             var emoji = EmojiManager.Instance;
-            if (emoji != null)
-                emoji.TryPlayAngryEmojiForJumped(_waitingBuffer, boardingPixel);
+            if (emoji == null)
+                return;
+
+            emoji.TryPlayAngryEmojiForJumped(_waitingBuffer, boardingPixel);
+            emoji.TryPlayHappyEmojiForJumped(_waitingBuffer, boardingPixel);
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>

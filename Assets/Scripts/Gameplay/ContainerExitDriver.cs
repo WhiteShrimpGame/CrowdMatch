@@ -123,6 +123,9 @@ namespace CrowdMatch
         /// <summary>「绳连后车甩头参数为 0」这条警告只打一次（每辆车都有各自的 driver，避免成组出车时刷屏）。</summary>
         private static bool _warnedRopeExitNoSwing;
 
+        /// <summary>「出车角度永远回不了 0」这条警告只打一次：属配置问题，同类型号的车会重复出现。</summary>
+        private static bool _warnedAngleNeverRecovers;
+
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
         /// <param name="ropeRearExit">
         /// true = 绳组的**非头车**：跳过倒车、直接切前轴，从正姿（0°）起步甩头（运动参数走 Rope Rear Exit 那一组）。
@@ -203,6 +206,9 @@ namespace CrowdMatch
             bool swung = maxAngle <= startAngleAbs;   // 目标角不超过起点角时，跳过甩头直接归 0
             float recoverT = 0f;
             float rollT = 0f;   // 侧翻出车时钟（自出车开始计时）
+
+            WarnIfAngleNeverRecovers(angAccel, swung, angle, maxAngle);
+
             while (true)
             {
                 float dt = Time.deltaTime;
@@ -486,6 +492,32 @@ namespace CrowdMatch
             Debug.LogWarning("[ContainerExitDriver] 绳连后车的甩头参数为 0（Rope Exit Max Angle = " + ropeExitMaxAngle +
                 "，Rope Exit Angular Acceleration = " + ropeExitAngularAcceleration +
                 "），本次出车不会有角度变化、只会水平移出。请在该车预制体的 ContainerExitDriver 上配置 Rope Rear Exit 那一组参数。", this);
+        }
+
+        /// <summary>
+        /// 出车角度只有在 <c>angAccel &gt; 0</c> 时才可能推进到目标：第一段要从起点下探到 <c>-maxAngle</c>，
+        /// 第二段再从那里爬回 0，两段都只由 angAccel 驱动。angAccel ≤ 0 时目标永远到不了——
+        /// 车会保持一个固定角度一直开远，**并且永不销毁、不触发补位**，静默下去极难查。
+        ///
+        /// 正常出车这条路径原本没有任何提示（绳连后车有 <see cref="WarnIfRopeExitHasNoSwing"/>），
+        /// 这里补一条只出现一次的警告点名。参数取当次实际生效的那一组（正常出车 / 绳连后车）。
+        /// </summary>
+        private void WarnIfAngleNeverRecovers(float angAccel, bool swung, float angle, float maxAngle)
+        {
+            if (_warnedAngleNeverRecovers || angAccel > 0f)
+                return;
+
+            // 当前阶段的目标角还够不着 → 卡在这一段，永远不会写转正
+            bool stuck = swung ? angle < 0f : angle > -maxAngle;
+            if (!stuck)
+                return;
+
+            _warnedAngleNeverRecovers = true;
+            Debug.LogWarning("[ContainerExitDriver] 出车角度永远回不了 0：Angular Acceleration = " + angAccel +
+                "（必须 > 0）。当前在「" + (swung ? "归 0" : "甩头") + "」阶段，angle = " + angle +
+                "，目标角 = " + maxAngle + "。这辆车会保持当前角度一直开远，并且永不销毁、不触发补位。" +
+                "请检查该车预制体上 ContainerExitDriver 的角度参数（正常出车看 Exit Max Angle / Exit Angular Acceleration / Reverse Angle，" +
+                "绳连后车看 Rope Exit 那一组）。", this);
         }
 
         /// <summary>把拖尾归还对象池。可重复调用：已回收或未生成时为空操作。</summary>

@@ -1179,6 +1179,12 @@ MonoBehaviour:
   maxOpenRows: 4
   consumeSpeed: 10
   refillSpeed: 10
+  ropeMaterial: {fileID: 0}
+  ropeLinkCount: 8
+  ropeDiameter: 0.15
+  ropeLayerName: Rope
+  ropeEnabled: 1
+  ropeExitStagger: 0.2
 --- !u!4 &1428373512
 Transform:
   m_ObjectHideFlags: 0
@@ -1705,7 +1711,7 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
+  - {fileID: 4900000, guid: 474d5d0f4f984754885237059c8c403d, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}

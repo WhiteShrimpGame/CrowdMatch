@@ -51,8 +51,17 @@ namespace CrowdMatch
         [Tooltip("车上最后一个像素准备上车时触发开心表情的概率（0 = 不触发，1 = 必触发）")]
         [Range(0f, 1f)] public float happyChance = 0.8f;
 
-        [Tooltip("开心表情在 SpawnPool 配置里的 tag")]
+        [Tooltip("开心表情在 SpawnPool 配置里的 tag（上车开心与插队开心共用）")]
         public string happyTag = "EmojiHappy";
+
+        [Tooltip("插队开心表情的触发概率（每次「后点的先上了带」独立掷一次，不随被插队人数放大；0 = 不触发，1 = 必触发）。上带的像素发现缓冲区里还有比自己先点击、颜色不同的像素在排队时，在**自己头上**播开心表情")]
+        [Range(0f, 1f)] public float happyJumpChance = 0.1f;
+
+        [Tooltip("触发门槛：被插队者（比它先点击、颜色不同的排队像素）数量 ≥ 该值才会走到掷概率那一步。低于门槛时连概率都不掷")]
+        [Min(1)] public int happyJumpMinJumped = 3;
+
+        [Tooltip("插队开心表情的全局冷却（秒）：冷却内不会再次触发（与上车开心的判定相互独立）")]
+        public float happyJumpCooldown = 3f;
 
         [Header("犯困表情")]
         [Tooltip("犯困表情在 SpawnPool 配置里的 tag（由传送带宿主按间隔检测播放）")]
@@ -101,6 +110,9 @@ namespace CrowdMatch
 
         /// <summary>插队生气表情下一次可触发的时刻（全局 CD）。</summary>
         private float _angryJumpReadyTime;
+
+        /// <summary>插队开心表情下一次可触发的时刻（全局 CD，与生气的相互独立）。</summary>
+        private float _happyJumpReadyTime;
 
         /// <summary>非 World Space 的 Canvas 只警告一次，避免每次播放都刷屏。</summary>
         private bool _warnedNonWorldCanvas;
@@ -238,6 +250,47 @@ namespace CrowdMatch
 
             _angryJumpReadyTime = Time.time + Mathf.Max(0f, angryJumpCooldown);
             PlayEmoji(candidates[Random.Range(0, candidates.Count)].emojiNode, angryTag, follow: true);
+        }
+
+        /// <summary>
+        /// 插队开心表情：某像素上带时，若缓冲区里还有「比它更早被点击、且颜色不同」的像素在排队（后点的先上了带），
+        /// 且这些被插队者的数量达到 happyJumpMinJumped，则在这个**插队者自己头上**播开心表情
+        /// （被插队者的生气表情见 <see cref="TryPlayAngryEmojiForJumped"/>，两者独立）。
+        /// 插队是「进入」那一瞬间的事件、不是持续状态，所以每次插队只对这个插队者独立掷一次 happyJumpChance
+        /// （**不按被插队人数缩放**，人数只用于门槛判定）；命中才播，并进入 happyJumpCooldown 全局 CD（CD 内连判定都不做）。
+        /// 被插队者只用来判定「是否真的发生了插队、插了几个人」，不要求它们配了表情节点（表情只挂在插队者身上）。
+        /// </summary>
+        public void TryPlayHappyEmojiForJumped(List<PixelItem> waiting, PixelItem boarding)
+        {
+            if (boarding == null || boarding.emojiNode == null || happyJumpChance <= 0f || boarding.clickSeq <= 0)
+                return;
+            if (Time.time < _happyJumpReadyTime)
+                return;   // CD 中：不检查也不播
+
+            int jumped = 0;
+            if (waiting != null)
+            {
+                for (int i = 0; i < waiting.Count; i++)
+                {
+                    var pixel = waiting[i];
+                    if (pixel == null)
+                        continue;
+                    if (pixel.clickSeq <= 0 || pixel.clickSeq >= boarding.clickSeq)
+                        continue;   // 不比它更早被点击
+                    if (pixel.colorId == boarding.colorId)
+                        continue;   // 同色不算被插队
+                    jumped++;
+                }
+            }
+
+            if (jumped < happyJumpMinJumped)
+                return;   // 被插队的人不够多：不掷概率
+
+            if (happyJumpChance < 1f && Random.value > happyJumpChance)
+                return;
+
+            _happyJumpReadyTime = Time.time + Mathf.Max(0f, happyJumpCooldown);
+            PlayEmoji(boarding.emojiNode, happyTag, follow: true);
         }
 
         /// <summary>
