@@ -779,5 +779,106 @@ namespace CrowdMatch
             else
                 Destroy(go);   // 端点缺失 / 生成失败：不留空壳
         }
+
+        // ===== 绳连的编辑器可视化 =====
+
+        [Header("绳连 Gizmos")]
+        [Tooltip("整条绳连预览（线 + 端点小球）的 Y 偏移（米）：抬到车体上方，避免被车挡住")]
+        public float ropeGizmoYOffset = 1f;
+
+        [Tooltip("绳连预览的颜色（洗牌开着导致运行时不会建绳时，自动按该色的低透明度画）")]
+        public Color ropeGizmoColor = new Color(0.1f, 1f, 1f);
+
+        [Tooltip("绳连预览端点小球的半径（米）")]
+        public float ropeGizmoAnchorRadius = 0.1f;
+
+        /// <summary>端点没配时的醒目色（固定亮红，不跟随 Rope Gizmo Color）。</summary>
+        private static readonly Color RopeGizmoMissingAnchorColor = new Color(1f, 0.15f, 0.15f);
+
+        /// <summary>
+        /// 非运行模式下把绳连画出来：同一个 ropeGroupId 的车按列升序串成链，在相邻两车之间画一条线——
+        /// 端点取车上的 <see cref="ContainerItem.ropeAnchorRight"/> / <see cref="ContainerItem.ropeAnchorLeft"/>，
+        /// 也就是运行时真正建绳的那两点。所以看到的就是运行时绳子的位置与走向。
+        ///
+        /// 两个刻意的处理：
+        /// · **整体抬到车体上方**（<see cref="ropeGizmoYOffset"/>）——端点就在车体侧面，不抬会被车完全挡住；
+        /// · 洗牌开着或绳子总开关关掉时（运行时不会建绳，见 §5.5）用**同色低透明度**画，一眼能分辨。
+        ///
+        /// 线宽用 `Gizmos.DrawLine` 的默认值（恒 1px，该 API 没有宽度参数）；曾用 `Handles.DrawAAPolyLine` 加粗过，
+        /// 但那样要把整段代码塞进 `#if UNITY_EDITOR` 并引 `UnityEditor`，收益不值当，已放弃。
+        ///
+        /// 运行时不画：那时绳子是真渲染出来的，再叠一层 Gizmos 只会糊。
+        /// </summary>
+        private void OnDrawGizmos()
+        {
+            if (Application.isPlaying)
+                return;
+
+            var items = GetComponentsInChildren<ContainerItem>();
+            if (items == null || items.Length == 0)
+                return;
+
+            var groups = new Dictionary<int, List<ContainerItem>>();
+            for (int i = 0; i < items.Length; i++)
+            {
+                var item = items[i];
+                if (item == null || item.ropeGroupId == 0)
+                    continue;
+
+                List<ContainerItem> list;
+                if (!groups.TryGetValue(item.ropeGroupId, out list))
+                {
+                    list = new List<ContainerItem>();
+                    groups[item.ropeGroupId] = list;
+                }
+                list.Add(item);
+            }
+
+            if (groups.Count == 0)
+                return;
+
+            bool live = ropeEnabled && !shuffleContainers;
+            Color lineColor = live ? ropeGizmoColor : Dimmed(ropeGizmoColor);
+            Vector3 lift = Vector3.up * ropeGizmoYOffset;
+
+            foreach (var pair in groups)
+            {
+                var chain = pair.Value;
+                chain.Sort((a, b) => a.gridX.CompareTo(b.gridX));
+
+                for (int i = 0; i + 1 < chain.Count; i++)
+                {
+                    Transform leftAnchor = chain[i].ropeAnchorRight;
+                    Transform rightAnchor = chain[i + 1].ropeAnchorLeft;
+
+                    Vector3 a = (leftAnchor != null ? leftAnchor.position : chain[i].transform.position) + lift;
+                    Vector3 b = (rightAnchor != null ? rightAnchor.position : chain[i + 1].transform.position) + lift;
+
+                    Gizmos.color = lineColor;
+                    Gizmos.DrawLine(a, b);
+
+                    DrawRopeGizmoAnchor(leftAnchor, a, live);
+                    DrawRopeGizmoAnchor(rightAnchor, b, live);
+                }
+            }
+        }
+
+        /// <summary>画一个端点小球：锚点存在时用链条色，缺失时用醒目红（提示这辆车没配端点）。</summary>
+        private void DrawRopeGizmoAnchor(Transform anchor, Vector3 pos, bool live)
+        {
+            if (anchor == null)
+                Gizmos.color = RopeGizmoMissingAnchorColor;
+            else
+                Gizmos.color = live ? ropeGizmoColor : Dimmed(ropeGizmoColor);
+
+            Gizmos.DrawSphere(pos, ropeGizmoAnchorRadius);
+        }
+
+        /// <summary>把颜色压暗成半透明（表示「这些连了也不会建绳」）。</summary>
+        private static Color Dimmed(Color c)
+        {
+            c.a *= 0.35f;
+            return c;
+        }
     }
 }

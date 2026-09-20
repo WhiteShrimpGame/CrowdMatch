@@ -42,7 +42,10 @@
       "Bash(awk '/^## 10\\\\. 决策记录/,/^## 11\\\\./' Docs/EmojiSystemDesign.md)",
       "Bash(grep -nE \"^#{2,3} \" Docs/ContainerExitDesign.md)",
       "Bash(awk '/^## 12\\\\. 决策记录/,0' Docs/ContainerExitDesign.md)",
-      "Bash(awk '/^## 10\\\\. 已确认的决策|^## 10\\\\. 决策记录/,/^## 11\\\\.|^## 12\\\\./' Docs/ContainerRopeDesign.md)"
+      "Bash(awk '/^## 10\\\\. 已确认的决策|^## 10\\\\. 决策记录/,/^## 11\\\\.|^## 12\\\\./' Docs/ContainerRopeDesign.md)",
+      "Bash(awk '/^## 11\\\\. 验证清单/,/^## 12\\\\./' Docs/ContainerRopeDesign.md)",
+      "Bash(sed -i -e 's|^13\\\\. 洗牌兜底：|14. 洗牌兜底：|' -e 's|^12\\\\. 重排：跑一次|13. 重排：跑一次|' -e 's|^11\\\\. 运行：连续多次出|12. 运行：连续多次出|' -e 's|^10\\\\. 运行：全组装满|11. 运行：全组装满|' -e 's|^9\\\\. 运行：让组内部分车|10. 运行：让组内部分车|' -e 's|^8\\\\. \\\\*\\\\*末端贴合\\\\*\\\\*|9. **末端贴合**|' -e 's|^7\\\\. 运行：把其中一辆车|8. 运行：把其中一辆车|' -e 's|^6\\\\. 运行：关卡加载后绳|7. 运行：关卡加载后绳|' Docs/ContainerRopeDesign.md)",
+      "Bash(grep -v \"///\")"
     ]
   }
 }

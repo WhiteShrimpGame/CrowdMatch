@@ -175,6 +175,36 @@ public int ropeGroupId;   // 0 = 未连接；同 id 的车成组（旧 JSON 无�
 
 标记时扫一遍同组下所有车的 `ropeGroupId`，取 `max + 1` 作为新 id。id 只需在单个关卡内唯一。
 
+### 4.6 编辑器可视化（Gizmos）
+
+非运行模式下光看 Inspector 的数字看不出谁连着谁，所以 `ContainerGroup.OnDrawGizmos` 把绳连画出来：
+
+| 画什么 | 怎么画 |
+|---|---|
+| 绳 | 同一个 `ropeGroupId` 的车按列升序串成链，相邻两车之间画一条线 |
+| 端点 | 线的两端取 `ropeAnchorRight` / `ropeAnchorLeft`——**就是运行时真正建绳的那两点**，所以看到的就是运行时绳子的位置与走向；两端各画一个小球 |
+| 整体抬升 | 线和小球统一加 `ropeGizmoYOffset`（默认 1 米）——端点就在车体侧面，不抬会被车完全挡住 |
+| 漏配端点 | 某辆车没配端点 → 该端画成**亮红小球**并落在车体位置 |
+| 运行时不会建绳 | 洗牌开着或 `ropeEnabled = false` → 用**同色低透明度**（alpha × 0.35）画，一眼能分辨 |
+
+可调参数（都在 `ContainerGroup` 上，归在「绳连 Gizmos」分组）：
+
+| 字段 | 默认 | 作用 |
+|---|---|---|
+| `ropeGizmoYOffset` | 1 | 整条预览的 Y 偏移（米）——小球被车挡住的解法就是这个 |
+| `ropeGizmoColor` | 亮青 `(0.1, 1, 1)` | 预览颜色；「运行时不会建绳」那档自动取它的 35% 透明度 |
+| `ropeGizmoAnchorRadius` | 0.1 | 端点小球半径（米）——**小球半径就在这里调** |
+
+三点说明：
+
+- **线宽恒为 1px**：用的是 `Gizmos.DrawLine`，这个 API **没有宽度参数**，加不了粗。曾改用编辑器专用的
+  `Handles.DrawAAPolyLine`（可指定宽度）实现过一版，但那样必须把整段预览代码塞进 `#if UNITY_EDITOR`、并在文件顶部
+  条件编译引入 `UnityEditor`，为了线宽付这个复杂度不值当，**已放弃、换回 `DrawLine`**。
+- **不再需要条件编译**：换回 `DrawLine` 后不依赖任何编辑器 API，所以这几个字段和这个方法都是普通运行时成员，
+  文件顶部也不用再条件编译引入 `UnityEditor`。
+- **运行时不画**：那时绳子是真渲染出来的，再叠一层 Gizmos 只会糊。用的是 `OnDrawGizmos`（不是 `OnDrawGizmosSelected`），
+  所以不用选中就能看到全场景的绳连；想临时藏起来就在 Scene 视图的 Gizmos 下拉里关掉这个组件。
+
 ---
 
 ## 5. 运行时
@@ -473,18 +503,20 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 4. 编辑器：故意违反每条校验（1 个车、同列 2 个、列不连续、端点未配置、与已有组交叉）→ 提示正确且按钮置灰。
    交叉用例：先标记 A = {(col1,row0), (col2,row2)}，再试 B = {(col1,row2), (col2,row0)} → 应被拒。
 5. 编辑器：「取消连接」选中组内任一个车 → 整组 `ropeGroupId` 归零；Undo 可整体回退。
-6. 运行：关卡加载后绳子出现在相邻车之间，两端贴合挂点，**无下垂、无拉伸脱离**。
-7. 运行：把其中一辆车补位前移（造成斜向）→ 绳子每帧重新绷直，长度与端点距离一致；
+6. **编辑器可视化**：非运行模式下 Scene 视图里能看到绳连——标记过的车之间有线，线的两端落在 `ropeAnchorLeft/Right` 上（小球标出）。
+   分项验证：故意清掉某辆车的端点 → 该端小球变**红**；把 `ContainerGroup.shuffleContainers` 打开 → 整条链变**半透明灰**；进 Play → 线条消失（由真绳子接管）。
+7. 运行：关卡加载后绳子出现在相邻车之间，两端贴合挂点，**无下垂、无拉伸脱离**。
+8. 运行：把其中一辆车补位前移（造成斜向）→ 绳子每帧重新绷直，长度与端点距离一致；
    **且绳子的花纹没有变稀**（贴图沿绳长保持固定世界密度，表现为「从起点端放出更多绳长」）。
-8. **末端贴合**：距离变化后（含补位途中、出库途中）绳子的两端都要**正好落在 anchor 上**，不能差一段。
+9. **末端贴合**：距离变化后（含补位途中、出库途中）绳子的两端都要**正好落在 anchor 上**，不能差一段。
    重点看**终点端**（右车的左端点）——那正是 §7.2 修的偏差；起点端本来就在锚点上。
-9. 运行：让组内部分车先装满 → 满车停在前排不动、该列不补位；其余车继续收像素。
-10. 运行：全组装满 → **最左那辆先出库，其余依次延迟**（头车 → 第一个后车 = `ropeExitHeadGap`，后车之间 = `ropeExitStagger`）；
+10. 运行：让组内部分车先装满 → 满车停在前排不动、该列不补位；其余车继续收像素。
+11. 运行：全组装满 → **最左那辆先出库，其余依次延迟**（头车 → 第一个后车 = `ropeExitHeadGap`，后车之间 = `ropeExitStagger`）；
     **头车有倒车段，后车没有**（直接切前轴、先甩到 `ropeExitMaxAngle` 再归 0）；绳子随车驶出并在车销毁后消失，
     Console 无空引用异常；补位也随之依次发生。
-11. 运行：连续多次出库/补位，绳子不残留、不抖动、绳长始终贴合。
-12. 重排：跑一次「按 Record 重排容器」→ 输出 JSON 中所有 `ropeGroupId` 均为 0。
-13. 洗牌兜底：手改 JSON 让 `lockContainer = false` 且带绳组 → 运行时**不生成绳子**，车各自独立出库。
+12. 运行：连续多次出库/补位，绳子不残留、不抖动、绳长始终贴合。
+13. 重排：跑一次「按 Record 重排容器」→ 输出 JSON 中所有 `ropeGroupId` 均为 0。
+14. 洗牌兜底：手改 JSON 让 `lockContainer = false` 且带绳组 → 运行时**不生成绳子**，车各自独立出库。
 
 ---
 
@@ -497,7 +529,7 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 | `Assets/Art/Textures/{rope_diffuseheight.tga,rope_normal.png}` + `.meta` | **新增**（skill 植入） | 连 `.meta` 一起 |
 | `Assets/Scripts/Gameplay/ContainerRopeLink.cs` | **新增** | 一条绳：建绳、建后清理、每帧绷直驱动、锚点消失自毁 |
 | `Assets/Scripts/Gameplay/ContainerItem.cs` | 改 | `ropeGroupId`、`ropeAnchorLeft/Right` 字段 |
-| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitHeadGap` / `ropeExitStagger` 错峰出库、头车正常出车 / 后车走变体；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参 |
+| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitHeadGap` / `ropeExitStagger` 错峰出库、头车正常出车 / 后车走变体；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参；`OnDrawGizmos` 绳连预览（§4.6） |
 | `Assets/Scripts/Gameplay/ContainerExitDriver.cs` | 改 | `Play` 加 `ropeRearExit`；绳连后车跳过倒车直接切前轴、从 0° 甩头归 0；新增一组独立的 `ropeExit*` 参数；倒车段抽成 `ReverseAndSwitchAxle` |
 | `Assets/Scripts/Gameplay/LevelData.cs` | 改 | `ContainerItemData.ropeGroupId` |
 | `Assets/Scripts/Core/LevelLoader.cs` | 改 | 传 `ropeGroupId`；洗牌时忽略绳组 |
