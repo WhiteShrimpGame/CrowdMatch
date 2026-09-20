@@ -1142,9 +1142,10 @@ MonoBehaviour:
     duration: 1
   happyChance: 0.6
   happyTag: EmojiHappy
+  happyJumpChance: 0.7
+  happyJumpMinJumped: 4
+  happyJumpCooldown: 3
   sleepTag: EmojiSleep
-  angryChance: 0.7
-  angryCooldown: 3
   angryTag: EmojiAngry
   angryJumpChancePerPixel: 0.1
   angryJumpCooldown: 3
@@ -1242,9 +1243,17 @@ MonoBehaviour:
   ropeMaterial: {fileID: 2100000, guid: 9f884cd5b7afe874fa04f41242a8c7d9, type: 2}
   ropeLinkCount: 8
   ropeDiameter: 0.15
+  ropeSwayAmplitude: 0.01
+  ropeSwayFrequency: 0.5
+  ropeSwayWaves: 0
+  ropeSwayVerticalRatio: 5
   ropeLayerName: Rope
   ropeEnabled: 1
-  ropeExitStagger: 0.08
+  ropeExitHeadGap: 0.2
+  ropeExitStagger: 0.15
+  ropeGizmoYOffset: 0.35
+  ropeGizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  ropeGizmoAnchorRadius: 0.1
 --- !u!4 &1428373512
 Transform:
   m_ObjectHideFlags: 0

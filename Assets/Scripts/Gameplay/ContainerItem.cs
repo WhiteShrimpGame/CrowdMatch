@@ -51,6 +51,10 @@ namespace CrowdMatch
         [Tooltip("前轴（空子物体，出车时的驱动轴）")]
         public Transform frontAxle;
 
+        [Tooltip("绳连后车出车转轴（空子物体，可选）：绳组里**非头车**出车时的旋转 pivot，" +
+            "单独配置就能让后车绕别的位置转（例如车体中心）而不用改正常出车的前轴。留空则退回用 frontAxle")]
+        public Transform ropeExitAxle;
+
         [Tooltip("后轴（空子物体，倒车时的驱动轴）")]
         public Transform rearAxle;
 
@@ -347,6 +351,22 @@ namespace CrowdMatch
             StartCoroutine(BoardRoutine(pixel, pos, onBoarded));
             return true;
         }
+
+        /// <summary>
+        /// 本车是否有**正在进行的上车动画**：像素还在跳（<see cref="_boardingPixels"/>），
+        /// 或已落到车上、正在播上车弹性（<see cref="IsCarUnderElasticAxle"/>）。
+        ///
+        /// **这是出车的前置条件之一**，与 <c>isRefilling</c>（补位换轴）并列。
+        /// 车身变空是**瞬间**的——`ConsumePixel` 里 `Consume()` 一执行 `IsEmpty` 就为 true——
+        /// 但像素还要跳 `boardJumpDuration` 才落到车上、之后才开始播弹性。所以「装满 + 在前排」成立之后，
+        /// 车身还有**两段**时间不在 ContainerGroup 下：先跳车、再换弹性轴。任一段里被放行，
+        /// `ContainerExitDriver` 取到的 `cartParent` 都会是那根弹性轴 → 整条出车链条挂错父物体
+        /// → 车以固定角度斜着开远（成因详见 Docs/ContainerExitDesign.md §5.6）。
+        ///
+        /// 两段之间**没有缝**：`BoardRoutine` 是在同一帧里先 `_boardingPixels.Remove`（落定）
+        /// 再 `PlayBoardElastic()`（换轴），中间不 yield，所以这个谓词在整个上车过程中恒为 true。
+        /// </summary>
+        public bool IsBoarding => _boardingPixels.Count > 0 || IsCarUnderElasticAxle();
 
         private Transform AcquireFreePos()
         {
@@ -795,7 +815,11 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>车身此刻是否挂在弹性轴下（上车形变换轴期间为 true）。</summary>
+        /// <summary>
+        /// 车身此刻是否挂在弹性轴下（上车弹性的换轴期间为 true）。
+        /// 这里只描述事实；**出车的前置条件请用 <see cref="IsBoarding"/>** ——
+        /// 那个把「还在跳车、弹性尚未开始」的那一段也包进来了，单查本项会漏（见其注释）。
+        /// </summary>
         private bool IsCarUnderElasticAxle()
         {
             return elasticScaleAxle != null && transform.parent == elasticScaleAxle;
