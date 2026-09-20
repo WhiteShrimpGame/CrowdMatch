@@ -1,0 +1,787 @@
+{
+    "version": 1,
+    "pixel": {
+        "columns": 15,
+        "rows": 15,
+        "tailRows": 0,
+        "unitSize": 0.5,
+        "cells": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            7,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            7,
+            7,
+            0,
+            0,
+            5,
+            3,
+            3,
+            0,
+            0,
+            4,
+            4,
+            4,
+            0,
+            0,
+            0,
+            -1,
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            0,
+            0,
+            6,
+            -1,
+            0,
+            0,
+            12,
+            4,
+            4,
+            7,
+            0,
+            0,
+            6,
+            6,
+            14,
+            0,
+            14,
+            6,
+            4,
+            4,
+            12,
+            12,
+            4,
+            4,
+            1,
+            0,
+            6,
+            6,
+            14,
+            14,
+            14,
+            14,
+            19,
+            4,
+            4,
+            12,
+            12,
+            4,
+            4,
+            5,
+            5,
+            -1,
+            -1,
+            8,
+            -1,
+            -1,
+            5,
+            6,
+            4,
+            4,
+            12,
+            -1,
+            -1,
+            -1,
+            8,
+            8,
+            -1,
+            8,
+            8,
+            8,
+            -1,
+            5,
+            5,
+            -1,
+            -1,
+            -1,
+            4,
+            4,
+            0,
+            8,
+            8,
+            -1,
+            8,
+            8,
+            8,
+            -1,
+            19,
+            3,
+            0,
+            3,
+            3,
+            4,
+            4,
+            0,
+            0,
+            14,
+            4,
+            4,
+            8,
+            4,
+            4,
+            19,
+            19,
+            0,
+            1,
+            7,
+            7,
+            6,
+            -1,
+            -1,
+            -1,
+            -1,
+            4,
+            4,
+            4,
+            -1,
+            -1,
+            -1,
+            -1,
+            7,
+            7,
+            4,
+            4,
+            19,
+            19,
+            0,
+            -1,
+            0,
+            1,
+            1,
+            -1,
+            1,
+            19,
+            19,
+            1,
+            1,
+            4,
+            4,
+            -1,
+            19,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            19,
+            -1,
+            1,
+            1,
+            4,
+            4,
+            -1,
+            19,
+            4,
+            4,
+            0,
+            8,
+            0,
+            0,
+            0,
+            19,
+            -1,
+            1,
+            1,
+            4,
+            4,
+            -1,
+            19,
+            4,
+            4,
+            4,
+            8,
+            8,
+            0,
+            0,
+            19,
+            -1,
+            1,
+            1,
+            4,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            4,
+            8,
+            8,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            1
+        ],
+        "questionCells": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    "container": {
+        "columns": 3,
+        "rows": 40,
+        "lockContainer": true,
+        "items": []
+    },
+    "walls": [
+        {
+            "points": [
+                {
+                    "x": 2.0,
+                    "y": 12.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 14.0
+                },
+                {
+                    "x": 5.0,
+                    "y": 14.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 2.0,
+                    "y": 9.0
+                },
+                {
+                    "x": 5.0,
+                    "y": 9.0
+                },
+                {
+                    "x": 5.0,
+                    "y": 10.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 12.0,
+                    "y": 9.0
+                },
+                {
+                    "x": 9.0,
+                    "y": 9.0
+                },
+                {
+                    "x": 9.0,
+                    "y": 10.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 9.0,
+                    "y": 14.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 14.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 12.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 0.0,
+                    "y": 6.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 6.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 14.0,
+                    "y": 6.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 6.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 5.0,
+                    "y": 7.0
+                },
+                {
+                    "x": 5.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 6.0,
+                    "y": 5.0
+                }
+            ],
+            "closed": false
+        },
+        {
+            "points": [
+                {
+                    "x": 8.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 9.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 9.0,
+                    "y": 7.0
+                }
+            ],
+            "closed": false
+        }
+    ],
+    "pipes": [
+        {
+            "points": [
+                {
+                    "x": 2.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 10.0
+                },
+                {
+                    "x": 3.0,
+                    "y": 10.0
+                },
+                {
+                    "x": 3.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 3.0,
+                    "y": 12.0
+                },
+                {
+                    "x": 3.0,
+                    "y": 13.0
+                }
+            ],
+            "colors": [
+                1,
+                2
+            ]
+        },
+        {
+            "points": [
+                {
+                    "x": 12.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 10.0
+                },
+                {
+                    "x": 11.0,
+                    "y": 10.0
+                },
+                {
+                    "x": 11.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 11.0,
+                    "y": 12.0
+                },
+                {
+                    "x": 11.0,
+                    "y": 13.0
+                }
+            ],
+            "colors": [
+                1,
+                2
+            ]
+        },
+        {
+            "points": [
+                {
+                    "x": 1.0,
+                    "y": 14.0
+                },
+                {
+                    "x": 0.0,
+                    "y": 14.0
+                },
+                {
+                    "x": 0.0,
+                    "y": 13.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 13.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 12.0
+                },
+                {
+                    "x": 0.0,
+                    "y": 12.0
+                },
+                {
+                    "x": 0.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 11.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 10.0
+                },
+                {
+                    "x": 0.0,
+                    "y": 10.0
+                }
+            ],
+            "colors": [
+                1,
+                2
+            ]
+        },
+        {
+            "points": [
+                {
+                    "x": 2.0,
+                    "y": 2.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 3.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 4.0
+                },
+                {
+                    "x": 2.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 4.0
+                },
+                {
+                    "x": 1.0,
+                    "y": 3.0
+                }
+            ],
+            "colors": [
+                0,
+                0
+            ]
+        },
+        {
+            "points": [
+                {
+                    "x": 12.0,
+                    "y": 2.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 3.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 4.0
+                },
+                {
+                    "x": 12.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 13.0,
+                    "y": 5.0
+                },
+                {
+                    "x": 13.0,
+                    "y": 4.0
+                },
+                {
+                    "x": 13.0,
+                    "y": 3.0
+                }
+            ],
+            "colors": [
+                0,
+                0
+            ]
+        }
+    ],
+    "boxes": [],
+    "elevators": []
+}

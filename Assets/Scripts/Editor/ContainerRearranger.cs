@@ -200,6 +200,9 @@ namespace CrowdMatch
             result.container.lockContainer = true;
             result.container.columns = columns;
             result.container.rows = Mathf.Max(result.container.rows, CeilDiv(entries.Count, columns));
+            // 重排后车的列位置与颜色全部改变，绳组关系（ContainerItemData.ropeGroupId）不再有意义。
+            // Distribute 会为每一项新建对象，因此 ropeGroupId / question 都保持默认值 → 绳子信息天然被清除。
+            // 注意：若日后把 Distribute 改成「保留原项、只改坐标」，必须在这里显式把 ropeGroupId 清零。
             result.container.items = Distribute(entries, columns, colCount, rng);
 
             LogSummary(entries, result.container.items, columns);

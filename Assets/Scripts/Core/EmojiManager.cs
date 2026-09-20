@@ -23,15 +23,29 @@ namespace CrowdMatch
             public float speed = 1f;
         }
 
-        [Tooltip("单个表情从生成到自动回池的时长（秒）")]
+        /// <summary>按 tag 配置的播放时长。</summary>
+        [System.Serializable]
+        public class EmojiDuration
+        {
+            [Tooltip("表情在 SpawnPool 配置里的 tag")]
+            public string tag;
+
+            [Tooltip("该表情从生成到自动回池的时长（秒）")]
+            public float duration = 1.5f;
+        }
+
+        [Tooltip("单个表情从生成到自动回池的时长（秒）；在 durations 里配置过的 tag 用各自的时长")]
         public float emojiDuration = 1.5f;
 
         [Tooltip("表情的世界缩放（预制体建议按 scale=1 制作，尺寸统一由这里控制；父节点有缩放时按世界缩放换算）")]
         public float emojiScale = 0.5f;
 
-        [Header("播放加速")]
+        [Header("每 tag 配置")]
         [Tooltip("按 tag 配置播放加速（粒子的 simulationSpeed / Animator.speed）；未配置的 tag 保持预制体原速")]
         public List<EmojiSpeed> speeds = new List<EmojiSpeed>();
+
+        [Tooltip("按 tag 配置播放时长；未出现在此列表里的 tag 用 Emoji Duration")]
+        public List<EmojiDuration> durations = new List<EmojiDuration>();
 
         [Header("上车开心表情")]
         [Tooltip("车上最后一个像素准备上车时触发开心表情的概率（0 = 不触发，1 = 必触发）")]
@@ -44,13 +58,7 @@ namespace CrowdMatch
         [Tooltip("犯困表情在 SpawnPool 配置里的 tag（由传送带宿主按间隔检测播放）")]
         public string sleepTag = "EmojiSleep";
 
-        [Header("点击受阻生气表情")]
-        [Tooltip("点击无法移出的像素时触发生气表情的概率（0 = 不触发，1 = 必触发）")]
-        [Range(0f, 1f)] public float angryChance = 0.5f;
-
-        [Tooltip("生气表情的全局冷却（秒）：冷却期内不再检查、也不再播放")]
-        public float angryCooldown = 3f;
-
+        [Header("生气的 tag（三条来源共用）")]
         [Tooltip("生气表情在 SpawnPool 配置里的 tag")]
         public string angryTag = "EmojiAngry";
 
@@ -91,18 +99,19 @@ namespace CrowdMatch
         private readonly List<Booking> _bookings = new List<Booking>();
         private int _nextBookingId;
 
-        /// <summary>生气表情下一次可播放的时刻（全局 CD）。</summary>
-        private float _angryReadyTime;
-
         /// <summary>插队生气表情下一次可触发的时刻（全局 CD）。</summary>
         private float _angryJumpReadyTime;
 
+        /// <summary>非 World Space 的 Canvas 只警告一次，避免每次播放都刷屏。</summary>
+        private bool _warnedNonWorldCanvas;
+
         /// <summary>
-        /// 在 anchor 处生成一个 tag 表情，emojiDuration 秒后自动回池；未配置对象池 / tag 不存在时返回 null。
+        /// 在 anchor 处生成一个 tag 表情，该 tag 的时长（默认 <see cref="emojiDuration"/>）后自动回池；未配置对象池 / tag 不存在时返回 null。
         /// follow = true：挂成 anchor 的子物体并归位到它自身（localPosition 归零），随 anchor 移动；
         ///   此时 anchor 被销毁会把表情一起带走（池里只留下一条待 GC 清理的登记，不会报错）。
         /// follow = false：挂在池根下、只取 anchor 当前的世界位置，不跟随。
         /// 两种模式都把表情的**世界缩放**设成 emojiScale（父节点有缩放时不能直接写 localScale），朝向仍由预制体决定。
+        /// 预制体里若带 World Space 的 Canvas，会自动挂上 <see cref="EmojiBillboard"/> 让它始终正对镜头。
         /// 不复用 SpawnPool.SpawnDuration：它内部的延时回调不带空守卫，对象若已销毁会在 Despawn 里解引用抛异常。
         /// </summary>
         public GameObject PlayEmoji(Transform anchor, string tag, bool follow = false)
@@ -125,11 +134,12 @@ namespace CrowdMatch
 
             ApplyWorldScale(emoji.transform);
             ApplyPlaySpeed(emoji, tag);
+            SetupBillboard(emoji);
 
             int bookingId = _nextBookingId++;
             _bookings.Add(new Booking { id = bookingId, emoji = emoji, anchor = anchor, tag = tag });
 
-            DOVirtual.DelayedCall(Mathf.Max(0f, emojiDuration), () =>
+            DOVirtual.DelayedCall(Mathf.Max(0f, ResolveDuration(tag)), () =>
             {
                 if (this == null)
                     return;   // 管理器已销毁（场景卸载）：池也随之没了，既不用回收也不用清理记录
@@ -149,25 +159,46 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 点击无法移出的像素时调用：按 angryChance 概率在被点击的连通组里随机一个像素上播生气表情（跟随模式）。
-        /// 全局 CD：距上次播放不足 angryCooldown 秒时直接返回，连概率都不掷。
+        /// 点击无法移出的像素时调用：在**被点的那一个像素**上播生气表情（跟随模式）——点谁谁生气。
+        /// **必出**（不掷概率），也**没有全局 CD**；唯一的抑制是「同一像素上一张生气还没播完就忽略本次」，
+        /// 避免连点时在同一颗头上反复叠同一张脸。
         /// </summary>
-        public void TryPlayAngryEmoji(List<PixelItem> clickedGroup)
+        public void TryPlayAngryEmoji(PixelItem clicked)
         {
-            if (angryChance <= 0f)
-                return;
-            if (Time.time < _angryReadyTime)
-                return;   // CD 中：不检查也不播
+            if (clicked == null || clicked.emojiNode == null)
+                return;   // 被点的像素没配表情节点：没法显示
+            if (HasEmoji(clicked.emojiNode, angryTag))
+                return;   // 该像素上一张生气还没播完：忽略本次
 
-            var pixel = PickRandomWithEmojiNode(clickedGroup);
-            if (pixel == null)
-                return;   // 组里没有任何配了表情节点的像素：不播
+            PlayEmoji(clicked.emojiNode, angryTag, follow: true);
+        }
 
-            if (Random.value > angryChance)
-                return;
+        /// <summary>
+        /// 该锚点上是否还有 tag 匹配的表情在播（尚未到期、也未被提前回收）。返回时顺手清掉已随锚点销毁的登记。
+        /// </summary>
+        public bool HasEmoji(Transform anchor, string tag)
+        {
+            if (anchor == null)
+                return false;
 
-            _angryReadyTime = Time.time + Mathf.Max(0f, angryCooldown);
-            PlayEmoji(pixel.emojiNode, angryTag, follow: true);
+            for (int i = _bookings.Count - 1; i >= 0; i--)
+            {
+                var booking = _bookings[i];
+
+                // 先判 emoji：已随锚点销毁的登记直接丢掉（与 RemoveBookings 同因：销毁对象之间会被 == 判为相等）
+                if (booking.emoji == null)
+                {
+                    _bookings.RemoveAt(i);
+                    continue;
+                }
+                if (booking.anchor != anchor)
+                    continue;
+                if (!string.IsNullOrEmpty(tag) && booking.tag != tag)
+                    continue;
+
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -285,7 +316,24 @@ namespace CrowdMatch
         {
             if (anchor == null)
                 return 0;
+            return RemoveBookings(anchor, tag);
+        }
 
+        /// <summary>
+        /// 收掉场上**所有**生气表情（复活时调用）。返回回收数量。
+        ///
+        /// 为什么复活要清：复活会把缓冲区里的像素**直接匹配上车**（`GameController.Revive` → `MatchPixelsToCars`），
+        /// 而跟随模式下表情是像素的子物体——不收就会跟着像素一起进车，变成乘客头上顶着生气脸。
+        /// 同时网格上残留的「点击受阻」生气脸在复活之后也没有意义了。
+        /// </summary>
+        public int ClearAngryEmojis()
+        {
+            return RemoveBookings(null, angryTag);
+        }
+
+        /// <summary>回收登记中匹配的表情：anchor 为空 = 不限锚点，tag 为空 = 不限 tag（两个都空即清空全部）。</summary>
+        private int RemoveBookings(Transform anchor, string tag)
+        {
             var pool = GetPool();
 
             int removed = 0;
@@ -299,7 +347,7 @@ namespace CrowdMatch
                     _bookings.RemoveAt(i);
                     continue;
                 }
-                if (booking.anchor != anchor)
+                if (anchor != null && booking.anchor != anchor)
                     continue;
                 if (!string.IsNullOrEmpty(tag) && booking.tag != tag)
                     continue;
@@ -392,6 +440,53 @@ namespace CrowdMatch
                 }
             }
             return false;
+        }
+
+        /// <summary>查该 tag 配置的播放时长；未配置则用全局 <see cref="emojiDuration"/>。</summary>
+        private float ResolveDuration(string tag)
+        {
+            if (durations != null && !string.IsNullOrEmpty(tag))
+            {
+                for (int i = 0; i < durations.Count; i++)
+                {
+                    var entry = durations[i];
+                    if (entry != null && entry.tag == tag)
+                        return entry.duration;
+                }
+            }
+            return emojiDuration;
+        }
+
+        /// <summary>
+        /// 支持 Canvas 方式的表情：把表情内部的 **World Space** Canvas 挂上 <see cref="EmojiBillboard"/>，让 UI 始终正对镜头。
+        /// 已经在池里复用的对象不会再重复挂（挂了就跳过）。
+        ///
+        /// 非 World Space 的 Canvas（Screen Space Overlay / Camera）在世界层级里不会跟随锚点、也做不了 billboard，
+        /// 这属于预制体配置问题，打一条 warning 指出改法（只打一次，避免刷屏）。
+        /// </summary>
+        private void SetupBillboard(GameObject emoji)
+        {
+            var canvases = emoji.GetComponentsInChildren<Canvas>(true);
+            for (int i = 0; i < canvases.Length; i++)
+            {
+                var canvas = canvases[i];
+                if (canvas == null)
+                    continue;
+
+                if (canvas.renderMode != RenderMode.WorldSpace)
+                {
+                    if (!_warnedNonWorldCanvas)
+                    {
+                        _warnedNonWorldCanvas = true;
+                        Debug.LogWarning("[EmojiManager] 表情 " + emoji.name + " 里的 Canvas 渲染模式是 " + canvas.renderMode +
+                            "，不是 World Space：它不会跟随锚点、也无法做 billboard。请在预制体上把 Canvas 的 Render Mode 改成 World Space。", canvas);
+                    }
+                    continue;
+                }
+
+                if (canvas.GetComponent<EmojiBillboard>() == null)
+                    canvas.gameObject.AddComponent<EmojiBillboard>();
+            }
         }
 
         /// <summary>按登记号移除一条播放记录（用登记号而非对象引用：两个已销毁对象会被 Unity 的 == 判为相等）。</summary>
