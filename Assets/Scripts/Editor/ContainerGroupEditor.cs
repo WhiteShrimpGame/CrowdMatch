@@ -90,7 +90,21 @@ namespace CrowdMatch
                 var colorConfig = ColorConfigLocator.Find();
                 Debug.Log(Tag + " colorConfig = " + (colorConfig != null ? colorConfig.name : "NULL（找不到 ColorConfig）"));
 
-                // 1) 收集 (layer, color) 列表（静态像素 + 管道将生成的像素），layer 0 = 最前排（gridZ 0 = Z 最大）
+                // 0) 倍乘门校验：不闭合就算不出有多少像素会经过门，容器容量必然错，直接拦下。
+                //    倍乘本身由 CollectPlanningPixels 自动带上（下方扫描到的像素数已含额外像素）。
+                pixelGroup.RebuildGrid();
+                string gateErr = pixelGroup.ValidateGates();
+                if (gateErr != null)
+                {
+                    Debug.LogError(Tag + " 倍乘门校验失败：" + gateErr);
+                    EditorUtility.DisplayDialog("生成 Containers", "倍乘门校验失败：\n" + gateErr, "确定");
+                    return;
+                }
+                int gateExtra = pixelGroup.CountGateExtraPixels();
+                if (gateExtra > 0)
+                    Debug.Log(Tag + " 倍乘门额外产生 " + gateExtra + " 个像素（已计入下面的容量规划）。");
+
+                // 1) 收集 (layer, color) 列表（静态像素 + 管道将生成的像素 + 倍乘门额外像素），layer 0 = 最前排（gridZ 0 = Z 最大）
                 int colorCount = colorConfig != null ? colorConfig.Count : 0;
                 var pixels = pixelGroup.CollectPlanningPixels();
                 int maxColorId = -1;
@@ -109,7 +123,7 @@ namespace CrowdMatch
                 }
 
                 colorCount = Mathf.Max(colorCount, maxColorId + 1);
-                Debug.Log(Tag + " 扫描到 " + totalPixels + " 个像素（含管道生成），颜色上限 " + colorCount +
+                Debug.Log(Tag + " 扫描到 " + totalPixels + " 个像素（含管道生成与倍乘门额外像素），颜色上限 " + colorCount +
                           "，span=" + group.maxSpanLayers);
 
                 // 2) 用分层颜色池生成容器计划（大色块优先，逐层抽同色 pack）
