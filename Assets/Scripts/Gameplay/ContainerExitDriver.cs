@@ -5,12 +5,14 @@ using UnityEngine;
 namespace CrowdMatch
 {
     /// <summary>
-    /// 小车出库动画，两种走法：
+    /// 小车出库动画，两种走法，**换轴逻辑相同**、只是根节点与运动参数不同：
     /// <list type="bullet">
     /// <item><b>正常出车</b>：用「前轴 / 后轴 + 父物体切换」驱动小车先倒车、再出车转正、最后整车直行开出场景。</item>
-    /// <item><b>绳连后车</b>（<see cref="ropeRearExitEnabled"/>）：跳过倒车，直接切前轴，从正姿（0°）先甩到
+    /// <item><b>绳连后车</b>（<see cref="ropeRearExitEnabled"/>）：跳过倒车，切到**单独配置的转轴**
+    /// （<see cref="ContainerItem.ropeExitAxle"/>，留空退回前轴），从正姿（0°）先甩到
     /// <see cref="ropeExitMaxAngle"/> 再加速归 0 出车；运动参数与正常出车**完全独立**。</item>
     /// </list>
+    /// 因为换轴逻辑一致，**侧翻与弹性缩放对两种走法都生效**。
     /// 轴引用取自同物体上的 ContainerItem.frontAxle / rearAxle / reverseScaleAxle / rollAxle；未配置轴时回退为「直接补位 + 销毁」。
     /// 倒车缩放轴（reverseScaleAxle）夹在驱动轴与车体之间做惯性夸张；侧翻自转轴（rollAxle）是最深层节点，出车转正时侧翻、转正后归 0。
     /// 所有 SetParent 都用 worldPositionStays:true 保持世界位姿，零瞬移；偏航（eulerY）写世界 rotation，侧翻（eulerX）写自转轴 localRotation。
@@ -153,6 +155,9 @@ namespace CrowdMatch
 
             Transform cartParent = transform.parent;   // 小车原始父物体（ContainerGroup）
 
+            // 绳连后车出车时的转轴：单独配置（ContainerItem.ropeExitAxle）；没配则退回用前轴（= 原版行为）
+            Transform ropeAxle = container != null && container.ropeExitAxle != null ? container.ropeExitAxle : front;
+
             // 出车段的运动参数：绳连后车走独立的一组，与正常出车互不影响
             float maxAngle   = ropeRearExit ? ropeExitMaxAngle            : exitMaxAngle;
             float angAccel   = ropeRearExit ? ropeExitAngularAcceleration : exitAngularAcceleration;
@@ -163,13 +168,14 @@ namespace CrowdMatch
 
             if (ropeRearExit)
             {
-                // ===== 绳连后车：跳过倒车，直接切前轴（后轴全程不参与，车体从正姿起转）=====
-                // 换轴与正常出车的 ReverseAndSwitchAxle 同构，只是驱动轴换成前轴、且不需要「把后轴还给小车」那一步：
+                // ===== 绳连后车：跳过倒车，切到绳后车转轴（ropeAxle，可单独配置）=====
+                // 换轴逻辑与正常出车的 ReverseAndSwitchAxle 完全同构，只是根节点换成 ropeAxle：
                 // 必须**逐层**把 缩放轴 → 自转轴 → 车体 挂到链上，最后车体落在最深层节点下——
                 // 只挂其中一层的话车体不会随轴走（既不换轴、也不转，只是原地不动）。
-                front.SetParent(cartParent, true);   // 前轴脱离小车 → 挂到与车体同父级
-                front.localScale = Vector3.one;      // 纯 pivot，重置 scale
-                Transform chainHead = front;
+                // 因为换轴照旧，侧翻与弹性缩放对这条路径同样生效（它们依赖车体挂在那两个轴下）。
+                ropeAxle.SetParent(cartParent, true);   // 转轴脱离小车 → 挂到与车体同父级
+                ropeAxle.localScale = Vector3.one;      // 纯 pivot，重置 scale
+                Transform chainHead = ropeAxle;
                 if (scale != null) { scale.SetParent(chainHead, true); chainHead = scale; }
                 if (roll != null)  { roll.SetParent(chainHead, true);  chainHead = roll; }
                 transform.SetParent(chainHead, true);   // 车体挂到最深层节点下
@@ -185,7 +191,10 @@ namespace CrowdMatch
                 yield return ReverseAndSwitchAxle(cartParent, front, rear, scale, roll);
             }
 
-            // ===== 出车转正：前轴驱动（两分支共用） =====
+            // 出车段的驱动对象：正常出车是前轴，绳连后车是它自己的转轴——两者都靠链条带着车体走
+            Transform drive = ropeRearExit ? ropeAxle : front;
+
+            // ===== 出车转正：由 drive 驱动（正常出车 = 前轴，绳连后车 = ropeExitAxle） =====
             float v = 0f;
             // 绳连后车没有倒车，从正姿起步；正常出车从倒车留下的 -reverseAngle 起步
             float angle = ropeRearExit ? 0f : -reverseAngle;
@@ -198,7 +207,7 @@ namespace CrowdMatch
             {
                 float dt = Time.deltaTime;
                 v = Mathf.Min(v + linAccel * dt, maxSpeed);
-                front.position += -front.right * (v * dt);   // 沿自身 left（车头 -X）位移（线性照旧，全程推进）
+                drive.position += -drive.right * (v * dt);   // 沿自身 left（车头 -X）位移（线性照旧，全程推进）
 
                 // 出车开始：缩放匀加速回到 1（只有正常出车会先倒车挤压，绳连后车没有这一步）
                 if (!ropeRearExit && scale != null && recoverT < exitScaleRecoverDuration)
@@ -234,7 +243,7 @@ namespace CrowdMatch
                     angle += angularVel * dt;
                     if (angle >= 0f)
                     {
-                        front.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
+                        drive.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
 
                         // 转正后才挂拖尾：生成后随车移动，车销毁前回收
                         SpawnTrail(container);
@@ -251,7 +260,7 @@ namespace CrowdMatch
                         {
                             transform.SetParent(cartParent, true);   // 无自转轴：小车回原始父物体
                         }
-                        front.SetParent(transform, true);        // 前轴归位为小车子物体
+                        drive.SetParent(transform, true);        // 驱动轴（前轴 / 绳后车转轴）归位为小车子物体
                         if (scale != null)
                         {
                             scale.SetParent(transform, true);    // 缩放轴归位
@@ -262,7 +271,7 @@ namespace CrowdMatch
                         break;
                     }
                 }
-                front.rotation = Quaternion.Euler(0f, angle, 0f);
+                drive.rotation = Quaternion.Euler(0f, angle, 0f);
                 yield return null;
             }
 
@@ -524,6 +533,9 @@ namespace CrowdMatch
                 Destroy(container.frontAxle.gameObject);
             if (container.rearAxle != null && container.rearAxle.parent != transform)
                 Destroy(container.rearAxle.gameObject);
+            if (container.ropeExitAxle != null && container.ropeExitAxle != container.frontAxle
+                && container.ropeExitAxle.parent != transform)
+                Destroy(container.ropeExitAxle.gameObject);   // 绳连后车变体中途销毁时可能正挂着这根轴
             if (container.reverseScaleAxle != null && container.reverseScaleAxle.parent != transform)
                 Destroy(container.reverseScaleAxle.gameObject);
             if (container.rollAxle != null && container.rollAxle.parent != transform)

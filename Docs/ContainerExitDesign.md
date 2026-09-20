@@ -91,11 +91,12 @@ Destroyed（销毁）
 > `elasticTargetScale`、到位后立即在 `elasticRecoverDuration` 内匀加速复原（见 §6.7）。
 
 > **绳连后车变体**（`Play(onRefill, ropeRearExit: true)`）：被绳子连接的后车**跳过 Reverse 与 ReverseWait 两个状态**，
-> 从 Idle 直接切前轴进入 ExitTurn，且起始角是正姿 **0°**（不是 `-reverseAngle`）。运动参数走独立的一组
-> `ropeExit*`（见 §6.8）。侧翻 / 弹性两个状态不变，仍与正常出车共用参数。
+> 换轴照旧、只是根节点换成**单独配置的转轴** `ContainerItem.ropeExitAxle`（留空退回 `frontAxle`），
+> 起始角是正姿 **0°**（不是 `-reverseAngle`）。运动参数走独立的一组 `ropeExit*`（见 §6.8）。
+> 因为换轴逻辑一致，**侧翻与弹性两段对这条路径同样生效**。
 
 ```
-Idle ──(ropeRearExit)──▶ ExitTurn（从 0° 起步：先甩到 -ropeExitMaxAngle 再归 0）──▶ ExitStraight ──▶ Destroyed
+Idle ──(ropeRearExit)──▶ ExitTurn（绕 ropeExitAxle：从 0° 甩到 -ropeExitMaxAngle 再归 0）──▶ ExitStraight ──▶ Destroyed
 ```
 
 ---
@@ -367,24 +368,34 @@ elasticScaleAxle.localScale = Lerp(elasticTargetScale, Vector3.one, e)
 
 归 1 后按 §5.5 把弹性轴还给小车，继续整车直行到 `exitDriveDuration` 后销毁。
 
-### 6.8 绳连后车变体（Rope Rear Exit，跳过倒车）
+### 6.8 绳连后车变体（Rope Rear Exit，跳过倒车、切自己的转轴）
 
 被绳子连接的后车（绳组里**非头车**，由 `ContainerGroup` 决定，见 `Docs/ContainerRopeDesign.md`）走这条路径：
-跳过 `Reverse` / `ReverseWait`，**直接切前轴**，然后从正姿起转。
+跳过 `Reverse` / `ReverseWait`，**换轴逻辑与正常出车完全一致**，只是把根节点从 `frontAxle` 换成
+**单独配置的转轴** `ContainerItem.ropeExitAxle`（留空则退回 `frontAxle`，即原版行为）。
+然后从正姿起转。
+
+> **为什么要单独一个转轴**：绕前轴甩头时车身左右端点会被大幅扫出去，而绳子的两端就在车体左右两侧——
+> 后车每个都甩一遍，绳端就跟着乱晃。把转轴单独配置，就可以把它摆在车体中心（或任何想要的位置）来减小端点位移，
+> 而**不必动正常出车的前轴**（两者互不影响）。
 
 **与正常出车的差别**：
 
 | 环节 | 正常出车 | 绳连后车 |
 |---|---|---|
-| 倒车 + 等待 | 有（`Reverse` / `ReverseWait`，后轴驱动） | **跳过**。后轴全程不参与，链条直接挂到前轴下 |
+| 倒车 + 等待 | 有（`Reverse` / `ReverseWait`，后轴驱动） | **跳过**（后轴全程不参与） |
+| 换轴根节点 | `frontAxle`（前轴） | **`ropeExitAxle`**（可单独配置；留空退回 `frontAxle`） |
+| 换轴逻辑 | 逐层挂 缩放轴 → 自转轴 → 车体 | **完全相同**（所以侧翻 / 弹性照样生效） |
+| 旋转 pivot | 前轴的位置 | `ropeExitAxle` 的位置——摆到车体中心即「原地转身」 |
+| 驱动对象 | 前轴（`drive = front`，车体被链条带着走） | 转轴（`drive = ropeAxle`，同样靠链条带着车体走） |
 | 倒车挤压 | 有（`reverseSquashScale` 压到 0.6） | 没有 → 出车段的「缩放恢复 1」也随之跳过（否则会从 0.6 弹回 1，凭空缩一下） |
 | ExitTurn 起始角 | `-reverseAngle`（倒车已把头甩出去 35°） | **0°**（正姿起转） |
 | ExitTurn 走向 | 从 -35° 继续甩到 `-exitMaxAngle` 再归 0 | 从 0° 甩到 `-ropeExitMaxAngle` 再归 0 |
 | 运动参数 | `exitAcceleration` / `exitAngularAcceleration` / `exitMaxAngle` / `exitMaxSpeed` / `exitDriveDuration` / `exitDriveAcceleration` | **完全独立的一组** `ropeExit*`（同名同义） |
-| 侧翻 / 弹性 | `roll*` / `elastic*` | **共用同一组参数**（这两个是叠加的装饰动画，保持一致更省心） |
-| 起步音效 / 震动时机 | 倒车开始时（音效）、倒车结束时（震动） | 都在**切前轴、开始出车**那一刻 |
+| 侧翻 / 弹性 | `roll*` / `elastic*` | **共用同一组参数**（因为换轴一致，两段都生效） |
+| 起步音效 / 震动时机 | 倒车开始时（音效）、倒车结束时（震动） | 都在**开始出车**那一刻 |
 
-**运动公式与 §6.3 / §6.4 完全相同**，只是把六个参数换成 `ropeExit*`、把起始角换成 0：
+**运动公式与 §6.3 / §6.4 完全相同**，只是把六个参数换成 `ropeExit*`、把起始角换成 0、把驱动轴换成 `ropeExitAxle`：
 
 ```
 angle = 0；ω = 0；swung = (ropeExitMaxAngle ≤ 0)
@@ -395,8 +406,10 @@ v = min(v + ropeExitAcceleration * dt, ropeExitMaxSpeed)
 ```
 
 > 实现上是同一份代码：`Run` 在开头按 `ropeRearExit` 把六个参数选进局部变量（`maxAngle` / `angAccel` /
-> `linAccel` / `maxSpeed` / `driveDur` / `driveAccel`），两个循环只读这些局部变量；倒车段被抽成
-> `ReverseAndSwitchAxle`，只在正常出车时 `yield return` 它。所以两条路径的运动学不会分叉。
+> `linAccel` / `maxSpeed` / `driveDur` / `driveAccel`），并把**驱动轴**也选成一个局部变量
+> `drive`（正常出车 = `front`，绳连后车 = `ropeAxle`），两个循环的位移与偏航都写 `drive`，
+> 转正收尾也由 `drive.SetParent(transform, true)` 归位；倒车段被抽成 `ReverseAndSwitchAxle`，
+> 只在正常出车时 `yield return` 它。所以两条路径的换轴与运动学不会分叉。
 >
 > `ropeRearExitEnabled` 是总开关：为 false 时，即使传入 `ropeRearExit: true` 也走正常出车
 > （等价于「绳组后车也用原来的倒车出车」）。
@@ -410,6 +423,7 @@ v = min(v + ropeExitAcceleration * dt, ropeExitMaxSpeed)
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `frontAxle` | `Transform` | 前轴（空子物体，出车驱动轴） |
+| `ropeExitAxle` | `Transform` | 绳连后车出车转轴（空子物体，可选）：绳组非头车出车时的旋转 pivot；摆到车体中心即「原地转身」。**留空退回 `frontAxle`** |
 | `rearAxle` | `Transform` | 后轴（空子物体，倒车驱动轴） |
 | `reverseScaleAxle` | `Transform` | 倒车缩放轴（空子物体，夹在轴与车体之间，X 缩放做惯性夸张，可选） |
 | `rollAxle` | `Transform` | 侧翻自转轴（空子物体，最深层节点，位于缩放轴与车体之间，绕前进轴侧翻，可选） |
@@ -554,7 +568,7 @@ Destroy(gameObject)
 | `ropeExitDriveAcceleration` | 绳连后车直行段加速 | 更快到顶速 | 更缓 |
 
 > 绳连后车没有倒车段，所以**倒车那一组参数（`reverse*` / `exitScaleRecoverDuration`）对它完全无效**；
-> 侧翻与弹性两组参数则是两条路径共用的。
+> 侧翻（`roll*`）与弹性（`elastic*`）因为换轴逻辑一致，对两种走法**都生效**、共用同一组参数。
 | `elasticRecoverDuration` | 弹性复原快慢（到最大后多久回弹到 1） | 回弹更慢 | 回弹更快 |
 
 ---
@@ -572,7 +586,8 @@ Destroy(gameObject)
 9. **scale 重置**：只重置「空轴」（换轴时刚取出的新轴、归位的旧轴）的 `localScale` 为 1；小车自身缩放**不重置**（pivot 与缩放轴不一致会瞬移），而是让小车全程留在缩放轴下、避免被烘。
 10. **侧翻自转轴**：新增 `rollAxle` 作为最深层节点（缩放轴之下、车体之上）。侧翻自出车开始即用时间时钟驱动（`p = clamp01(τ / rollOutDuration)`，先匀加速后匀减速到 `rollMaxAngle`，到点后保持）；转正后保留自转轴作父物体，侧翻角匀加速归 0 后自转轴才归位。
 11. **弹性缩放轴**：新增 `elasticScaleAxle`，在侧翻归 0 后**单独应用**（其他轴均已归位为小车子物体，不共存）。用 `Vector3` 直接定义最终缩放 `elasticTargetScale`，在 `elasticScaleDuration` 内匀减速从 `(1,1,1)` 缩放到该值，到位后立即在 `elasticRecoverDuration` 内匀加速复原，复原后弹性轴归位、继续整车直行。
-12. **绳连后车走独立变体（跳过倒车）**：绳组错峰出库时，后车本来是被前面的车「拽」出去的，再做一遍倒车会让整条链的节奏打架（后车先退再进，绳长反复伸缩）。改成跳过倒车、直接切前轴，从正姿甩头归 0 出车。
-13. **变体的运动参数整组独立**（`ropeExitMaxAngle` / `ropeExitAngularAcceleration` / `ropeExitAcceleration` / `ropeExitMaxSpeed` / `ropeExitDriveDuration` / `ropeExitDriveAcceleration`）：没有倒车段的起始角与预压缩，正常出车那一组值在这个新起点上手感对不上，所以不共用。**侧翻与弹性仍共用**——它们是叠加在各运动路径上的装饰动画，保持一致更省心，也避免参数表翻倍。
-14. **实现上不复制运动学代码**：`Run` 按 `ropeRearExit` 把六个参数选进局部变量，两个循环只读局部变量；倒车段抽成 `ReverseAndSwitchAxle` 只在正常出车时 `yield return`。这样两条路径的运动公式永远一致，将来调公式只改一处。
-15. **变体带总开关 `ropeRearExitEnabled`**：留着方便对比两种出车观感（关掉即等价于「绳组后车也用原来的倒车出车」），不必回滚代码。
+12. **绳连后车走独立变体（跳过倒车）**：绳组错峰出库时，后车本来是被前面的车「拽」出去的，再做一遍倒车会让整条链的节奏打架（后车先退再进，绳长反复伸缩）。改成跳过倒车，从正姿甩头归 0 出车。
+13. **变体的换轴根节点单独配置**（`ContainerItem.ropeExitAxle`，留空退回 `frontAxle`）：绕前轴甩头会把车身左右端点大幅扫出去，而绳子的两端就在车体左右两侧——后车每个都甩一遍，绳端跟着乱晃。把转轴独立出来，就能把它摆到车体中心（或任何想要的位置）来减小端点位移，**且完全不动正常出车的前轴**。交替试过「不换轴、直接转车体」，但那样车体不在自转轴 / 弹性轴下，**侧翻与弹性会一起失效**；改为「换轴照旧、只换根节点」后两段都保住了。
+14. **变体的运动参数整组独立**（`ropeExitMaxAngle` / `ropeExitAngularAcceleration` / `ropeExitAcceleration` / `ropeExitMaxSpeed` / `ropeExitDriveDuration` / `ropeExitDriveAcceleration`）：没有倒车段的起始角与预压缩，正常出车那一组值在这个新起点上手感对不上，所以不共用。
+15. **实现上不复制换轴与运动学代码**：`Run` 按 `ropeRearExit` 把六个参数选进局部变量，并把驱动轴也选成一个局部变量 `drive`（正常出车 = `front`，绳连后车 = `ropeAxle`），两个循环的位移与偏航都写 `drive`、转正收尾用 `drive.SetParent(transform, true)` 归位；倒车段抽成 `ReverseAndSwitchAxle` 只在正常出车时 `yield return`。这样两条路径不再分叉，将来改公式或改换轴只改一处。
+16. **变体带总开关 `ropeRearExitEnabled`**：留着方便对比两种出车观感（关掉即等价于「绳组后车也用原来的倒车出车」），不必回滚代码。

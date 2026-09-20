@@ -51,6 +51,10 @@ namespace CrowdMatch
         [Tooltip("前轴（空子物体，出车时的驱动轴）")]
         public Transform frontAxle;
 
+        [Tooltip("绳连后车出车转轴（空子物体，可选）：绳组里**非头车**出车时的旋转 pivot，" +
+            "单独配置就能让后车绕别的位置转（例如车体中心）而不用改正常出车的前轴。留空则退回用 frontAxle")]
+        public Transform ropeExitAxle;
+
         [Tooltip("后轴（空子物体，倒车时的驱动轴）")]
         public Transform rearAxle;
 
