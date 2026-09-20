@@ -39,7 +39,21 @@
       "Bash(sed -i 248,278d Docs/EmojiSystemDesign.md)",
       "Bash(sed -i 's/^### 6\\\\.7 生气表情的回收时机/### 6.6 生气表情的回收时机/' Docs/EmojiSystemDesign.md)",
       "Bash(sed -i -e '5s|，以及点击受阻 / 排队生气的\\\\*\\\\*「一波多点」\\\\*\\\\*（§6\\\\.6）||' -e 294,297d -e 322,323d -e 353,360d -e 386,392d -e '321s|§6\\\\.7|§6.6|' -e '350s|§6\\\\.7|§6.6|' -e '350s|上传送带|上车|' Docs/EmojiSystemDesign.md)",
-      "Bash(awk '/^## 10\\\\. 决策记录/,/^## 11\\\\./' Docs/EmojiSystemDesign.md)"
+      "Bash(awk '/^## 10\\\\. 决策记录/,/^## 11\\\\./' Docs/EmojiSystemDesign.md)",
+      "Bash(grep -nE \"^#{2,3} \" Docs/ContainerExitDesign.md)",
+      "Bash(awk '/^## 12\\\\. 决策记录/,0' Docs/ContainerExitDesign.md)",
+      "Bash(awk '/^## 10\\\\. 已确认的决策|^## 10\\\\. 决策记录/,/^## 11\\\\.|^## 12\\\\./' Docs/ContainerRopeDesign.md)",
+      "Bash(awk '/^## 11\\\\. 验证清单/,/^## 12\\\\./' Docs/ContainerRopeDesign.md)",
+      "Bash(sed -i -e 's|^13\\\\. 洗牌兜底：|14. 洗牌兜底：|' -e 's|^12\\\\. 重排：跑一次|13. 重排：跑一次|' -e 's|^11\\\\. 运行：连续多次出|12. 运行：连续多次出|' -e 's|^10\\\\. 运行：全组装满|11. 运行：全组装满|' -e 's|^9\\\\. 运行：让组内部分车|10. 运行：让组内部分车|' -e 's|^8\\\\. \\\\*\\\\*末端贴合\\\\*\\\\*|9. **末端贴合**|' -e 's|^7\\\\. 运行：把其中一辆车|8. 运行：把其中一辆车|' -e 's|^6\\\\. 运行：关卡加载后绳|7. 运行：关卡加载后绳|' Docs/ContainerRopeDesign.md)",
+      "Bash(grep -v \"///\")",
+      "Bash(awk '/^### 6.8 /,/^## 7\\\\. 组件与 API/' Docs/ContainerExitDesign.md)",
+      "Bash(dotnet build *)",
+      "Bash(grep -E \"\\\\.\\(prefab|unity|meta|asset\\)$\")",
+      "Bash(grep -vE \"^\\\\+\\\\s*///|^\\\\+\\\\s*//|^\\\\+\\\\s*$|^\\\\+\\\\s*\\\\|\")",
+      "Bash(grep -o 'Compile Include=\"Assets\\\\\\\\Scripts\\\\\\\\Gameplay\\\\\\\\PixelGroup.cs\"' Assembly-CSharp.csproj)",
+      "Bash(git checkout *)",
+      "Read(//c/Users/hougo/.claude/projects/F--CrowdMatch/**)",
+      "Bash(cd /c/Users/hougo/.claude/projects/F--CrowdMatch && grep -b -o -m1 \"private bool TakeGateBudget\\(ExtractState st\\)\" 7af79093-572e-4ef8-9f77-89546145fe26.jsonl)"
     ]
   }
 }
