@@ -298,7 +298,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 7
+  m_RootOrder: 8
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1055116488556959032
 GameObject:
@@ -329,7 +329,38 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 11
+  m_RootOrder: 12
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1642966659126998048
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6573816072339993371}
+  m_Layer: 0
+  m_Name: RopeAxle
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6573816072339993371
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1642966659126998048}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6649613836873739741}
+  m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2241682447060008416
 GameObject:
@@ -456,7 +487,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 5
+  m_RootOrder: 6
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3158978698464442674
 GameObject:
@@ -490,7 +521,7 @@ Transform:
   - {fileID: 1327761262032724933}
   - {fileID: 5621284353001030607}
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 9
+  m_RootOrder: 10
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4183084718532272777
 GameObject:
@@ -521,7 +552,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 8
+  m_RootOrder: 9
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4799539194707009635
 GameObject:
@@ -817,6 +848,7 @@ Transform:
   - {fileID: 616969079983411815}
   - {fileID: 8116897745096912535}
   - {fileID: 5733411419755414242}
+  - {fileID: 6573816072339993371}
   - {fileID: 5069035725881052468}
   - {fileID: 2994442980820408748}
   - {fileID: 6380109393100094303}
@@ -851,6 +883,7 @@ MonoBehaviour:
   ropeAnchorLeft: {fileID: 2669120192788595211}
   ropeAnchorRight: {fileID: 935631904960828710}
   frontAxle: {fileID: 5733411419755414242}
+  ropeExitAxle: {fileID: 6573816072339993371}
   rearAxle: {fileID: 5069035725881052468}
   reverseScaleAxle: {fileID: 2994442980820408748}
   rollAxle: {fileID: 6380109393100094303}
@@ -911,6 +944,13 @@ MonoBehaviour:
   elasticTargetScale: {x: 1.1, y: 0.8, z: 1.1}
   elasticScaleDuration: 0.05
   elasticRecoverDuration: 0.1
+  ropeRearExitEnabled: 1
+  ropeExitMaxAngle: 50
+  ropeExitAngularAcceleration: 600
+  ropeExitAcceleration: 10
+  ropeExitMaxSpeed: 18
+  ropeExitDriveDuration: 1.2
+  ropeExitDriveAcceleration: 70
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0
@@ -940,7 +980,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 6
+  m_RootOrder: 7
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7796291526418217155
 GameObject:
@@ -1087,7 +1127,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 10
+  m_RootOrder: 11
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &8986039854410672198
 GameObject:
@@ -1149,5 +1189,5 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6649613836873739741}
-  m_RootOrder: 12
+  m_RootOrder: 13
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

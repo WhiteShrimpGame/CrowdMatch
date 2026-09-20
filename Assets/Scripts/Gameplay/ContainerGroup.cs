@@ -71,7 +71,10 @@ namespace CrowdMatch
         [Tooltip("绳子总开关（调试用：关掉可先单独验证出库逻辑）")]
         public bool ropeEnabled = true;
 
-        [Tooltip("绳组出库间隔（秒）：最左边那辆先出，之后每辆比前一辆晚这么多（0 = 全组同一帧出库）")]
+        [Tooltip("绳组出库间隔（秒）：头车 → 第一个后车的间隔（与「后车之间」的间隔独立配置）。0 = 头车与第一个后车同一帧出")]
+        public float ropeExitHeadGap = 0.2f;
+
+        [Tooltip("绳组出库间隔（秒）：后车之间（第 2 辆起）每辆比前一辆晚这么多。0 = 全组后续同一帧出")]
         public float ropeExitStagger = 0.2f;
 
         /// <summary>
@@ -346,14 +349,17 @@ namespace CrowdMatch
         /// 前排容器耗尽：立即清空该格，启动小车出库动画；转正瞬间触发补位。
         /// 轴未配置时（ContainerExitDriver.Play 回退）等价旧的「直接销毁 + 补位」。
         /// </summary>
-        private void StartContainerExit(ContainerItem gone, int col)
+        /// <param name="ropeRearExit">
+        /// true = 绳组的非头车：出库跳过倒车、直接切前轴（运动参数走 ContainerExitDriver 里独立的那一组）。
+        /// </param>
+        private void StartContainerExit(ContainerItem gone, int col, bool ropeRearExit = false)
         {
             grid[col, 0] = null;
 
             var driver = gone.GetComponent<ContainerExitDriver>();
             if (driver == null)
                 driver = gone.gameObject.AddComponent<ContainerExitDriver>();
-            driver.Play(() => RefillColumn(col));
+            driver.Play(() => RefillColumn(col), ropeRearExit);
         }
 
         /// <summary>
@@ -402,9 +408,10 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 全组出库：链首（列最小 = 最左边）那辆立即出发，其余按 <see cref="ropeExitStagger"/> 依次延迟固定间隔，
-        /// 形成「前面的车把后面的车依次拽出去」的观感。间隔为 0 时等价于全组同一帧出发。
-        /// 期间各组车逐辆出库，绳长仍在每帧同步，所以延迟窗口内绳子会被拉长后逐段消失。
+        /// 全组出库：头车（列最小 = 最左边）立即出发；第一个后车在 <see cref="ropeExitHeadGap"/> 之后，
+        /// 其余后车之间再各自间隔 <see cref="ropeExitStagger"/>——两段间隔独立配置。
+        /// 出车方式也分两种：头车走正常出车（含倒车），被绳子连接的后车跳过倒车、直接切前轴（见 ContainerExitDriver）。
+        /// 期间绳长仍在每帧同步，所以延迟窗口内绳子会被拉长后逐段消失。
         /// </summary>
         private void ExitRopeGroup(List<ContainerItem> chain)
         {
@@ -413,12 +420,17 @@ namespace CrowdMatch
 
         private IEnumerator ExitRopeGroupRoutine(List<ContainerItem> chain)
         {
-            float delay = Mathf.Max(0f, ropeExitStagger);
+            float headGap = Mathf.Max(0f, ropeExitHeadGap);   // 头车 → 第一个后车
+            float rearGap = Mathf.Max(0f, ropeExitStagger);   // 后车 → 后车
 
             for (int i = 0; i < chain.Count; i++)
             {
-                if (i > 0 && delay > 0f)
-                    yield return new WaitForSeconds(delay);
+                if (i > 0)
+                {
+                    float gap = i == 1 ? headGap : rearGap;
+                    if (gap > 0f)
+                        yield return new WaitForSeconds(gap);
+                }
 
                 var car = chain[i];
                 if (car == null || grid == null)
@@ -427,7 +439,8 @@ namespace CrowdMatch
                 if (!IsInRange(car.gridX, 0) || grid[car.gridX, 0] != car)
                     continue;      // 已被移走 / 已开始出库：幂等兜底
 
-                StartContainerExit(car, car.gridX);
+                // i == 0 是头车：正常出车；i > 0 是「被绳子连接的后车」：跳过倒车、直接切前轴
+                StartContainerExit(car, car.gridX, i > 0);
             }
         }
 
@@ -765,6 +778,107 @@ namespace CrowdMatch
                 _ropeRoots.Add(go);
             else
                 Destroy(go);   // 端点缺失 / 生成失败：不留空壳
+        }
+
+        // ===== 绳连的编辑器可视化 =====
+
+        [Header("绳连 Gizmos")]
+        [Tooltip("整条绳连预览（线 + 端点小球）的 Y 偏移（米）：抬到车体上方，避免被车挡住")]
+        public float ropeGizmoYOffset = 1f;
+
+        [Tooltip("绳连预览的颜色（洗牌开着导致运行时不会建绳时，自动按该色的低透明度画）")]
+        public Color ropeGizmoColor = new Color(0.1f, 1f, 1f);
+
+        [Tooltip("绳连预览端点小球的半径（米）")]
+        public float ropeGizmoAnchorRadius = 0.1f;
+
+        /// <summary>端点没配时的醒目色（固定亮红，不跟随 Rope Gizmo Color）。</summary>
+        private static readonly Color RopeGizmoMissingAnchorColor = new Color(1f, 0.15f, 0.15f);
+
+        /// <summary>
+        /// 非运行模式下把绳连画出来：同一个 ropeGroupId 的车按列升序串成链，在相邻两车之间画一条线——
+        /// 端点取车上的 <see cref="ContainerItem.ropeAnchorRight"/> / <see cref="ContainerItem.ropeAnchorLeft"/>，
+        /// 也就是运行时真正建绳的那两点。所以看到的就是运行时绳子的位置与走向。
+        ///
+        /// 两个刻意的处理：
+        /// · **整体抬到车体上方**（<see cref="ropeGizmoYOffset"/>）——端点就在车体侧面，不抬会被车完全挡住；
+        /// · 洗牌开着或绳子总开关关掉时（运行时不会建绳，见 §5.5）用**同色低透明度**画，一眼能分辨。
+        ///
+        /// 线宽用 `Gizmos.DrawLine` 的默认值（恒 1px，该 API 没有宽度参数）；曾用 `Handles.DrawAAPolyLine` 加粗过，
+        /// 但那样要把整段代码塞进 `#if UNITY_EDITOR` 并引 `UnityEditor`，收益不值当，已放弃。
+        ///
+        /// 运行时不画：那时绳子是真渲染出来的，再叠一层 Gizmos 只会糊。
+        /// </summary>
+        private void OnDrawGizmos()
+        {
+            if (Application.isPlaying)
+                return;
+
+            var items = GetComponentsInChildren<ContainerItem>();
+            if (items == null || items.Length == 0)
+                return;
+
+            var groups = new Dictionary<int, List<ContainerItem>>();
+            for (int i = 0; i < items.Length; i++)
+            {
+                var item = items[i];
+                if (item == null || item.ropeGroupId == 0)
+                    continue;
+
+                List<ContainerItem> list;
+                if (!groups.TryGetValue(item.ropeGroupId, out list))
+                {
+                    list = new List<ContainerItem>();
+                    groups[item.ropeGroupId] = list;
+                }
+                list.Add(item);
+            }
+
+            if (groups.Count == 0)
+                return;
+
+            bool live = ropeEnabled && !shuffleContainers;
+            Color lineColor = live ? ropeGizmoColor : Dimmed(ropeGizmoColor);
+            Vector3 lift = Vector3.up * ropeGizmoYOffset;
+
+            foreach (var pair in groups)
+            {
+                var chain = pair.Value;
+                chain.Sort((a, b) => a.gridX.CompareTo(b.gridX));
+
+                for (int i = 0; i + 1 < chain.Count; i++)
+                {
+                    Transform leftAnchor = chain[i].ropeAnchorRight;
+                    Transform rightAnchor = chain[i + 1].ropeAnchorLeft;
+
+                    Vector3 a = (leftAnchor != null ? leftAnchor.position : chain[i].transform.position) + lift;
+                    Vector3 b = (rightAnchor != null ? rightAnchor.position : chain[i + 1].transform.position) + lift;
+
+                    Gizmos.color = lineColor;
+                    Gizmos.DrawLine(a, b);
+
+                    DrawRopeGizmoAnchor(leftAnchor, a, live);
+                    DrawRopeGizmoAnchor(rightAnchor, b, live);
+                }
+            }
+        }
+
+        /// <summary>画一个端点小球：锚点存在时用链条色，缺失时用醒目红（提示这辆车没配端点）。</summary>
+        private void DrawRopeGizmoAnchor(Transform anchor, Vector3 pos, bool live)
+        {
+            if (anchor == null)
+                Gizmos.color = RopeGizmoMissingAnchorColor;
+            else
+                Gizmos.color = live ? ropeGizmoColor : Dimmed(ropeGizmoColor);
+
+            Gizmos.DrawSphere(pos, ropeGizmoAnchorRadius);
+        }
+
+        /// <summary>把颜色压暗成半透明（表示「这些连了也不会建绳」）。</summary>
+        private static Color Dimmed(Color c)
+        {
+            c.a *= 0.35f;
+            return c;
         }
     }
 }

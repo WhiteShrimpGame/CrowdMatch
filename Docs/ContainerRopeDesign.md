@@ -5,7 +5,7 @@
 > 并改动 `ContainerGroup.cs`、`ContainerItem.cs`、`LevelData.cs`、`LevelLoader.cs`、`LevelDataExporter.cs`、
 > `ContainerItemEditor.cs`、`ContainerRearranger.cs`，新增 `ContainerRopeLink.cs`。
 >
-> **仍需你在 Unity 里做的三步见 §10.1**（建 `Rope` 层、预制体挂两个端点、指定绳子材质）。
+> **仍需你在 Unity 里做的四步见 §10.1**（建 `Rope` 层、预制体挂两个端点、指定绳子材质、配绳后车出车转轴）。
 
 ---
 
@@ -20,7 +20,7 @@
 | 或取消连接（选中任意一个被连接的车，取消整组） | §4.3 |
 | 运行状态下绳子长度始终保持和端点实际距离完全一致 | 无物理「绷直驱动」，每帧铺骨骼（§5.2，核心） |
 | 当被链接的部分车完成匹配时，留在前排 | 组未齐时满车不出库、占住前排、该列不补位（§5.4） |
-| 全部匹配同时出车 | 全组一起满足出库条件，但**按列序依次延迟固定间隔**出库（最左先出）——§5.4 |
+| 全部匹配同时出车 | 全组一起满足出库条件，但**按列序依次延迟**出库（最左先出）：头车 → 第一个后车、后车 → 后车用**两段独立配置的间隔**；且头车走正常出车、被绳子连接的后车走「跳过倒车」的变体（§5.4） |
 | 绳子需要支持关卡 JSON 的导入导出 | `ContainerItemData.ropeGroupId`（§3.1、§3.3） |
 | 运行模式下洗牌激活时，所有绳子失效 | 标记时强制关洗牌 + 运行时兜底忽略（§4.4、§5.5） |
 | 按 Record 重排时，清除所有绳子信息 | 重排路径天然丢弃，另加显式兜底（§3.3） |
@@ -47,7 +47,7 @@
 | 脚本 | 植入 `unity-rope` 的三个 `.cs`（三者同程序集、均无命名空间） | **已完成**（已校验字节一致） |
 | 资源 | `Rope.mat` / `Rope_d.mat` + 两张贴图，**必须连同 `.meta` 一起复制** | **已完成**（无 GUID 冲突） |
 | 层 | 新增名为 `Rope` 的层 | **待你做**（`TagManager.asset` 用户层全空，只有内置层 + `Click`） |
-| 预制体 | ContainerItem 预制体新增两个空物体作为端点（§2.3） | **待你做** |
+| 预制体 | ContainerItem 预制体新增两个空物体作为端点（§2.3）、一个作为绳后车出车转轴（`ropeExitAxle`） | **待你做** |
 | 材质引用 | ContainerGroup 的 `Rope Material` 字段指定 `Rope.mat` | **待你做**（§10.1） |
 
 ### 2.2 植入路径与依赖检查
@@ -175,6 +175,36 @@ public int ropeGroupId;   // 0 = 未连接；同 id 的车成组（旧 JSON 无�
 
 标记时扫一遍同组下所有车的 `ropeGroupId`，取 `max + 1` 作为新 id。id 只需在单个关卡内唯一。
 
+### 4.6 编辑器可视化（Gizmos）
+
+非运行模式下光看 Inspector 的数字看不出谁连着谁，所以 `ContainerGroup.OnDrawGizmos` 把绳连画出来：
+
+| 画什么 | 怎么画 |
+|---|---|
+| 绳 | 同一个 `ropeGroupId` 的车按列升序串成链，相邻两车之间画一条线 |
+| 端点 | 线的两端取 `ropeAnchorRight` / `ropeAnchorLeft`——**就是运行时真正建绳的那两点**，所以看到的就是运行时绳子的位置与走向；两端各画一个小球 |
+| 整体抬升 | 线和小球统一加 `ropeGizmoYOffset`（默认 1 米）——端点就在车体侧面，不抬会被车完全挡住 |
+| 漏配端点 | 某辆车没配端点 → 该端画成**亮红小球**并落在车体位置 |
+| 运行时不会建绳 | 洗牌开着或 `ropeEnabled = false` → 用**同色低透明度**（alpha × 0.35）画，一眼能分辨 |
+
+可调参数（都在 `ContainerGroup` 上，归在「绳连 Gizmos」分组）：
+
+| 字段 | 默认 | 作用 |
+|---|---|---|
+| `ropeGizmoYOffset` | 1 | 整条预览的 Y 偏移（米）——小球被车挡住的解法就是这个 |
+| `ropeGizmoColor` | 亮青 `(0.1, 1, 1)` | 预览颜色；「运行时不会建绳」那档自动取它的 35% 透明度 |
+| `ropeGizmoAnchorRadius` | 0.1 | 端点小球半径（米）——**小球半径就在这里调** |
+
+三点说明：
+
+- **线宽恒为 1px**：用的是 `Gizmos.DrawLine`，这个 API **没有宽度参数**，加不了粗。曾改用编辑器专用的
+  `Handles.DrawAAPolyLine`（可指定宽度）实现过一版，但那样必须把整段预览代码塞进 `#if UNITY_EDITOR`、并在文件顶部
+  条件编译引入 `UnityEditor`，为了线宽付这个复杂度不值当，**已放弃、换回 `DrawLine`**。
+- **不再需要条件编译**：换回 `DrawLine` 后不依赖任何编辑器 API，所以这几个字段和这个方法都是普通运行时成员，
+  文件顶部也不用再条件编译引入 `UnityEditor`。
+- **运行时不画**：那时绳子是真渲染出来的，再叠一层 Gizmos 只会糊。用的是 `OnDrawGizmos`（不是 `OnDrawGizmosSelected`），
+  所以不用选中就能看到全场景的绳连；想临时藏起来就在 Scene 视图的 Gizmos 下拉里关掉这个组件。
+
 ---
 
 ## 5. 运行时
@@ -271,7 +301,9 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 若 item.ropeGroupId == 0          → 保持现状（无条件出库）
 否则：
     组就绪 = 组内每辆车都满足 IsEmpty && grid[car.gridX, 0] == car
-    就绪   → 链首（列最小 = 最左）立即出库，其余按 ropeExitStagger 依次延迟
+    就绪   → 链首（列最小 = 最左）立即出库（正常出车）；
+             第一个后车再等 ropeExitHeadGap，其余后车之间各等 ropeExitStagger；
+             后车一律走「跳过倒车、直接切前轴」的变体
     未就绪 → 直接 return（该满车留在前排，不补位、不出库）
 ```
 
@@ -281,7 +313,7 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 |---|---|
 | 组内车满但不在前排（`gridZ > 0`） | 它不满足就绪条件。它所在列的前车照常出库 → 它被 `RefillColumn` 推到前排，然后**停在前排等待**（该列不再补位，因为它占着 `grid[col,0]`） |
 | 组内部分车满、其余未满 | 满的那辆停在前排等；未满的照常收像素。玩家看到的正是「已匹配的先排着队等」 |
-| 全组都满且都在前排 | `TryExitIfAtFront` 被最后一次触发时启动出库协程：链首（最左）立即出库，其余按 `ropeExitStagger` 依次延迟。**不是同一帧**——前面的车先走，把后面的车依次拽出去 |
+| 全组都满且都在前排 | `TryExitIfAtFront` 被最后一次触发时启动出库协程：链首（最左）立即出库，第一个后车在 `ropeExitHeadGap` 之后、其余后车之间各间隔 `ropeExitStagger`。**不是同一帧**——前面的车先走，把后面的车依次拽出去 |
 | 全组出库完成 | 每辆车的 `ContainerExitDriver` 各自回调 `RefillColumn(自己的列)`。因为出库是错峰的，补位也**依次**发生（`onRefill` 在「转正瞬间」触发，所以补位比出库启动还要早一点） |
 
 **必须同时处理的既有路径**：
@@ -315,7 +347,8 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 
 | 阶段 | 表现 |
 |---|---|
-| 全组就绪 | 链首（最左）立即 `ContainerExitDriver.Play`，其余按 `ropeExitStagger` 依次延迟启动；绳子每帧跟着端点绷直 |
+| 全组就绪 | 链首（最左）立即 `ContainerExitDriver.Play(onRefill, ropeRearExit: false)` 走**正常出车**；后车按两段间隔依次 `Play(onRefill, ropeRearExit: true)` 走**跳过倒车的变体**（见 §6） |
+| 后车的出车方式 | **跳过倒车**，换轴逻辑照旧、但根节点换成**单独配置的转轴**（`ContainerItem.ropeExitAxle`，留空退回前轴）；从正姿（0°）甩到 `ropeExitMaxAngle` 再归 0 出车。把转轴摆到车体中心即可「原地转身」，避免绕前轴把绳的两端大幅扫出去。运动参数整组独立（`ContainerExitDriver` 的 Rope Rear Exit 那一组）；侧翻与弹性照常生效。详见 `Docs/ContainerExitDesign.md` §6.8 |
 | 延迟窗口内 | 左边那辆已经开走、右边那辆还停在原地 → 绳子被拉长，但 tiling 补偿让它表现为「绳长被不断放出」而不是拉稀；车一离开销毁，对应那条绳也消失 |
 | 驶出途中 | 车被挂到各自的轴（前轴/后轴/侧翻/弹性）上，端点作为车体子物随车一起走 → 绳子被「拽」着走 |
 | 车销毁 | `ContainerExitDriver.Run` 末尾 `Destroy(gameObject)`（`:332`）。绳根由 `ContainerRopeLink` 每帧检测「任一锚点已销毁」→ 自行销毁 |
@@ -335,7 +368,8 @@ node.fLength = (b - a).magnitude            // 让内部状态与实际一致
 | `ropeDiameter` | 车距的合理比例（建议先按实际间距试 0.1~0.2） | 绳子粗细 |
 | `ropeLayerName` | `"Rope"` | 绳节层 |
 | `ropeEnabled` | true | 总开关（调试用：关掉可先只验证出库逻辑） |
-| `ropeExitStagger` | 0.2 | 绳组出库间隔（秒）：最左先出，之后每辆比前一辆晚这么多；0 = 全组同一帧 |
+| `ropeExitHeadGap` | 0.2 | 出库间隔（秒）：**头车 → 第一个后车** |
+| `ropeExitStagger` | 0.2 | 出库间隔（秒）：**后车之间**（第 2 辆起）。与上一行独立配置；两段都为 0 = 全组同一帧 |
 
 ### 7.1 纹理密度补偿（「从一端放出」的观感）
 
@@ -428,8 +462,10 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 18. **长度不设上限**：已确认包围盒（`updateWhenOffscreen`）与断绳逻辑（`LinkJointBreakForce = Infinity`）都不构成限制，直线绳的纵向分段数也不影响观感（§7.1）。
 19. **末端漏一段靠骨节长度缩放修，而不是改摆位**：管体最后一节的长度是**建绳时烘焙**进顶点的常量（`fLength / nNumLinks`），摆位改不动它；改骨骼 `localScale.z` 能让蒙皮把那个 z 偏移一起放大，末端才回得到锚点。摆位公式（`t = i/n`）本身已经是对的（§7.2）。
 20. **只缩放 z、不缩放 x/y**：顶点径向偏移由 x/y 承载，动了就会让管子变粗变细。
-21. **绳组按列序错峰出库（`ropeExitStagger`）**：链首（列最小 = 最左）立即出库，其余依次延迟固定间隔。`Chain` 已按 `gridX` 升序排好，所以「最左先出」不需要额外判定。错峰还带来一个副作用：延迟窗口内左车已走、右车未动，绳子被拉长——正好由 §7.1 的 tiling 补偿表现为「绳长被放出」。
-22. **错峰用协程而不是逐车排队**：`TryExitIfAtFront` 的绳组门槛（`IsRopeGroupReady` 要求全组都在前排）在链首出库的瞬间就不再成立，所以协程只会被启动一次，天然幂等；不需要额外的「本组已开始出库」标记。
+21. **绳组按列序错峰出库**：链首（列最小 = 最左）立即出库，其余依次延迟。`Chain` 已按 `gridX` 升序排好，所以「最左先出」不需要额外判定。错峰还带来一个副作用：延迟窗口内左车已走、右车未动，绳子被拉长——正好由 §7.1 的 tiling 补偿表现为「绳长被放出」。
+22. **两段间隔独立配置**（`ropeExitHeadGap` 头车→第一个后车、`ropeExitStagger` 后车→后车）：头车要先倒车（`reverseDuration + reverseWait`）才开始前进，后车是直接出车，两者的「起步延迟」手感不同，共用一个值必然有一边不对。实现上就是协程里 `i == 1` 用前者、`i >= 2` 用后者。
+23. **后车用「跳过倒车 + 独立转轴」的出车变体**：后车本来是被前面的车拽出去的，再做一遍倒车会让整条链的节奏打架（后车先退再进，绳长反复伸缩）；而绕前轴甩头会把车身左右端点大幅扫出去，绳端跟着乱晃——所以既不倒车，也不复用正常出车的前轴，改用**单独配置的转轴**（`ropeExitAxle`，摆到车体中心即原地转身）。**换轴逻辑不动，所以侧翻与弹性照常生效**。变体细节与参数见 `Docs/ContainerExitDesign.md` §6.8；这里只负责决定「谁是头车、谁是后车」——`chain[0]` 走正常出车，`chain[1..]` 走变体。
+24. **错峰用协程而不是逐车排队**：`TryExitIfAtFront` 的绳组门槛（`IsRopeGroupReady` 要求全组都在前排）在链首出库的瞬间就不再成立，所以协程只会被启动一次，天然幂等；不需要额外的「本组已开始出库」标记。
 
 ---
 
@@ -446,13 +482,14 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 | 7 | 同一列出现两个不同绳组 | **允许，但不得交叉**；且一辆车不能属于多个绳组 | 交叉校验（§4.2）；「一车一组」由 `ropeGroupId` 单值天然保证 |
 | 8 | 纹理拉伸 / 长度上限 | **改成「从一端放出绳长」的观感**，沿绳长保持固定纹理密度、长度不设上限 | tiling 每帧补偿（§7.1） |
 
-### 10.1 需手工完成的三步
+### 10.1 需手工完成的四步
 
 | 步骤 | 位置 | 说明 |
 |---|---|---|
 | 1. 新增层 | `ProjectSettings/TagManager.asset` → Tags and Layers | 加一个名为 **`Rope`** 的层；建议在 Physics 碰撞矩阵里把 `Rope` 与所有层的勾选**全部取消**（绳子纯视觉） |
 | 2. 挂端点 | ContainerItem 预制体 | 在车体根下建两个空物体，命名 `ropeAnchorLeft` / `ropeAnchorRight`，位置按你要的挂点摆；不要挂 Rigidbody，也不要放在 `elasticScaleAxle` 之下 |
 | 3. 配材质 | 场景里 ContainerGroup 的 Inspector | 把 `Assets/CrowdMatch/Materials/Rope.mat` 拖到新增的 `Rope Material` 字段（可再调 `Rope Link Count` / `Rope Diameter`） |
+| 4. 配绳后车转轴 | ContainerItem 预制体 | 新增一个空物体作为**绳连后车出车时的旋转 pivot**，赋给 `ContainerItem.ropeExitAxle`。摆在车体中心即「原地转身」。**不配就退回前轴**（等于没改），所以想让后车转法不同于头车，这一步必须做 |
 
 > 未做第 1 步时，`Rope.cs` 会把绳节放到 `Default` 层并打 warning —— 绳节会与像素/车互撞，务必先做。
 > 未做第 2 步时，「标记为连接」会被校验拦住并提示缺端点。
@@ -467,16 +504,21 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 4. 编辑器：故意违反每条校验（1 个车、同列 2 个、列不连续、端点未配置、与已有组交叉）→ 提示正确且按钮置灰。
    交叉用例：先标记 A = {(col1,row0), (col2,row2)}，再试 B = {(col1,row2), (col2,row0)} → 应被拒。
 5. 编辑器：「取消连接」选中组内任一个车 → 整组 `ropeGroupId` 归零；Undo 可整体回退。
-6. 运行：关卡加载后绳子出现在相邻车之间，两端贴合挂点，**无下垂、无拉伸脱离**。
-7. 运行：把其中一辆车补位前移（造成斜向）→ 绳子每帧重新绷直，长度与端点距离一致；
+6. **编辑器可视化**：非运行模式下 Scene 视图里能看到绳连——标记过的车之间有线，线的两端落在 `ropeAnchorLeft/Right` 上（小球标出）。
+   分项验证：故意清掉某辆车的端点 → 该端小球变**红**；把 `ContainerGroup.shuffleContainers` 打开 → 整条链变**半透明灰**；进 Play → 线条消失（由真绳子接管）。
+7. 运行：关卡加载后绳子出现在相邻车之间，两端贴合挂点，**无下垂、无拉伸脱离**。
+8. 运行：把其中一辆车补位前移（造成斜向）→ 绳子每帧重新绷直，长度与端点距离一致；
    **且绳子的花纹没有变稀**（贴图沿绳长保持固定世界密度，表现为「从起点端放出更多绳长」）。
-8. **末端贴合**：距离变化后（含补位途中、出库途中）绳子的两端都要**正好落在 anchor 上**，不能差一段。
+9. **末端贴合**：距离变化后（含补位途中、出库途中）绳子的两端都要**正好落在 anchor 上**，不能差一段。
    重点看**终点端**（右车的左端点）——那正是 §7.2 修的偏差；起点端本来就在锚点上。
-9. 运行：让组内部分车先装满 → 满车停在前排不动、该列不补位；其余车继续收像素。
-10. 运行：全组装满 → **最左那辆先出库，其余依次延迟 `ropeExitStagger`**，绳子随车驶出并在车销毁后消失，Console 无空引用异常；补位也随之依次发生。
-11. 运行：连续多次出库/补位，绳子不残留、不抖动、绳长始终贴合。
-12. 重排：跑一次「按 Record 重排容器」→ 输出 JSON 中所有 `ropeGroupId` 均为 0。
-13. 洗牌兜底：手改 JSON 让 `lockContainer = false` 且带绳组 → 运行时**不生成绳子**，车各自独立出库。
+10. 运行：让组内部分车先装满 → 满车停在前排不动、该列不补位；其余车继续收像素。
+11. 运行：全组装满 → **最左那辆先出库，其余依次延迟**（头车 → 第一个后车 = `ropeExitHeadGap`，后车之间 = `ropeExitStagger`）；
+    **头车有倒车段，后车没有**（跳过倒车，绕 `ropeExitAxle` 从 0° 甩到 `ropeExitMaxAngle` 再归 0；
+    转轴没配时退回前轴，此时看不出与头车的转轴差别）；后车的侧翻与弹性**照常生效**。
+    绳子随车驶出并在车销毁后消失，Console 无空引用异常；补位也随之依次发生。
+12. 运行：连续多次出库/补位，绳子不残留、不抖动、绳长始终贴合。
+13. 重排：跑一次「按 Record 重排容器」→ 输出 JSON 中所有 `ropeGroupId` 均为 0。
+14. 洗牌兜底：手改 JSON 让 `lockContainer = false` 且带绳组 → 运行时**不生成绳子**，车各自独立出库。
 
 ---
 
@@ -489,7 +531,9 @@ fRopeT = nLink / TotalLinks                             // u = 0 落在骨骼链
 | `Assets/Art/Textures/{rope_diffuseheight.tga,rope_normal.png}` + `.meta` | **新增**（skill 植入） | 连 `.meta` 一起 |
 | `Assets/Scripts/Gameplay/ContainerRopeLink.cs` | **新增** | 一条绳：建绳、建后清理、每帧绷直驱动、锚点消失自毁 |
 | `Assets/Scripts/Gameplay/ContainerItem.cs` | 改 | `ropeGroupId`、`ropeAnchorLeft/Right` 字段 |
-| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitStagger` 错峰出库；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参 |
+| `Assets/Scripts/Gameplay/ContainerGroup.cs` | 改 | 建绳入口 + 绳配置字段；`TryExitIfAtFront` 加绳组门槛；`ExitRopeGroup` 按 `ropeExitHeadGap` / `ropeExitStagger` 错峰出库、头车正常出车 / 后车走变体；`DestroyContainerInPlace` 绕开绳组车；`ClearContainers` 清绳；`SpawnContainer` 加形参；`OnDrawGizmos` 绳连预览（§4.6） |
+| `Assets/Scripts/Gameplay/ContainerExitDriver.cs` | 改 | `Play` 加 `ropeRearExit`；绳连后车跳过倒车、换轴根节点换成 `ropeExitAxle`；新增一组独立的 `ropeExit*` 参数；倒车段抽成 `ReverseAndSwitchAxle` |
+| ContainerItem 预制体 | **手工** | （除 §10.1 那两个端点外）新增一个空物体作为绳后车出车转轴，赋给 `ContainerItem.ropeExitAxle`；**不配就用前轴**，看不出差别 |
 | `Assets/Scripts/Gameplay/LevelData.cs` | 改 | `ContainerItemData.ropeGroupId` |
 | `Assets/Scripts/Core/LevelLoader.cs` | 改 | 传 `ropeGroupId`；洗牌时忽略绳组 |
 | `Assets/Scripts/Editor/LevelDataExporter.cs` | 改 | 导出 `ropeGroupId` |

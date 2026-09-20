@@ -5,7 +5,14 @@ using UnityEngine;
 namespace CrowdMatch
 {
     /// <summary>
-    /// 小车出库动画：容器耗尽后，用「前轴 / 后轴 + 父物体切换」驱动小车先倒车、再出车转正、最后整车直行开出场景。
+    /// 小车出库动画，两种走法，**换轴逻辑相同**、只是根节点与运动参数不同：
+    /// <list type="bullet">
+    /// <item><b>正常出车</b>：用「前轴 / 后轴 + 父物体切换」驱动小车先倒车、再出车转正、最后整车直行开出场景。</item>
+    /// <item><b>绳连后车</b>（<see cref="ropeRearExitEnabled"/>）：跳过倒车，切到**单独配置的转轴**
+    /// （<see cref="ContainerItem.ropeExitAxle"/>，留空退回前轴），从正姿（0°）先甩到
+    /// <see cref="ropeExitMaxAngle"/> 再加速归 0 出车；运动参数与正常出车**完全独立**。</item>
+    /// </list>
+    /// 因为换轴逻辑一致，**侧翻与弹性缩放对两种走法都生效**。
     /// 轴引用取自同物体上的 ContainerItem.frontAxle / rearAxle / reverseScaleAxle / rollAxle；未配置轴时回退为「直接补位 + 销毁」。
     /// 倒车缩放轴（reverseScaleAxle）夹在驱动轴与车体之间做惯性夸张；侧翻自转轴（rollAxle）是最深层节点，出车转正时侧翻、转正后归 0。
     /// 所有 SetParent 都用 worldPositionStays:true 保持世界位姿，零瞬移；偏航（eulerY）写世界 rotation，侧翻（eulerX）写自转轴 localRotation。
@@ -74,6 +81,28 @@ namespace CrowdMatch
         [Tooltip("弹性缩放复原时长（秒，到达最大值后立即匀加速回到 1 的时长）")]
         public float elasticRecoverDuration = 0.2f;
 
+        [Header("绳连后车出车 / Rope Rear Exit")]
+        [Tooltip("绳组里**非头车**的出车方式：跳过倒车、直接切前轴，从正姿（0°）先甩到 Rope Exit Max Angle 再加速归 0。下方参数与上面的正常出车完全独立")]
+        public bool ropeRearExitEnabled = true;
+
+        [Tooltip("甩头最大角度（度，正值为车头甩向负 Y；从 0° 甩到此角再归 0）")]
+        public float ropeExitMaxAngle = 55f;
+
+        [Tooltip("出车角度加速度（度/秒²）")]
+        public float ropeExitAngularAcceleration = 300f;
+
+        [Tooltip("出车转正段线性加速度（米/秒²）")]
+        public float ropeExitAcceleration = 8f;
+
+        [Tooltip("出车最大速度（米/秒）")]
+        public float ropeExitMaxSpeed = 6f;
+
+        [Tooltip("转正后整车直行时长（秒），到点销毁")]
+        public float ropeExitDriveDuration = 0.8f;
+
+        [Tooltip("转正后整车直行段线性加速度（米/秒²），可与转正前分别配置")]
+        public float ropeExitDriveAcceleration = 8f;
+
         private bool _playing;
 
         /// <summary>出车时从 SpawnPool 生成的拖尾物体（挂在 ContainerItem.trailParent 下）；车销毁前回收。</summary>
@@ -91,16 +120,23 @@ namespace CrowdMatch
         /// <summary>上一次播放出车音效的时间（Time.time）。</summary>
         private static float _carLeaveLastTime = float.NegativeInfinity;
 
+        /// <summary>「绳连后车甩头参数为 0」这条警告只打一次（每辆车都有各自的 driver，避免成组出车时刷屏）。</summary>
+        private static bool _warnedRopeExitNoSwing;
+
         /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
-        public void Play(Action onRefill)
+        /// <param name="ropeRearExit">
+        /// true = 绳组的**非头车**：跳过倒车、直接切前轴，从正姿（0°）起步甩头（运动参数走 Rope Rear Exit 那一组）。
+        /// 会被 <see cref="ropeRearExitEnabled"/> 总开关拦一道。
+        /// </param>
+        public void Play(Action onRefill, bool ropeRearExit = false)
         {
             if (_playing)
                 return;
             _playing = true;
-            StartCoroutine(Run(onRefill));
+            StartCoroutine(Run(onRefill, ropeRearExit && ropeRearExitEnabled));
         }
 
-        private IEnumerator Run(Action onRefill)
+        private IEnumerator Run(Action onRefill, bool ropeRearExit)
         {
             var container = GetComponent<ContainerItem>();
             Transform front = container != null ? container.frontAxle : null;
@@ -119,82 +155,62 @@ namespace CrowdMatch
 
             Transform cartParent = transform.parent;   // 小车原始父物体（ContainerGroup）
 
-            // ===== 倒车：后轴驱动（缩放轴若存在则夹在后轴与车体之间） =====
-            rear.SetParent(cartParent, true);   // 后轴脱离小车 → 挂到原始父物体
-            rear.localScale = Vector3.one;      // 轴始终是纯 pivot，重置 scale，避免继承小车的缩放
-            Transform chainRoot = rear;
-            if (scale != null) { scale.SetParent(chainRoot, true); chainRoot = scale; }   // 缩放轴 → 后轴下
-            if (roll != null)  { roll.SetParent(chainRoot, true);  chainRoot = roll; }    // 自转轴 → 缩放轴下（最深层）
-            transform.SetParent(chainRoot, true);   // 小车挂到自转轴（或缩放轴、后轴）
+            // 绳连后车出车时的转轴：单独配置（ContainerItem.ropeExitAxle）；没配则退回用前轴（= 原版行为）
+            Transform ropeAxle = container != null && container.ropeExitAxle != null ? container.ropeExitAxle : front;
 
-            // 开始倒车
-            PlayCarLeaveSfx();
+            // 出车段的运动参数：绳连后车走独立的一组，与正常出车互不影响
+            float maxAngle   = ropeRearExit ? ropeExitMaxAngle            : exitMaxAngle;
+            float angAccel   = ropeRearExit ? ropeExitAngularAcceleration : exitAngularAcceleration;
+            float linAccel   = ropeRearExit ? ropeExitAcceleration        : exitAcceleration;
+            float maxSpeed   = ropeRearExit ? ropeExitMaxSpeed            : exitMaxSpeed;
+            float driveDur   = ropeRearExit ? ropeExitDriveDuration       : exitDriveDuration;
+            float driveAccel = ropeRearExit ? ropeExitDriveAcceleration   : exitDriveAcceleration;
 
-            //SpawnConfetti();
-
-            float t = 0f;
-            float prevS = 0f;
-            float total = reverseDuration + reverseWait;
-            float squashTotal = Mathf.Max(0.0001f, total - reverseSquashDelay);
-            while (t < reverseDuration)
+            if (ropeRearExit)
             {
-                float dt = Time.deltaTime;
-                t += dt;
-                float p = Mathf.Clamp01(t / reverseDuration);
-                float s = reverseDistance * p * p;
-                float ang = reverseAngle * p * p;
+                // ===== 绳连后车：跳过倒车，切到绳后车转轴（ropeAxle，可单独配置）=====
+                // 换轴逻辑与正常出车的 ReverseAndSwitchAxle 完全同构，只是根节点换成 ropeAxle：
+                // 必须**逐层**把 缩放轴 → 自转轴 → 车体 挂到链上，最后车体落在最深层节点下——
+                // 只挂其中一层的话车体不会随轴走（既不换轴、也不转，只是原地不动）。
+                // 因为换轴照旧，侧翻与弹性缩放对这条路径同样生效（它们依赖车体挂在那两个轴下）。
+                ropeAxle.SetParent(cartParent, true);   // 转轴脱离小车 → 挂到与车体同父级
+                ropeAxle.localScale = Vector3.one;      // 纯 pivot，重置 scale
+                Transform chainHead = ropeAxle;
+                if (scale != null) { scale.SetParent(chainHead, true); chainHead = scale; }
+                if (roll != null)  { roll.SetParent(chainHead, true);  chainHead = roll; }
+                transform.SetParent(chainHead, true);   // 车体挂到最深层节点下
 
-                rear.position += rear.right * (s - prevS);   // 沿自身 right（车尾 +X）位移本帧增量
-                prevS = s;
-                rear.rotation = Quaternion.Euler(0f, -ang, 0f);   // 直接赋值负角度
+                WarnIfRopeExitHasNoSwing();
 
-                // 从 reverseSquashDelay 起匀减速缩放（覆盖剩余倒车 + 等待）
-                if (scale != null)
-                    SetScaleX(scale, 1f - (1f - reverseSquashScale) * EaseOutQuad((t - reverseSquashDelay) / squashTotal));
-                yield return null;
+                PlayCarLeaveSfx();   // 没有倒车段，起步音效与震动挪到出车开始的这一刻
+                if (GameManager.Instance != null)
+                    GameManager.Instance.TriggerVibrate(1);
+            }
+            else
+            {
+                yield return ReverseAndSwitchAxle(cartParent, front, rear, scale, roll);
             }
 
-            // ===== 倒车等待：匀减速缩放继续，到等待结束缩至 reverseSquashScale =====
-            while (t < total)
-            {
-                float dt = Time.deltaTime;
-                t += dt;
-                if (scale != null)
-                    SetScaleX(scale, 1f - (1f - reverseSquashScale) * EaseOutQuad((t - reverseSquashDelay) / squashTotal));
-                yield return null;
-            }
+            // 出车段的驱动对象：正常出车是前轴，绳连后车是它自己的转轴——两者都靠链条带着车体走
+            Transform drive = ropeRearExit ? ropeAxle : front;
 
-            // 倒车等待结束，开始出车
-            //if (AudioManager.Instance != null)
-            //    AudioManager.Instance.Play("CarOut");
-            if (GameManager.Instance != null)
-                GameManager.Instance.TriggerVibrate(1);
-
-            // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
-            // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
-            // （缩放轴，或无缩放轴时的自转轴，或都无时的小车）整体移到新轴下，最后把旧轴还给小车。小车全程不脱离
-            // 缩放轴/自转轴，自身缩放不被烘、也不重置（避免缩放 pivot 与车体 pivot 不一致导致瞬移）。
-            front.SetParent(cartParent, true);   // 前轴脱离小车 → 挂到与旧位移轴（后轴）同父级
-            front.localScale = Vector3.one;      // 此刻前轴与系统无牵连，重置 scale 干净
-            Transform chainChild = scale != null ? scale : (roll != null ? roll : transform);
-            chainChild.SetParent(front, true);   // 把链条最上层节点（缩放轴/自转轴/小车）移到前轴下
-            rear.SetParent(transform, true);     // 旧轴（后轴）还给小车
-            rear.localScale = Vector3.one;       // 后轴归位后重置 scale（空轴，重置不引起瞬移）
-
+            // ===== 出车转正：由 drive 驱动（正常出车 = 前轴，绳连后车 = ropeExitAxle） =====
             float v = 0f;
-            float angle = -reverseAngle;
+            // 绳连后车没有倒车，从正姿起步；正常出车从倒车留下的 -reverseAngle 起步
+            float angle = ropeRearExit ? 0f : -reverseAngle;
+            float startAngleAbs = ropeRearExit ? 0f : reverseAngle;
             float angularVel = 0f;
-            bool swung = exitMaxAngle <= reverseAngle;   // 目标角不超过起点角时，跳过甩头直接归 0
+            bool swung = maxAngle <= startAngleAbs;   // 目标角不超过起点角时，跳过甩头直接归 0
             float recoverT = 0f;
             float rollT = 0f;   // 侧翻出车时钟（自出车开始计时）
             while (true)
             {
                 float dt = Time.deltaTime;
-                v = Mathf.Min(v + exitAcceleration * dt, exitMaxSpeed);
-                front.position += -front.right * (v * dt);   // 沿自身 left（车头 -X）位移（线性照旧，全程推进）
+                v = Mathf.Min(v + linAccel * dt, maxSpeed);
+                drive.position += -drive.right * (v * dt);   // 沿自身 left（车头 -X）位移（线性照旧，全程推进）
 
-                // 出车开始：缩放匀加速回到 1
-                if (scale != null && recoverT < exitScaleRecoverDuration)
+                // 出车开始：缩放匀加速回到 1（只有正常出车会先倒车挤压，绳连后车没有这一步）
+                if (!ropeRearExit && scale != null && recoverT < exitScaleRecoverDuration)
                 {
                     recoverT += dt;
                     float rp = Mathf.Clamp01(recoverT / exitScaleRecoverDuration);
@@ -210,12 +226,12 @@ namespace CrowdMatch
 
                 if (!swung)
                 {
-                    // 第一阶段：加速变大（甩头）到 -exitMaxAngle
-                    angularVel -= exitAngularAcceleration * dt;
+                    // 第一阶段：加速变大（甩头）到 -maxAngle
+                    angularVel -= angAccel * dt;
                     angle += angularVel * dt;
-                    if (angle <= -exitMaxAngle)
+                    if (angle <= -maxAngle)
                     {
-                        angle = -exitMaxAngle;
+                        angle = -maxAngle;
                         angularVel = -angularVel;   // 立即反向角速度
                         swung = true;               // 固定进入归 0 阶段，不再回甩
                     }
@@ -223,11 +239,11 @@ namespace CrowdMatch
                 else
                 {
                     // 第二阶段：反向后加速归 0
-                    angularVel += exitAngularAcceleration * dt;
+                    angularVel += angAccel * dt;
                     angle += angularVel * dt;
                     if (angle >= 0f)
                     {
-                        front.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
+                        drive.rotation = Quaternion.Euler(0f, 0f, 0f);   // 转正
 
                         // 转正后才挂拖尾：生成后随车移动，车销毁前回收
                         SpawnTrail(container);
@@ -244,7 +260,7 @@ namespace CrowdMatch
                         {
                             transform.SetParent(cartParent, true);   // 无自转轴：小车回原始父物体
                         }
-                        front.SetParent(transform, true);        // 前轴归位为小车子物体
+                        drive.SetParent(transform, true);        // 驱动轴（前轴 / 绳后车转轴）归位为小车子物体
                         if (scale != null)
                         {
                             scale.SetParent(transform, true);    // 缩放轴归位
@@ -255,7 +271,7 @@ namespace CrowdMatch
                         break;
                     }
                 }
-                front.rotation = Quaternion.Euler(0f, angle, 0f);
+                drive.rotation = Quaternion.Euler(0f, angle, 0f);
                 yield return null;
             }
 
@@ -267,10 +283,10 @@ namespace CrowdMatch
             float elasticRecoverT = 0f;
             bool elasticStarted = false;
             bool elasticRestored = elastic == null;   // 弹性轴未配置则跳过
-            while (hold < exitDriveDuration)
+            while (hold < driveDur)
             {
                 float dt = Time.deltaTime;
-                v = Mathf.Min(v + exitDriveAcceleration * dt, exitMaxSpeed);
+                v = Mathf.Min(v + driveAccel * dt, maxSpeed);
                 transform.position += -transform.right * (v * dt);
                 hold += dt;
 
@@ -333,6 +349,76 @@ namespace CrowdMatch
             Destroy(gameObject);
         }
 
+        /// <summary>
+        /// 正常出车的准备段：后轴驱动倒车 → 等待 → 位移级换轴到前轴。
+        /// 结束后车体挂在链条（前轴 → 缩放轴 → 自转轴 → 车体）上、朝向为 <c>-reverseAngle</c>，由调用方接着跑出车段。
+        /// 绳连后车跳过这一整段（见 <see cref="ropeRearExitEnabled"/>），所以这里只服务正常出车。
+        /// </summary>
+        private IEnumerator ReverseAndSwitchAxle(Transform cartParent, Transform front, Transform rear, Transform scale, Transform roll)
+        {
+            // ===== 倒车：后轴驱动（缩放轴若存在则夹在后轴与车体之间） =====
+            rear.SetParent(cartParent, true);   // 后轴脱离小车 → 挂到原始父物体
+            rear.localScale = Vector3.one;      // 轴始终是纯 pivot，重置 scale，避免继承小车的缩放
+            Transform chainRoot = rear;
+            if (scale != null) { scale.SetParent(chainRoot, true); chainRoot = scale; }   // 缩放轴 → 后轴下
+            if (roll != null)  { roll.SetParent(chainRoot, true);  chainRoot = roll; }    // 自转轴 → 缩放轴下（最深层）
+            transform.SetParent(chainRoot, true);   // 小车挂到自转轴（或缩放轴、后轴）
+
+            // 开始倒车
+            PlayCarLeaveSfx();
+
+            //SpawnConfetti();
+
+            float t = 0f;
+            float prevS = 0f;
+            float total = reverseDuration + reverseWait;
+            float squashTotal = Mathf.Max(0.0001f, total - reverseSquashDelay);
+            while (t < reverseDuration)
+            {
+                float dt = Time.deltaTime;
+                t += dt;
+                float p = Mathf.Clamp01(t / reverseDuration);
+                float s = reverseDistance * p * p;
+                float ang = reverseAngle * p * p;
+
+                rear.position += rear.right * (s - prevS);   // 沿自身 right（车尾 +X）位移本帧增量
+                prevS = s;
+                rear.rotation = Quaternion.Euler(0f, -ang, 0f);   // 直接赋值负角度
+
+                // 从 reverseSquashDelay 起匀减速缩放（覆盖剩余倒车 + 等待）
+                if (scale != null)
+                    SetScaleX(scale, 1f - (1f - reverseSquashScale) * EaseOutQuad((t - reverseSquashDelay) / squashTotal));
+                yield return null;
+            }
+
+            // ===== 倒车等待：匀减速缩放继续，到等待结束缩至 reverseSquashScale =====
+            while (t < total)
+            {
+                float dt = Time.deltaTime;
+                t += dt;
+                if (scale != null)
+                    SetScaleX(scale, 1f - (1f - reverseSquashScale) * EaseOutQuad((t - reverseSquashDelay) / squashTotal));
+                yield return null;
+            }
+
+            // 倒车等待结束，开始出车
+            //if (AudioManager.Instance != null)
+            //    AudioManager.Instance.Play("CarOut");
+            if (GameManager.Instance != null)
+                GameManager.Instance.TriggerVibrate(1);
+
+            // ===== 出车转正：前轴驱动（缩放轴 → 自转轴 → 小车 链条整体移到前轴下） =====
+            // 位移级换轴：先把新轴（前轴）提到与旧位移轴（后轴）同父级并重置 scale，再把直接挂在后轴下的链条节点
+            // （缩放轴，或无缩放轴时的自转轴，或都无时的小车）整体移到新轴下，最后把旧轴还给小车。小车全程不脱离
+            // 缩放轴/自转轴，自身缩放不被烘、也不重置（避免缩放 pivot 与车体 pivot 不一致导致瞬移）。
+            front.SetParent(cartParent, true);   // 前轴脱离小车 → 挂到与旧位移轴（后轴）同父级
+            front.localScale = Vector3.one;      // 此刻前轴与系统无牵连，重置 scale 干净
+            Transform chainChild = scale != null ? scale : (roll != null ? roll : transform);
+            chainChild.SetParent(front, true);   // 把链条最上层节点（缩放轴/自转轴/小车）移到前轴下
+            rear.SetParent(transform, true);     // 旧轴（后轴）还给小车
+            rear.localScale = Vector3.one;       // 后轴归位后重置 scale（空轴，重置不引起瞬移）
+        }
+
         /// <summary>从 SpawnPool 生成 Trail 并挂到车上的拖尾父节点下；未配置池 / 节点 / tag 时静默跳过。</summary>
         private void SpawnTrail(ContainerItem container)
         {
@@ -385,6 +471,23 @@ namespace CrowdMatch
         //        fx.transform.position = transform.position;
         //}
 
+        /// <summary>
+        /// 绳连后车的甩头参数若为 0（`ropeExitMaxAngle` / `ropeExitAngularAcceleration`），出车会**没有任何角度变化**、
+        /// 直接水平移出——这是配置漏了，静默下去很难查。这里打一条只出现一次的警告点名。
+        /// </summary>
+        private void WarnIfRopeExitHasNoSwing()
+        {
+            if (_warnedRopeExitNoSwing)
+                return;
+            if (ropeExitMaxAngle > 0f && ropeExitAngularAcceleration > 0f)
+                return;
+
+            _warnedRopeExitNoSwing = true;
+            Debug.LogWarning("[ContainerExitDriver] 绳连后车的甩头参数为 0（Rope Exit Max Angle = " + ropeExitMaxAngle +
+                "，Rope Exit Angular Acceleration = " + ropeExitAngularAcceleration +
+                "），本次出车不会有角度变化、只会水平移出。请在该车预制体的 ContainerExitDriver 上配置 Rope Rear Exit 那一组参数。", this);
+        }
+
         /// <summary>把拖尾归还对象池。可重复调用：已回收或未生成时为空操作。</summary>
         private void DespawnTrail()
         {
@@ -430,6 +533,9 @@ namespace CrowdMatch
                 Destroy(container.frontAxle.gameObject);
             if (container.rearAxle != null && container.rearAxle.parent != transform)
                 Destroy(container.rearAxle.gameObject);
+            if (container.ropeExitAxle != null && container.ropeExitAxle != container.frontAxle
+                && container.ropeExitAxle.parent != transform)
+                Destroy(container.ropeExitAxle.gameObject);   // 绳连后车变体中途销毁时可能正挂着这根轴
             if (container.reverseScaleAxle != null && container.reverseScaleAxle.parent != transform)
                 Destroy(container.reverseScaleAxle.gameObject);
             if (container.rollAxle != null && container.rollAxle.parent != transform)
