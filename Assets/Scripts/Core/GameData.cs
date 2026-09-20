@@ -8,6 +8,9 @@ namespace CrowdMatch
     /// </summary>
     public static class GameData
     {
+        public const string MusicState = "MusicState";
+        public const string SoundState = "SoundState";
+        public const string VibrateState = "VibrateState";
         private static int _currentLevel = -1;
 
         /// <summary>当前关卡编号（1 起）。读取时保护：&lt;= 0 一律按第 1 关处理。胜利时 +1，失败重置当前关时不变。</summary>
@@ -27,7 +30,24 @@ namespace CrowdMatch
                 PlayerPrefs.SetInt("CurrentLevel", value);
             }
         }
+        private static int _winStreak = -1;
+        public static int WinStreak
+        {
+            get
+            {
+                if (_winStreak < 0)
+                {
+                    _winStreak = PlayerPrefs.GetInt("WinStreak", 0);
+                }
 
+                return _winStreak;
+            }
+            set
+            {
+                _winStreak = value;
+                PlayerPrefs.SetInt("WinStreak", value);
+            }
+        }
         /// <summary>当前关卡的连续失败次数。胜利时清零。</summary>
         public static int FailCount { get; set; } = 0;
 

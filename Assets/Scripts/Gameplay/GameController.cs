@@ -144,7 +144,7 @@ namespace CrowdMatch
             LevelData data = LevelLoader.Parse(json);
             if (data == null)
                 return;
-
+            UIManager.Instance.Init();
             Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
 
 #if UNITY_EDITOR
@@ -262,8 +262,8 @@ namespace CrowdMatch
             if (IsFail())
             {
                 _transitioning = true;
-                GameState.GameFail();
-                UIManager.Instance.showFailPanel(true);
+                //GameState.GameFail();
+                UIManager.Instance.showRevivePanel(true);
                 //Invoke(nameof(DoRevive), 1.5f);
             }
         }
@@ -310,13 +310,17 @@ namespace CrowdMatch
 
         private void DoGameWin()
         {
+            Debug.Log("Game Win");
             var gm = GameManager.Instance;
             if (gm != null)
+            {
                 gm.GameWin();
+                UIManager.Instance.showWinPanel(true);
+            }
         }
 
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
-        private void DoRevive()
+        public void DoRevive()
         {
             Revive();
             GameState.GameStart();   // 复活后回到游玩态，继续本关

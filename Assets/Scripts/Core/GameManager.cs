@@ -43,6 +43,7 @@ namespace CrowdMatch
         [Tooltip("表情包管理器（场景里单独建一个物体挂上，再拖到这里）；留空则所有表情播放自动跳过")]
         public EmojiManager emojiManager;
 
+        public StaminaConfig staminaConfig;
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -79,6 +80,7 @@ namespace CrowdMatch
             if (Input.GetKeyDown(KeyCode.N))
             {
                 GameWin();
+                ReloadLevel();
             }
             else if (Input.GetKeyDown(KeyCode.B))
             {
@@ -111,8 +113,9 @@ namespace CrowdMatch
         public void GameWin()
         {
             GameData.CurrentLevel++;
+            GameData.WinStreak++;
             GameData.FailCount = 0;
-            ReloadLevel();
+            //ReloadLevel();
         }
 
         /// <summary>上一关：关卡序号 -1（不低于 1），连败清零，重载关卡。</summary>
@@ -131,7 +134,7 @@ namespace CrowdMatch
         }
 
         /// <summary>重载当前关卡（原地重建，不重载场景）：重置计数后交由 GameController 重新初始化。</summary>
-        private void ReloadLevel()
+        public void ReloadLevel()
         {
             CleanupSpawnPool();   // 关卡重建前回收对象池：在用对象全部归还并裁回 preloadCount
             GameData.Init(true);
