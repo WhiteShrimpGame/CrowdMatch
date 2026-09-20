@@ -213,6 +213,72 @@ ContainerGroup
 > pivot 与缩放轴不一致，重置会让视觉瞬移。因此换轴时只重置「空轴」的 scale（§5.1 第 2 步、§5.2 第 2/5 步），
 > 并让小车全程留在缩放轴/自转轴下，避免小车自身缩放被烘、被重置。侧翻归 0 后自转轴已 identity，小车脱离时不烘。
 
+### 5.6 出车的准备门槛：车身必须先回到 ContainerGroup 下
+
+`ContainerExitDriver.Run` 开头会**只读一次** `cartParent = transform.parent`（`:156`），后面 6 处
+`SetParent(cartParent, …)` 全用它——「小车原始父物体 = ContainerGroup」是整条出车链条的前提。
+
+小车的父物体在四种情况下不是 ContainerGroup：
+
+| 期间 | 车身挂在哪 | 谁挡住出车 |
+|---|---|---|
+| 补位侧倾 | `rollAxle` | `isRefilling`（要等 `RestoreRollAxle` 之后才置 false）✅ |
+| 补位前移夹着上车动画 | `elasticScaleAxle` | 同上（`RefillRoutineViaElasticAxle` 自己也等 `_elasticPhase == 0` 才回调）✅ |
+| **上车动画前半：跳车中** | `ContainerGroup`（还没换轴） | **原本没人挡** ❌ → 已补 |
+| **上车动画后半：播弹性** | `elasticScaleAxle` | **原本没人挡** ❌ → 已补 |
+
+**缺口成因：车身变空是瞬间的，而上车动画有两段。** `ConsumePixel` 里 `container.Consume()` 一执行，
+`IsEmpty` 就为 true；但像素还要跳 `boardJumpDuration` 才落到车上（**这一段车身还在 ContainerGroup 下**），
+落定那一帧才 `PlayBoardElastic()` 换到弹性轴下播弹性。只有弹性播完才走
+`onBoarded → OnPixelConsumed → TryExitIfAtFront`。于是整个上车动画期间
+「装满 + 在前排 + 不在补位」都成立，**任何提前的触发都会把出车放行**。
+
+> **这里踩过一次坑**：第一版只堵了「车身挂在弹性轴下」，重跑后仍有一例失败——正是**跳车那一段**：
+> 车已 `IsEmpty`、但弹性还没开始，`IsCarUnderElasticAxle()` 还是 false，门控看不见它。
+> 所以判据必须是「**整个上车动画是否结束**」，不能只看换轴状态。
+
+实际发生过两条提前触发：
+
+- **绳组**：整组出库由**某个成员**的事件触发，而 `IsRopeGroupReady` 只看 `IsEmpty` / `isRefilling` / 是否在前排
+  → 另一个成员的完成事件会把还在跳车或还在播弹性的成员一起拉出车；
+- **普通车**：`MoveContainer` 在没有 roll 轴时走纯 Lerp 回退路径，结束后直接 `OnCarArrivedFront → TryExitIfAtFront`，
+  完全不看上车动画。
+
+**为什么"挂错父物体"表现为"歪着开远"而不是"位置错"**：弹性轴的缩放是**非均匀**的
+（`elasticTargetScale` 形如 `1.2 / 0.83 / 1.2`）。`SetParent(…, worldPositionStays: true)` 在非均匀缩放的父物体下
+会做矩阵分解，把补偿量烘进子节点的 `localScale` / `localRotation`。误差因此**不在某一个 rotation 上**，
+而在祖先的 scale 与被烘进去的补偿量里 → 后面 `drive.rotation = Quaternion.Euler(0,0,0)` 的转正**拉不回来**；
+再加上直行段只写 `position`、不写 `rotation`，车的角度就此**完全冻结**着斜飞出去。
+
+**修法（把既有规则搬进门槛，而不是改动画调度）**：新增 `ContainerItem.IsBoarding`
+（= 还在跳车 `_boardingPixels.Count > 0` **或** 车身挂在弹性轴下），两个出车门控同查它：
+
+| 门控 | 改动 |
+|---|---|
+| `ContainerGroup.TryExitIfAtFront` | 上车动画未结束 → `return` |
+| `ContainerGroup.IsRopeGroupReady` | 任一成员上车动画未结束 → 整组不就绪 |
+
+**为什么这一条是充分的**：所有能发起一次上车的入口都跳过 `IsEmpty` 的车——`ProcessConsumption`（带上吸收）、
+`FindMatchableInColumn`（带闸口）、`ConsumePixel`、`FindCarForColor`（复活）全都有 `IsEmpty` 早退。
+所以一辆车变空之后**不可能再开始新的上车**，它的 `IsBoarding` 只会单调变为 false。由此两点：
+
+- 门控一旦通过，即使 `ExitRopeGroupRoutine` 要隔 `headGap` / `ropeExitStagger` 才轮到某个成员，
+  那个成员也不可能在这段时间里重新进入上车状态 → **协程里不需要再查一遍**；
+- 被挡下的那一次，上车动画结束时必然重新触发（见下）。
+
+**自愈**（不需要轮询，也不需要超时兜底）：`BoardRoutine` 的收尾是
+`PlayBoardElastic()` → `WaitForElasticIdle()`（等 `_elasticPhase == 0`）→ `onBoarded`，
+而 `ElasticRoutine` 的收尾顺序是 `RestoreElasticAxle()` → `_elasticPhase = 0`。
+所以 `onBoarded` 触发时轴已归还、`_boardingPixels` 已清空 → `IsBoarding == false`，
+同一帧内 `onBoarded → OnPixelConsumed → TryExitIfAtFront` 必然放行。
+
+> **为什么不在驱动侧兜底**（`Run` 开头等车身不在任何轴下再取 `cartParent`）：那条路会把
+> 「`grid[col,0]` 已清空但车还在原地」的窗口多拉长几帧；门控版本让车压根没进入出车流程。
+> 而且「出车必须在形变播完之后」本来就是既定规则（`WaitForElasticIdle`、`RefillRoutineViaElasticAxle` 的收尾条件），
+> 门控只是把它从"靠调用链自觉"变成"由判据保证"。
+
+> **附带收益**：车不会在还处于挤压形变时就起步开走（以前能看到车带着形变同时位移）。
+
 ---
 
 ## 6. 运动模型
@@ -529,6 +595,7 @@ Destroy(gameObject)
 | `rollOutDuration = 0` | `clamp01(τ / 0)` 返回 1，侧翻瞬间到位（退化为无过渡的瞬时侧翻，建议设 > 0） |
 | 弹性轴未配置（`elasticScaleAxle` 为 null） | 跳过弹性缩放，侧翻归 0 后直接整车直行（等价无弹性轴） |
 | `elasticTargetScale = (1,1,1)` | 无弹性，动画退化为纯直行；`elasticScaleDuration = 0` 时 `clamp01` 返回 1，瞬间到位后复原 |
+| 出车瞬间上车动画还没播完（跳车中 / 车身挂在弹性轴下） | 已由门控排除：`TryExitIfAtFront` / `IsRopeGroupReady` 都查 `IsBoarding`，动画播完会自动重新触发（§5.6） |
 | `exitAngularAcceleration` 过大导致角度瞬间越 0 | `θ = min(…, 0)` 封顶，转正只发生一次 |
 | `exitMaxAngle ≤ reverseAngle` | 甩头第一阶段不进入，直接加速归 0（等价旧行为） |
 | `ropeExitMaxAngle ≤ 0` | 绳连后车同样跳过甩头：从 0° 直接加速归 0（退化为「原地不转头就走」） |
@@ -591,3 +658,5 @@ Destroy(gameObject)
 14. **变体的运动参数整组独立**（`ropeExitMaxAngle` / `ropeExitAngularAcceleration` / `ropeExitAcceleration` / `ropeExitMaxSpeed` / `ropeExitDriveDuration` / `ropeExitDriveAcceleration`）：没有倒车段的起始角与预压缩，正常出车那一组值在这个新起点上手感对不上，所以不共用。
 15. **实现上不复制换轴与运动学代码**：`Run` 按 `ropeRearExit` 把六个参数选进局部变量，并把驱动轴也选成一个局部变量 `drive`（正常出车 = `front`，绳连后车 = `ropeAxle`），两个循环的位移与偏航都写 `drive`、转正收尾用 `drive.SetParent(transform, true)` 归位；倒车段抽成 `ReverseAndSwitchAxle` 只在正常出车时 `yield return`。这样两条路径不再分叉，将来改公式或改换轴只改一处。
 16. **变体带总开关 `ropeRearExitEnabled`**：留着方便对比两种出车观感（关掉即等价于「绳组后车也用原来的倒车出车」），不必回滚代码。
+17. **出车的前置条件「上车动画必须已播完」由门控保证，不再靠调用链自觉**：`cartParent` 只在 `Run` 开头读一次，读到时车身必须已是 ContainerGroup 的子物体。补位侧倾那条早有 `isRefilling` 挡着，**上车动画那条一直没人挡**。而这里的坑是**上车动画有两段**：车变空是瞬间的（`Consume` 一执行 `IsEmpty` 就为 true），但像素还要跳一段才落定（这段车身仍在 ContainerGroup 下）、落定后才换到弹性轴播弹性。所以只看「是否挂在弹性轴下」会漏掉跳车那一段（第一版就是这么漏的，重跑仍有一例失败）。最终判据是新增的 `ContainerItem.IsBoarding` = 跳车中 **或** 挂在弹性轴下，`TryExitIfAtFront` 与 `IsRopeGroupReady` 同查它（§5.6）。
+18. **不让驱动侧兜底**（不去 `Run` 里等车身不在轴下再取 `cartParent`）：门控版本让车压根不进入出车流程，避免「`grid[col,0]` 已清空但车还在原地」的窗口被拉长；并且「等形变播完」本来就是既定规则，门控只是把它落到判据上。自愈性由既有的 `WaitForElasticIdle → onBoarded → OnPixelConsumed → TryExitIfAtFront` 顺序保证，不需要轮询或超时（§5.6）。

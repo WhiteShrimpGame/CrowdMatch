@@ -65,6 +65,18 @@ namespace CrowdMatch
         [Tooltip("绳子直径（世界单位）")]
         public float ropeDiameter = 0.15f;
 
+        [Tooltip("绳中段最大偏移（世界单位）：绷直驱动之上叠加的程序化微晃。0 = 完全绷直不动")]
+        public float ropeSwayAmplitude = 0.05f;
+
+        [Tooltip("微晃频率（Hz）：每秒往复多少次")]
+        public float ropeSwayFrequency = 1.2f;
+
+        [Tooltip("微晃沿绳长的波数：1 = 一个弓形（钟摆感），>1 = 多段起伏")]
+        public float ropeSwayWaves = 1f;
+
+        [Tooltip("微晃的纵向分量占比：0 = 只左右摆，1 = 只上下摆")]
+        public float ropeSwayVerticalRatio = 0.45f;
+
         [Tooltip("绳节所在层名。该层需先在 Tags and Layers 中创建，否则绳节会回退到 Default 并与像素互撞")]
         public string ropeLayerName = "Rope";
 
@@ -128,7 +140,10 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 某格小车是否已「开启匹配」：处于前 maxOpenRows 排，且前方（row 更小）没有车、或前方所有车都已找全匹配对象（容量耗尽）。
+        /// 某格小车是否已「开启匹配」：处于前 maxOpenRows 排，且前方（row 更小）的车全部已**放行**。
+        ///
+        /// 「放行」的判据统一在 <see cref="IsRowReleased"/> —— 失败判定里的 <see cref="IsFrontCleared"/>
+        /// 用的是同一个谓词，两处**必须一致**：前者决定「能不能开盖收像素」，后者决定「算不算还有进度、先别判失败」。
         /// </summary>
         public bool IsOpen(int col, int row)
         {
@@ -136,11 +151,29 @@ namespace CrowdMatch
                 return false;
             for (int r = 0; r < row; r++)
             {
-                var f = GetItem(col, r);
-                if (f != null && !f.IsEmpty)
-                    return false;   // 前方还有未找全匹配对象的车
+                if (!IsRowReleased(GetItem(col, r)))
+                    return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// 前方这一格是否已**放行**——即它后面的车可以接着它开放（收像素）、接着它补位到前排。
+        ///
+        /// 「空」不等于「放行」：绳车装满之后如果同组还没齐，它是不会走的
+        /// （<see cref="TryExitIfAtFront"/> 直接返回，留在前排占位），这段等待期里它必须继续当阻塞物。
+        /// 漏掉这一条会同时坏掉两件事：
+        ///   · **暴露**：后排开盖把像素吸走，本该留给同组其它车的颜色被吞掉，绳组永远凑不齐（<see cref="IsWaitingRopeCar"/>）；
+        ///   · **失败判定**：后排被误判成「即将补位到前排」，于是 <see cref="HasPendingFrontTransition"/>
+        ///     在被绳车堵死的列上恒为真 → <c>IsFail</c> 提前返回 false → **该判失败时不判、关卡卡住**。
+        /// </summary>
+        private bool IsRowReleased(ContainerItem item)
+        {
+            if (item == null)
+                return true;                    // 空格子：没有阻挡
+            if (!item.IsEmpty)
+                return false;                   // 还没找全匹配对象
+            return !IsWaitingRopeCar(item);     // 装满但在等同组的绳车：仍未放行
         }
 
         /// <summary>某格子的本地坐标：X 居中，前排（row 0）Z = 0，后排向 +Z 延展</summary>
@@ -237,7 +270,7 @@ namespace CrowdMatch
             bool isLast = container.Consume();
             if (isLast)
             {
-                OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
+                OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
                 OnLastBoarding(container, pixel);   // 最后一个像素准备上车
             }
             consumingCount++;
@@ -262,6 +295,7 @@ namespace CrowdMatch
         /// 复活深排上车（gridZ &gt;= maxOpenRows）：像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
         /// 仍走 Consume 扣容量 → OpenRearLid → consumingCount 计数 → OnPixelConsumed（失败判定 + 出库）完整链路，只是省略 jump。
         /// gridZ &gt;= maxOpenRows + 1（视野外更严格 1 排）的车完成匹配时，直接原地销毁并瞬间补位，避免后期大量已匹配车开走产生垃圾时间。
+        /// 绳组车另有一条门槛：**整组**都装满、且都在可消失范围内，才整组一起消失（见 <see cref="RopeCarBlocksInstantDestroy"/>）。
         /// </summary>
         public void ConsumePixelInstant(PixelItem pixel, ContainerItem container)
         {
@@ -269,10 +303,10 @@ namespace CrowdMatch
                 return;
 
             bool isLast = container.Consume();
-            // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车除外——原地销毁会连带删掉绳子锚点。
-            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !IsRopeCar(container);
+            // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车要再收紧一层，见 RopeCarBlocksInstantDestroy。
+            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !RopeCarBlocksInstantDestroy(container);
             if (isLast)
-                OpenRearLid(container);   // 播放移入动画前，先打开其正后方容器的盖子
+                OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
             consumingCount++;
 
             int col = container.gridX;
@@ -331,7 +365,7 @@ namespace CrowdMatch
             if (!isLast)
                 return;
             if (destroyInPlace)
-                DestroyContainerInPlace(container);   // 视野外深排车：原地销毁 + 瞬间补位
+                DestroyRopeGroupInPlace(container);   // 视野外深排车：原地销毁 + 瞬间补位（绳组整组一起消失）
             else
                 TryExitIfAtFront(container, col);
         }
@@ -368,6 +402,12 @@ namespace CrowdMatch
         ///
         /// 绳组车额外一条门槛：**必须等同组全部装满且都停在前排**才一起出库。
         /// 未就绪时直接返回——本车留在前排占住格子，从而该列不补位（这正是「留在前排等待」的实现）。
+        ///
+        /// 另有一条对**所有车**都成立的准备门槛：**上车动画必须已经全部结束**。
+        /// 车身变空是**瞬间**的（Consume 一执行 IsEmpty 就为 true），但像素还要跳一段才落定、之后才开始播弹性；
+        /// 所以这个窗口里「装满 + 在前排 + 不在补位」全部成立，出车会被提前放行——
+        /// 那样 ContainerExitDriver 取到的 cartParent 会是弹性轴，车斜着开远且转正拉不回来
+        /// （见 <see cref="ContainerItem.IsBoarding"/>）。等上车动画播完会自动重新触发，无需额外轮询。
         /// </summary>
         private void TryExitIfAtFront(ContainerItem item, int col)
         {
@@ -375,6 +415,8 @@ namespace CrowdMatch
                 return;
             if (item.isRefilling)
                 return;   // 补位移动中，等 MoveContainer 完成后由它触发
+            if (item.IsBoarding)
+                return;   // 上车动画（跳车 / 弹性换轴）还没结束：等它播完，onBoarded → OnPixelConsumed 会重新触发
 
             List<ContainerItem> chain;
             if (item.ropeGroupId != 0 && _ropeGroups.TryGetValue(item.ropeGroupId, out chain))
@@ -390,7 +432,16 @@ namespace CrowdMatch
             StartContainerExit(item, col);
         }
 
-        /// <summary>绳组是否全部就绪：组内每辆车都已装满、都在前排、且都不在补位移动中。</summary>
+        /// <summary>
+        /// 绳组是否全部就绪：组内每辆车都已装满、都在前排、都不在补位移动中、且形变都已播完。
+        ///
+        /// 「上车动画已结束」这一条必须逐个成员查：车身变空是**瞬间**的（Consume 一执行 IsEmpty 就为 true），
+        /// 但像素还要跳一段才落定、之后才开始播弹性。所以一个成员哪怕还在跳车或还在播弹性，
+        /// 也已经满足「装满 + 在前排」。整组出库是由**某个成员**的事件触发的，若不查这条，
+        /// 那个车身正挂在弹性轴下的成员就会带着整组提前出车——整条出车链条挂到弹性轴下，
+        /// 车斜着开远且转正拉不回来（见 <see cref="ContainerItem.IsBoarding"/>）。
+        /// 等它播完那次 OnPixelConsumed 会重新走到这里，届时自会就绪。
+        /// </summary>
         private bool IsRopeGroupReady(List<ContainerItem> chain)
         {
             if (grid == null)
@@ -401,7 +452,30 @@ namespace CrowdMatch
                 var car = chain[i];
                 if (car == null || !car.IsEmpty || car.isRefilling)
                     return false;
+                if (car.IsBoarding)
+                    return false;   // 该成员的上车动画还没结束（跳车中 / 车身挂在弹性轴下）
                 if (!IsInRange(car.gridX, 0) || grid[car.gridX, 0] != car)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 组内是否**每一辆都已装满**——即「这个绳组还需要像素吗」，只此一项。
+        ///
+        /// 刻意**不**包含「都在前排」（<see cref="IsRopeGroupReady"/> 管）与「形变/上车动画已播完」（那两个都管）：
+        /// 那些是"能不能出库"，而这里问的是"还需不需要像素"，用途完全不同。两处判据共用本方法，
+        /// 避免又出现「用 IsRopeGroupReady 当像素需求判据」那类错配（见 <see cref="IsWaitingRopeCar"/>）。
+        /// </summary>
+        private bool IsRopeGroupMatched(List<ContainerItem> chain)
+        {
+            if (chain == null)
+                return true;
+
+            for (int i = 0; i < chain.Count; i++)
+            {
+                var car = chain[i];
+                if (car != null && !car.IsEmpty)
                     return false;
             }
             return true;
@@ -451,6 +525,30 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 该车是否「已装满、但同组还有车没装满」——即一辆**仍被同组的像素需求压着、必须继续堵住整列**的绳车。
+        ///
+        /// 先装满的那几辆会一直占着各自前排的格子（要等全组都到前排才出库），这段时间里它们必须**继续当阻塞物**：
+        /// 否则它们后面的车会照常开盖、把像素吸走，而这些像素本该留给同组还没装满的车——
+        /// 被吞掉之后该颜色可能再也不出现，绳组就永远凑不齐，整列跟着一起死锁。
+        ///
+        /// **判据只看「组是否装满」，不看「组是否就绪」**：<see cref="IsRopeGroupReady"/> 还额外要求「都在前排」，
+        /// 那是**出库**条件，与「还需不需要像素」无关。用错判据的后果是——整组装满之后、真正移出之前
+        /// （各车还在往各自前排挪），后排仍被堵着，要等到车移出才开盖；而单列车的规则是
+        /// 「前车最后一个像素开始上车动画时就开它的后盖」。改用 <see cref="IsRopeGroupMatched"/> 后两者一致：
+        /// **整组装满那一刻，整组的后排一起开盖**（由 <see cref="OpenRearLidAfterMatch"/> 补上）。
+        /// </summary>
+        private bool IsWaitingRopeCar(ContainerItem item)
+        {
+            if (item == null || !item.IsEmpty)
+                return false;
+            if (!IsRopeCar(item))
+                return false;
+
+            List<ContainerItem> chain;
+            return _ropeGroups.TryGetValue(item.ropeGroupId, out chain) && !IsRopeGroupMatched(chain);
+        }
+
+        /// <summary>
         /// 复活深排车完成匹配：直接原地销毁（连同已上车的乘客像素，均已计入 ClearedPixelCount），
         /// 后车瞬间补位（teleport，无动画）。用于玩家视野外（gridZ >= maxOpenRows + 1）的车，
         /// 避免后期大量已匹配的车逐个开走出库产生垃圾时间。
@@ -465,6 +563,7 @@ namespace CrowdMatch
                 return;   // 已被移走 / 已销毁，幂等兜底
 
             grid[col, row] = null;
+            DetachFromRopeChain(item);   // 绳组：本车出局，先从链里摘掉，否则剩下的成员永远凑不齐
             Destroy(item.gameObject);   // 车 + 乘客像素一并销毁（乘客已计入 ClearedPixelCount）
 
             // 后车瞬间补位（teleport，无动画）：每车向上移一格，与 RefillColumn 同构（保留空格）
@@ -482,13 +581,126 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 传送带吸收模式：某容器耗尽时打开其正后方（gridZ + 1）容器的盖子，让它随后可接收像素。
+        /// 绳车是否**不允许**走「深排原地销毁」路径。
+        ///
+        /// 绳组是一个整体：要消失就**整组一起消失**，所以门槛对整组统一——只要组内有一辆车不满足
+        /// 消失条件，全组都不消失。不满足的情形有两类：
+        ///
+        /// | 不满足 | 为什么 |
+        /// |---|---|
+        /// | 还有车**没装满** | 这辆车是那一组凑齐的必要拼图；销毁它 = 剩下的成员永远等不到伙伴 |
+        /// | 有车**不在可消失范围**（`gridZ < maxOpenRows + 1`，即还在玩家视野内） | 那辆车看得见，凭空消失会穿帮；而且它马上要上前排，正组出库才是它该走的路径 |
+        ///
+        /// 不满足时车留在原地。它所在列靠前方**非绳车**正常出库把自己逐步带到前排（`RefillColumn`
+        /// 是逐列的，所以同组其它列的车也会被各自的前车推着走），最终全组都在前排时按 §5.4 的出库规则
+        /// **一起出库**——走正规出库而不是凭空消失，这正是期望的兜底。
+        /// 非绳车恒为 false，行为与改动前完全一致。
+        /// </summary>
+        private bool RopeCarBlocksInstantDestroy(ContainerItem item)
+        {
+            if (!IsRopeCar(item))
+                return false;
+
+            List<ContainerItem> chain;
+            if (!_ropeGroups.TryGetValue(item.ropeGroupId, out chain))
+                return false;
+
+            if (!IsRopeGroupMatched(chain))
+                return true;                          // 同组还有车没装满
+
+            for (int i = 0; i < chain.Count; i++)
+            {
+                var car = chain[i];
+                if (car != null && car.gridZ < maxOpenRows + 1)
+                    return true;                      // 同组有车还在视野内，不能消失
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 绳组**整组**原地销毁：组内所有成员在同一帧一起消失。
+        ///
+        /// 必须整组一起做，不能逐个车各自判断：先消失的那辆会经由 <see cref="DetachFromRopeChain"/>
+        /// 把自己从链里摘掉，同组的判定随即失真（`IsRopeGroupReady` 对空链恒为 true），
+        /// 剩下那些车的门槛就再也不是原本那条了。
+        /// 调用前提：<see cref="RopeCarBlocksInstantDestroy"/> 已确认整组都符合消失条件。
+        /// </summary>
+        private void DestroyRopeGroupInPlace(ContainerItem item)
+        {
+            if (item == null)
+                return;
+
+            List<ContainerItem> chain;
+            if (item.ropeGroupId == 0 || !_ropeGroups.TryGetValue(item.ropeGroupId, out chain))
+            {
+                DestroyContainerInPlace(item);   // 非绳车（或已不在链里）：退化成单车处理
+                return;
+            }
+
+            // 复制一份再遍历：DestroyContainerInPlace 会从链里摘人，直接遍历原链会边遍历边改
+            var members = new List<ContainerItem>(chain);
+            for (int i = 0; i < members.Count; i++)
+                DestroyContainerInPlace(members[i]);
+        }
+
+        /// <summary>
+        /// 把一辆车从它所属的绳链里摘掉。只用于「深排原地销毁」——那辆车就此出局，
+        /// 留着一个已销毁的成员会让 <see cref="IsRopeGroupReady"/> 永远返回 false，
+        /// 剩下的成员就再也出不了库了（摘掉之后它们照常凑齐、照常一起出库）。
+        /// 关卡重建不在这里处理——那条路径由 <see cref="ClearRopes"/> 整体清空。
+        /// </summary>
+        private void DetachFromRopeChain(ContainerItem item)
+        {
+            if (item == null || item.ropeGroupId == 0)
+                return;
+
+            List<ContainerItem> chain;
+            if (_ropeGroups.TryGetValue(item.ropeGroupId, out chain))
+                chain.Remove(item);
+        }
+
+        /// <summary>
+        /// 某容器**耗尽**（最后一个像素开始上车动画）时的开盖入口，单列车与绳组在此统一。
+        ///
+        /// 单列车：只开它自己正后方那辆——与原来一致。
+        /// 绳组：**整组装满的那一刻，把整组每个成员的正后方盖子都打开**。
+        ///
+        /// 为什么要在这里补一次整组开盖：各成员自己耗尽时会各调一次 <see cref="OpenRearLid"/>，
+        /// 但那时组往往还没满 → 被 <see cref="IsWaitingRopeCar"/> 挡下（那些像素要留给同组其它车）。
+        /// 等最后一个成员装满，先前那些成员那一次已经错过、不会再补，于是后排要等到车真的移出才开盖；
+        /// 而单列车的规则是「前车最后一个像素开始上车动画时就开后盖」。在这里补一次，两者就一致了。
+        /// </summary>
+        private void OpenRearLidAfterMatch(ContainerItem container)
+        {
+            if (container == null)
+                return;
+
+            List<ContainerItem> chain;
+            if (container.ropeGroupId != 0 && _ropeGroups.TryGetValue(container.ropeGroupId, out chain)
+                && IsRopeGroupMatched(chain))
+            {
+                for (int i = 0; i < chain.Count; i++)
+                    OpenRearLid(chain[i]);
+                return;
+            }
+
+            OpenRearLid(container);
+        }
+
+        /// <summary>
+        /// 打开某容器正后方（gridZ + 1）容器的盖子，让它随后可接收像素。
         /// 前排 / 已开放的后排容器共用此逻辑——耗尽谁的容量就开谁后面的盖子。
+        ///
+        /// 例外：该车「装满但同组还有车没装满」时**不开**——它仍压着同组的像素需求
+        /// （<see cref="IsWaitingRopeCar"/>），打开后盖就等于绕过 <see cref="IsOpen"/> 对后排的堵截。
         /// </summary>
         private void OpenRearLid(ContainerItem container)
         {
             if (container == null)
                 return;
+            if (IsWaitingRopeCar(container))
+                return;
+
             var rear = GetItem(container.gridX, container.gridZ + 1);
             if (rear != null)
                 rear.OpenLid();
@@ -606,10 +818,14 @@ namespace CrowdMatch
 
         /// <summary>
         /// 是否存在「已开启匹配且即将抵达前排」的车（含正在补位移动的车）。
-        /// 判定 = 存在 isRefilling 的车，或存在「非前排、盖子已打开、且前方所有车都已清空」的车。
+        /// 判定 = 存在 isRefilling 的车，或存在「非前排、盖子已打开、且前方所有车都已放行」的车。
         /// 说明：RefillColumn 在补位开始时就把 gridZ 同步置 0，而 lidOpened 在 ConsumePixel（OpenRearLid）时就已锁存，
         /// 因此该条件在整个「上车 → 弹回 → 出库动画 → 补位移动」区间内恒为 true，直到车真正落定前排才释放，杜绝空白时间窗。
-        /// 「前方已清空」约束用于排除复活直接给「前方仍有非空车」的后排车开盖的情况——那种车并非即将补位，不算过渡中。
+        /// 「前方已放行」约束用于排除复活直接给「前方仍有非空车」的后排车开盖的情况——那种车并非即将补位，不算过渡中。
+        ///
+        /// **绳车**沿用的是暴露/开盖那一套判据（<see cref="IsRowReleased"/>）：被等待中的绳车堵住的列
+        /// 后面那些车**不会**被补位到前排，所以不能算「过渡中」。否则被绳车堵死的列会让本方法恒为真，
+        /// <c>IsFail</c> 提前返回 false → 该判失败时不判、关卡卡住。
         /// </summary>
         public bool HasPendingFrontTransition()
         {
@@ -627,13 +843,16 @@ namespace CrowdMatch
             return false;
         }
 
-        /// <summary>该格前方（row 更小）所有车是否都已为空（含 null），即该格即将被补位到前排。</summary>
+        /// <summary>
+        /// 该格前方（row 更小）所有车是否都已**放行**，即该格即将被补位到前排。
+        /// 判据与 <see cref="IsOpen"/> 共用 <see cref="IsRowReleased"/>——两者必须一致，否则会出现
+        /// 「不开盖」（前排不放行）却「算过渡中」（后方即将补位）的自相矛盾状态。
+        /// </summary>
         private bool IsFrontCleared(int col, int row)
         {
             for (int r = 0; r < row; r++)
             {
-                var f = GetItem(col, r);
-                if (f != null && !f.IsEmpty)
+                if (!IsRowReleased(GetItem(col, r)))
                     return false;
             }
             return true;
@@ -773,6 +992,10 @@ namespace CrowdMatch
             link.linkCount = ropeLinkCount;
             link.diameter = ropeDiameter;
             link.ropeLayerName = ropeLayerName;
+            link.swayAmplitude = ropeSwayAmplitude;
+            link.swayFrequency = ropeSwayFrequency;
+            link.swayWaves = ropeSwayWaves;
+            link.swayVerticalRatio = ropeSwayVerticalRatio;
 
             if (link.Build())
                 _ropeRoots.Add(go);
