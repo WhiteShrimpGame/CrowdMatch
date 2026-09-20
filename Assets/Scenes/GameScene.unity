@@ -1142,6 +1142,9 @@ MonoBehaviour:
     duration: 1
   happyChance: 0.6
   happyTag: EmojiHappy
+  happyJumpChance: 0.7
+  happyJumpMinJumped: 4
+  happyJumpCooldown: 3
   sleepTag: EmojiSleep
   angryTag: EmojiAngry
   angryJumpChancePerPixel: 0.1
