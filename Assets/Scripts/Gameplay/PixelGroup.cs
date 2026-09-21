@@ -62,6 +62,9 @@ namespace CrowdMatch
         [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
         public GameObject pipePrefab;
 
+        [Tooltip("倍乘门预制体模板（需自带 GateItem 组件，并含本体 Mesh 子物体与倍数 Text 子物体）")]
+        public GameObject gatePrefab;
+
         [Tooltip("箱子角格预制体（占一格，可视觉溢出边界）")]
         public GameObject boxCornerPrefab;
 
@@ -86,11 +89,24 @@ namespace CrowdMatch
         /// <summary>管道占用表 [column, row]：true = 该格被 PipeItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] pipeGrid;
 
+        /// <summary>倍乘门门格表 [column, row]：该格属于哪道门（不在任何门上为 null）。
+        /// 注意门格**不是**障碍——门是区域的唯一出口，寻路与暴露都必须能穿过它。</summary>
+        [System.NonSerialized] public GateItem[,] gateGrid;
+
+        /// <summary>该格是否落在某道门的闭合区域内（供「区域内像素必须走到门格才允许离场」的守卫用）。</summary>
+        [System.NonSerialized] public bool[,] gateRegionMask;
+
+        /// <summary>倍率图 [column, row]：该格所属各门倍数之积（不在任何区域内为 1）。嵌套即连乘。</summary>
+        [System.NonSerialized] public int[,] gateMultiplier;
+
         /// <summary>箱子占用表 [column, row]：true = 该格被未开箱的 BoxItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] boxGrid;
 
         /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
+
+        /// <summary>运行时收集到的所有倍乘门（重建 grid 时刷新）。</summary>
+        [System.NonSerialized] public List<GateItem> gates = new List<GateItem>();
 
         /// <summary>运行时收集到的所有箱子（重建 grid 时刷新；含已开箱的，用 opened 区分）。</summary>
         [System.NonSerialized] public List<BoxItem> boxes = new List<BoxItem>();
@@ -125,9 +141,16 @@ namespace CrowdMatch
             wallGrid = new bool[columns, TotalRows];
             pipeGrid = new bool[columns, TotalRows];
             boxGrid = new bool[columns, TotalRows];
+            gateGrid = new GateItem[columns, TotalRows];
+            gateRegionMask = new bool[columns, TotalRows];
+            gateMultiplier = new int[columns, TotalRows];
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    gateMultiplier[c, r] = 1;
             pipes = new List<PipeItem>();
             boxes = new List<BoxItem>();
             elevators = new List<ElevatorItem>();
+            gates = new List<GateItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -187,6 +210,50 @@ namespace CrowdMatch
             // 无升降台的关卡：恢复默认地面材质（清除之前升降台留下的挖洞材质污染）
             if (Application.isPlaying && elevators.Count == 0)
                 RestoreDefaultGroundMaterial();
+
+            // 倍乘门：登记引用 + 门格表。门格**不写 wallGrid / pipeGrid / boxGrid**（门不是障碍）
+            foreach (var gate in GetComponentsInChildren<GateItem>())
+            {
+                if (gate == null)
+                    continue;
+                gate.group = this;
+                gate.RefreshCells();   // 字段可能在 Inspector 里被改过，用最新的起终点
+                gate.ResetMasks(columns, TotalRows);
+                gates.Add(gate);
+
+                foreach (var cell in gate.cells)
+                {
+                    if (IsInRange(cell.x, cell.y))
+                        gateGrid[cell.x, cell.y] = gate;
+                }
+            }
+
+            // 闭合区域 + 连乘倍率图
+            for (int i = 0; i < gates.Count; i++)
+            {
+                var gate = gates[i];
+                var region = GateRegion.ComputeRegion(columns, TotalRows, IsPermanentGateBarrier, gate.cells);
+                int mult = Mathf.Max(1, gate.multiplier);
+
+                foreach (var cell in region)
+                {
+                    if (!IsInRange(cell.x, cell.y))
+                        continue;
+                    gate.regionMask[cell.x, cell.y] = true;
+                    gateRegionMask[cell.x, cell.y] = true;
+                    gateMultiplier[cell.x, cell.y] *= mult;   // 嵌套 = 各门倍数连乘
+                }
+            }
+        }
+
+        /// <summary>
+        /// 倍乘门闭合区域求解用的「永久障碍」：墙 ∪ 管道自身格。
+        /// **不含箱子**：箱子会开箱、会消失，不能当永久围栏；不把它算障碍，
+        /// 区域内箱子自身的格才落在区域内、箱子释放的像素才可能被正确计入倍乘（见 <see cref="GateRegion"/>）。
+        /// </summary>
+        private bool IsPermanentGateBarrier(int col, int row)
+        {
+            return IsWall(col, row) || IsPipe(col, row);
         }
 
         /// <summary>找到地面 Renderer（优先 Block_BG，退 BG），若非默认 BG 材质则换回，用于无升降台关卡恢复地面外观。</summary>
@@ -308,6 +375,114 @@ namespace CrowdMatch
             if (IsBlocked(col, row))
                 return false;
             return !IsActivePipeBlocked(col, row);
+        }
+
+        /// <summary>该格是否是某道倍乘门的门格。</summary>
+        public bool IsGateCell(int col, int row)
+        {
+            return GateAt(col, row) != null;
+        }
+
+        /// <summary>该格所属的倍乘门（不是门格时返回 null）。</summary>
+        public GateItem GateAt(int col, int row)
+        {
+            if (gateGrid == null || !IsInRange(col, row))
+                return null;
+            return gateGrid[col, row];
+        }
+
+        /// <summary>该格是否落在某道门的闭合区域内。</summary>
+        public bool IsInGateRegion(int col, int row)
+        {
+            if (gateRegionMask == null || !IsInRange(col, row))
+                return false;
+            return gateRegionMask[col, row];
+        }
+
+        /// <summary>该格的倍率（所属各门倍数之积；不在任何区域内为 1）。嵌套门即连乘。</summary>
+        public int GateMultiplierAt(int col, int row)
+        {
+            if (gateMultiplier == null || !IsInRange(col, row))
+                return 1;
+            return gateMultiplier[col, row];
+        }
+
+        /// <summary>
+        /// 该格是否「在某道门的区域内、却不在那道门的门格上」——这种格不允许像素直接离场，
+        /// 必须继续走到门格才允许（见 CrowdBufferZone.CanExit 的守卫；否则区域深处的像素会原地飞出去、
+        /// 越过门格却不占用它，裂变不触发、嵌套的外门也会被整层跳过）。
+        /// 返回 true 时 out gate 给出对应的门。
+        /// </summary>
+        public bool MustWalkToGate(int col, int row, out GateItem gate)
+        {
+            gate = null;
+            if (gates == null || !IsInRange(col, row))
+                return false;
+
+            for (int i = 0; i < gates.Count; i++)
+            {
+                var g = gates[i];
+                if (g == null || g.regionMask == null)
+                    continue;
+                if (!g.regionMask[col, row])
+                    continue;                                       // 不在这道门的区域内
+                if (g.cellMask != null && g.cellMask[col, row])
+                    continue;                                       // 已在门格上：允许离场
+
+                gate = g;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>落在该门闭合区域内的静态网格像素数（供 Inspector 显示与校验提示）。</summary>
+        public int CountPixelsInRegion(GateItem gate)
+        {
+            if (gate == null || gate.regionMask == null || grid == null)
+                return 0;
+
+            int n = 0;
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    if (gate.regionMask[c, r] && grid[c, r] != null)
+                        n++;
+            return n;
+        }
+
+        /// <summary>
+        /// 校验所有倍乘门（调用前应先 <see cref="RebuildGrid"/> 让掩码与区域刷新）。通过返回 null，否则返回错误描述。
+        /// 查三件事：① 线段轴对齐；② 每道门都围出了非空闭合区域；③ 门格互不重叠
+        /// （重叠时分身该算哪道门无定义）。**创建门时不做这个检查**，只有数量检查与生成 Containers 才查。
+        /// </summary>
+        public string ValidateGates()
+        {
+            if (gates == null || gates.Count == 0)
+                return null;
+
+            var seen = new HashSet<Vector2Int>();
+            for (int i = 0; i < gates.Count; i++)
+            {
+                var gate = gates[i];
+                if (gate == null)
+                    continue;
+
+                if (!gate.IsValid(out string segErr))
+                    return "倍乘门 " + gate.name + "：" + segErr;
+
+                gate.RefreshCells();
+                foreach (var cell in gate.cells)
+                {
+                    if (!seen.Add(cell))
+                        return "倍乘门门格重叠：格 (" + cell.x + "," + cell.y + ") 被多道门同时占用，" +
+                               "重叠时分身属于哪道门没有定义，请错开各门的范围。";
+                }
+
+                if (gate.RegionCellCount() == 0)
+                    return "倍乘门 " + gate.name + " 没有围出闭合区域。\n" +
+                           "请用墙（或管道）配合这道门把要倍乘的像素围成一个封闭区间——" +
+                           "门本身算围栏的一段，区域内不能有别的出口，否则无法确定有多少像素会经过这道门。";
+            }
+            return null;
         }
 
         /// <summary>
@@ -528,6 +703,30 @@ namespace CrowdMatch
             pipes = new List<PipeItem>();
         }
 
+        /// <summary>清空所有 GateItem 子物体（供关卡重载时重建倍乘门）。</summary>
+        public void ClearGates()
+        {
+            var items = GetComponentsInChildren<GateItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var g = items[i];
+                if (g == null)
+                    continue;
+                g.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(g.gameObject);
+                else
+                    DestroyImmediate(g.gameObject);
+            }
+
+            // 置空而不是清零：倍率「不在区域内 = 1」，用 0 填充会在重建前被读成倍率 0。
+            // 三个访问器（GateAt / IsInGateRegion / GateMultiplierAt）都已对 null 做了兜底。
+            gateGrid = null;
+            gateRegionMask = null;
+            gateMultiplier = null;
+            gates = new List<GateItem>();
+        }
+
         /// <summary>
         /// 清空所有 BoxItem 及其隐藏 Pixel（供关卡重载时重建箱子）。
         /// 隐藏 Pixel 是 PixelGroup 的子物体（gridX=gridZ=-1 且 inactive），hiddenPixels 列表在域重载后会清空，
@@ -675,6 +874,44 @@ namespace CrowdMatch
             var cell = PipeItem.GetPipeCell(pipe.points);
             go.transform.localPosition = GetLocalPosition(cell.x, cell.y);
             return pipe;
+        }
+
+        /// <summary>
+        /// 在 PixelGroup 下动态创建一道倍乘门（用 gatePrefab 实例化），并摆放可见表现
+        /// （根定位到整段中心、本体网格按格数缩放、数字显示 x{倍数}）。
+        /// 起终点为网格坐标（x = 列 col，y = 行 row）。
+        /// </summary>
+        public GateItem SpawnGate(Vector2 start, Vector2 end, int multiplier)
+        {
+            if (gatePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] gatePrefab 为空，无法生成倍乘门（请指定自带 GateItem 组件的预制体）。");
+                return null;
+            }
+
+            string gateName = "Gate_" + (transform.childCount + 1);   // 先取名，避免实例化后再数子物体多算一个
+            var go = PrefabSpawner.Instantiate(gatePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = gateName;
+
+            var gate = go.GetComponent<GateItem>();
+            if (gate == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + gatePrefab.name + " 缺少 GateItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
+            gate.start = start;
+            gate.end = end;
+            gate.multiplier = Mathf.Max(1, multiplier);
+            gate.group = this;
+            gate.BuildVisual(this);
+            return gate;
         }
 
         /// <summary>
@@ -904,12 +1141,56 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 收集用于容器规划的 (层, 颜色) 列表：静态像素（含轨道上的初始像素）+ 管道将生成的像素。
-        /// 编辑器与运行时均可调用（不依赖 grid 重建）。
+        /// 收集用于容器规划的 (层, 颜色) 列表：静态像素（含轨道上的初始像素）+ 管道将生成的像素 + 箱子隐藏像素 + 升降台分组像素。
+        /// 编辑器与运行时均可调用（不依赖 grid 重建）。**已含倍乘门带来的额外像素**：每颗按其所在格的倍率重复发出。
         /// </summary>
         public List<(int layer, int color)> CollectPlanningPixels()
         {
-            var pixels = new List<(int, int)>();
+            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            CollectPlanningSources(sources);
+
+            var pixels = new List<(int, int)>(sources.Count);
+            for (int i = 0; i < sources.Count; i++)
+            {
+                var s = sources[i];
+                int mult = Mathf.Max(1, GateMultiplierAt(s.cell.x, s.cell.y));
+                for (int k = 0; k < mult; k++)
+                    pixels.Add((s.layer, s.color));
+            }
+            return pixels;
+        }
+
+        /// <summary>
+        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时通关判定把总数算全
+        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就永远无法通关）。
+        /// 与 <see cref="CollectPlanningPixels"/> 同源，口径不会发散。
+        /// </summary>
+        public int CountGateExtraPixels()
+        {
+            if (gates == null || gates.Count == 0)
+                return 0;
+
+            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            CollectPlanningSources(sources);
+
+            int extra = 0;
+            for (int i = 0; i < sources.Count; i++)
+            {
+                var s = sources[i];
+                int mult = Mathf.Max(1, GateMultiplierAt(s.cell.x, s.cell.y));
+                if (mult > 1)
+                    extra += mult - 1;
+            }
+            return extra;
+        }
+
+        /// <summary>
+        /// **只枚举一次**的 (层, 颜色, 所在格) 源列表，是「统计颜色总数 / 容器规划 / 通关判定」三处共同的底座，
+        /// 保证三处口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        /// </summary>
+        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell)> outList)
+        {
+            outList.Clear();
 
             // 区域内的地上像素是普通网格像素，正常计入；升降台自身的地下像素由分组单独计入（下方）。
             var elevators = GetComponentsInChildren<ElevatorItem>();
@@ -918,35 +1199,39 @@ namespace CrowdMatch
             {
                 if (it == null || !IsInRange(it.gridX, it.gridZ))
                     continue;
-                pixels.Add((it.gridZ, it.colorId));
+                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ)));
             }
 
             foreach (var pipe in GetComponentsInChildren<PipeItem>())
             {
                 if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null)
                     continue;
-                int track = PipeItem.CountTrackCells(pipe.points, columns, TotalRows);
-                if (track <= 0)
+                // 管道每波像素逐个停在轨道格上（PipeItem 会把 gridX/gridZ 设成对应 track[i]），故按轨道格查倍率
+                var trackCells = pipe.TrackCells();
+                if (trackCells.Count == 0)
                     continue;
                 var pipeCell = PipeItem.GetPipeCell(pipe.points);
                 int layer = Mathf.Clamp(pipeCell.y, 0, TotalRows - 1);
                 foreach (int c in pipe.colors)
-                    for (int k = 0; k < track; k++)
-                        pixels.Add((layer, c));
+                    for (int k = 0; k < trackCells.Count; k++)
+                        outList.Add((layer, c, trackCells[k]));
             }
 
-            // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入
+            // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入。
+            // 释放到哪些格是运行时动态选的（BoxItem.PlanAssignments 按当时空位分配），无法预知，
+            // 故倍率一律钉在箱子锚点格 (colMin,rowMin) 上——整箱跨门时计数不可靠，校验里会提示。
             foreach (var box in GetComponentsInChildren<BoxItem>())
             {
                 if (box == null || box.opened || box.colorIds == null)
                     continue;
                 int layer = Mathf.Clamp(box.rowMin, 0, TotalRows - 1);
                 int count = Mathf.Min(box.capacity, box.colorIds.Length);
+                var anchor = new Vector2Int(box.colMin, box.rowMin);
                 for (int i = 0; i < count; i++)
-                    pixels.Add((layer, box.colorIds[i]));
+                    outList.Add((layer, box.colorIds[i], anchor));
             }
 
-            // 升降台分组像素：layer 取升降台 rowMin，颜色按每组 cells 的三元组计入（编辑器与运行时通用）
+            // 升降台分组像素：layer 取升降台 rowMin，颜色与所在格按每组 cells 的三元组取（编辑器与运行时通用）
             foreach (var elev in elevators)
             {
                 if (elev == null || elev.groups == null)
@@ -957,11 +1242,9 @@ namespace CrowdMatch
                     if (g == null || g.cells == null)
                         continue;
                     for (int i = 0; i + 2 < g.cells.Length; i += 3)
-                        pixels.Add((layer, g.cells[i + 2]));
+                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1])));
                 }
             }
-
-            return pixels;
         }
     }
 }
