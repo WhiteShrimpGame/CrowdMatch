@@ -213,10 +213,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   colorId: 0
+  isQuestion: 0
+  questionObject: {fileID: 0}
   capacity: 1
   capacityText: {fileID: 5768384865316759867}
   gridX: 0
   gridZ: 0
+  ropeGroupId: 0
+  ropeAnchorLeft: {fileID: 0}
+  ropeAnchorRight: {fileID: 0}
+  frontAxle: {fileID: 0}
+  ropeExitAxle: {fileID: 0}
+  rearAxle: {fileID: 0}
+  reverseScaleAxle: {fileID: 0}
+  rollAxle: {fileID: 0}
+  elasticScaleAxle: {fileID: 0}
+  trailParent: {fileID: 0}
+  lidTransform: {fileID: 0}
+  posList: []
+  boardJumpPower: 0.6
+  boardJumpCount: 1
+  boardJumpDuration: 0.35
+  boardElasticTargetScale: {x: 1.15, y: 0.85, z: 1.15}
+  boardElasticScaleDuration: 0.1
+  boardElasticRecoverDuration: 0.15
+  refillRollMaxAngle: 10
+  refillRollOutDuration: 0.3
+  refillRollRecoverDuration: 0.4
+  materialReplacements: []
 --- !u!1 &5689616838624277948
 GameObject:
   m_ObjectHideFlags: 0
