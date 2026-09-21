@@ -74,7 +74,13 @@
       "Bash(timeout 540 dotnet build Assembly-CSharp-Editor.csproj -v:m -nologo -t:Rebuild)",
       "Bash(cp \"F:/CrowdMatch/Assets/Scripts/Gameplay/CornerTiling/CornerTileTable.cs\" \"C:/Users/hougo/.claude/skills/unity-corner-tiler/CornerTileTable.cs\" && md5sum \"C:/Users/hougo/.claude/skills/unity-corner-tiler/CornerTileTable.cs\" \"F:/CrowdMatch/Assets/Scripts/Gameplay/CornerTiling/CornerTileTable.cs\" && grep -n \"124,  4,\\\\|233,  4,\\\\|0xE9\" \"C:/Users/hougo/.claude/skills/unity-corner-tiler/CornerTileTable.cs\" | head)",
       "Bash(git -C /f/CrowdMatch diff --stat)",
-      "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/Conveyor/ConveyorBelt.cs)"
+      "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/Conveyor/ConveyorBelt.cs)",
+      "Bash(python -)",
+      "Bash(node -e ' *)",
+      "Bash(node -e 'const fs=require\\(\"fs\"\\); *)",
+      "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/GameController.cs)",
+      "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/PixelItem.cs)",
+      "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/PixelGroup.cs Assets/Scripts/Core/LevelLoader.cs Assets/Scripts/Core/LevelData.cs Assets/Scripts/Editor/LevelDataExporter.cs)"
     ]
   }
 }

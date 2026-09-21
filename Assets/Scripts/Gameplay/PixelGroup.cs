@@ -84,6 +84,15 @@ namespace CrowdMatch
         [Tooltip("冰冻组预制体模板（需自带 IceItem 组件，并含单元模板子物体与计数 Text 子物体）。每个冰组实例化一份")]
         public GameObject icePrefab;
 
+        [Tooltip("木箱角格预制体（占一格；木箱可单独覆盖这三个字段，留空就用这里的）")]
+        public GameObject crateCornerPrefab;
+
+        [Tooltip("木箱边格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
+        public GameObject crateEdgePrefab;
+
+        [Tooltip("木箱中心格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
+        public GameObject crateCenterPrefab;
+
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
 
@@ -113,6 +122,11 @@ namespace CrowdMatch
         /// <summary>箱子占用表 [column, row]：true = 该格被未开箱的 BoxItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] boxGrid;
 
+        /// <summary>木箱占用/遮盖表 [column, row]：true = 该格被未拆掉的木箱盖住。
+        /// 与 <see cref="boxGrid"/> 同类 —— **是障碍**（整块矩形，含其中的空格），
+        /// 于是木箱格天然被排除在同色连通块之外、也不会出描边。</summary>
+        [System.NonSerialized] public bool[,] crateMask;
+
         /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
 
@@ -127,6 +141,9 @@ namespace CrowdMatch
 
         /// <summary>运行时收集到的所有升降台（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<ElevatorItem> elevators = new List<ElevatorItem>();
+
+        /// <summary>运行时收集到的所有木箱（重建 grid 时刷新；含已拆掉的，用 destroyed 区分）。</summary>
+        [System.NonSerialized] public List<CrateItem> crates = new List<CrateItem>();
 
         /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
         [System.NonSerialized] public int releasingBoxesCount;
@@ -155,6 +172,7 @@ namespace CrowdMatch
             wallGrid = new bool[columns, TotalRows];
             pipeGrid = new bool[columns, TotalRows];
             boxGrid = new bool[columns, TotalRows];
+            crateMask = new bool[columns, TotalRows];
             gateGrid = new GateItem[columns, TotalRows];
             gateRegionMask = new bool[columns, TotalRows];
             gateMultiplier = new int[columns, TotalRows];
@@ -167,6 +185,7 @@ namespace CrowdMatch
             elevators = new List<ElevatorItem>();
             gates = new List<GateItem>();
             iceGroups = new List<IceItem>();
+            crates = new List<CrateItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -274,7 +293,19 @@ namespace CrowdMatch
                 iceGroups.Add(ice);
             }
 
+            // 木箱：登记引用 + 本体格掩码（crateMask 由 RefreshCrateState 填）。
+            // 与冰**相反**：木箱格是障碍（并入 IsBlocked），所以整块矩形连同其中的空格都占格。
+            foreach (var crate in GetComponentsInChildren<CrateItem>())
+            {
+                if (crate == null)
+                    continue;
+                crate.group = this;
+                crate.RefreshCells();   // 字段可能在 Inspector 里被改过，用最新的区域
+                crates.Add(crate);
+            }
+
             RefreshIceState();
+            RefreshCrateState();
         }
 
         /// <summary>
@@ -343,8 +374,18 @@ namespace CrowdMatch
             return boxGrid[col, row];
         }
 
-        /// <summary>该格是否为障碍（墙体、管道或未开箱的箱子）。</summary>
-        public bool IsBlocked(int col, int row) => IsWall(col, row) || IsPipe(col, row) || IsBox(col, row);
+        /// <summary>该格是否被未拆掉的木箱盖住（木箱本体整块矩形，含其中的空格）。</summary>
+        public bool IsCrateCell(int col, int row)
+        {
+            if (crateMask == null)
+                return false;
+            if (!IsInRange(col, row))
+                return false;
+            return crateMask[col, row];
+        }
+
+        /// <summary>该格是否为障碍（墙体、管道、未开箱的箱子或未拆掉的木箱）。</summary>
+        public bool IsBlocked(int col, int row) => IsWall(col, row) || IsPipe(col, row) || IsBox(col, row) || IsCrateCell(col, row);
 
         /// <summary>该格是否为空（既无像素也无墙体/管道，可作为可通行 / 暴露判定依据）。grid 未重建时视为非空。</summary>
         public bool IsEmpty(int col, int row)
@@ -630,6 +671,120 @@ namespace CrowdMatch
             RefreshExposed();   // 冰化开后组内像素要立刻恢复可点
         }
 
+        // ===== 木箱 =====
+
+        /// <summary>
+        /// 刷新木箱状态：按未拆掉的木箱重填 <see cref="crateMask"/>，并把「被盖住」标志写回各像素
+        /// （关渲染器 / 恢复显示）。
+        ///
+        /// **只按 destroyed 计算，不重置计数**：计数只由 <see cref="CrateItem.RegisterAdjacentMoveOut"/>
+        /// 推进；复位只发生在 <see cref="SpawnCrate"/>（新关卡导入）与 RebuildGrid 重新登记之后
+        /// （新建的 CrateItem 计数天然是 0）。
+        /// </summary>
+        public void RefreshCrateState()
+        {
+            if (crateMask == null || grid == null)
+                return;
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    crateMask[c, r] = false;
+
+            if (crates != null)
+            {
+                for (int i = 0; i < crates.Count; i++)
+                {
+                    var crate = crates[i];
+                    if (crate == null || crate.destroyed)
+                        continue;
+
+                    foreach (var cell in crate.Cells)
+                        if (IsInRange(cell.x, cell.y))
+                            crateMask[cell.x, cell.y] = true;
+                }
+            }
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                {
+                    var item = grid[c, r];
+                    if (item != null)
+                        item.SetCovered(crateMask[c, r]);
+                }
+        }
+
+        /// <summary>落在该木箱本体格上的像素数（供 Inspector 显示）。</summary>
+        public int CountPixelsUnderCrate(CrateItem crate)
+        {
+            if (crate == null || grid == null)
+                return 0;
+
+            int n = 0;
+            foreach (var cell in crate.Cells)
+                if (IsInRange(cell.x, cell.y) && grid[cell.x, cell.y] != null)
+                    n++;
+            return n;
+        }
+
+        /// <summary>
+        /// 一次成功的「点击移出」之后：与本次移出的像素上下左右（4 邻）相接的木箱各计 1 次。
+        ///
+        /// **同组同时移出算一次**：同一次点击移出的是一组同色像素，无论组内有多少颗挨着同一个木箱，
+        /// 该木箱都只计 1 次（这里对每个木箱逐次判断「有没有挨着」而不是累计格数）。
+        /// 计满的木箱当场拆掉 —— 占格与遮盖立刻撤销（<see cref="RefreshCrateState"/>），
+        /// 底下像素恢复可见并按正常规则重新判定暴露。
+        ///
+        /// 返回**是否有木箱被拆掉**（调用方据此补一次整体描边刷新）。
+        /// </summary>
+        public bool NotifyPixelsMovedOut(List<PixelItem> moved)
+        {
+            if (crates == null || crates.Count == 0 || moved == null || moved.Count == 0)
+                return false;
+
+            // 本次移出像素的 4 邻格。用它们**移出前**的网格坐标：grid 里的引用已被清空，
+            // 但 gridX / gridZ 字段没变，就是它们刚离开的位置。
+            var touched = new HashSet<Vector2Int>();
+            for (int i = 0; i < moved.Count; i++)
+            {
+                var it = moved[i];
+                if (it == null)
+                    continue;
+                touched.Add(new Vector2Int(it.gridX - 1, it.gridZ));
+                touched.Add(new Vector2Int(it.gridX + 1, it.gridZ));
+                touched.Add(new Vector2Int(it.gridX, it.gridZ - 1));
+                touched.Add(new Vector2Int(it.gridX, it.gridZ + 1));
+            }
+
+            bool anyDestroyed = false;
+            for (int i = 0; i < crates.Count; i++)
+            {
+                var crate = crates[i];
+                if (crate == null || crate.destroyed)
+                    continue;
+
+                bool adjacent = false;
+                foreach (var cell in crate.Cells)
+                {
+                    if (touched.Contains(cell))
+                    {
+                        adjacent = true;
+                        break;
+                    }
+                }
+                if (!adjacent)
+                    continue;
+
+                if (crate.RegisterAdjacentMoveOut())
+                    anyDestroyed = true;
+            }
+
+            if (!anyDestroyed)
+                return false;
+
+            RefreshExposed();   // 内部先 RefreshCrateState（撤占格 + 恢复渲染），再重算暴露
+            return true;
+        }
+
         /// <summary>
         /// 校验所有倍乘门（调用前应先 <see cref="RebuildGrid"/> 让掩码与区域刷新）。通过返回 null，否则返回错误描述。
         /// 查三件事：① 线段轴对齐；② 每道门都围出了非空闭合区域；③ 门格互不重叠
@@ -698,6 +853,10 @@ namespace CrowdMatch
             // 冰冻掩码先刷新到最新：下面同色连通块的扩散要「碰到冰冻中的冰格就停」，
             // 靠的就是 iceFrozenMask。放在这里是为了不依赖调用顺序（调用方可能刚改过冰组、刚融化）。
             RefreshIceState();
+
+            // 木箱掩码同理先刷新：crateMask 是障碍（并入 IsBlocked），下面所有
+            // 「跳过 IsBlocked」的分支都依赖它是最新的，否则刚被拆掉的木箱会继续挡住它的像素。
+            RefreshCrateState();
 
             int cols = columns;
             int totalRows = TotalRows;
@@ -1039,6 +1198,29 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 清空所有 CrateItem 及其拼接视觉（供关卡重载时重建木箱）。
+        /// **不销毁任何像素**：木箱盖住的像素是普通网格像素（不像箱子的隐藏像素），
+        /// 它们由 ClearPixels 统一处理 —— 与 ClearElevators 同类。
+        /// </summary>
+        public void ClearCrates()
+        {
+            var items = GetComponentsInChildren<CrateItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var crate = items[i];
+                if (crate == null)
+                    continue;
+                crate.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(crate.gameObject);
+                else
+                    DestroyImmediate(crate.gameObject);
+            }
+            crateMask = new bool[columns, TotalRows];
+            crates = new List<CrateItem>();
+        }
+
+        /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
         /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
         /// closed = true 时额外补首尾闭合段。
@@ -1209,6 +1391,50 @@ namespace CrowdMatch
             ice.ResetCount();          // 新冰组的计数从 freezeCount 起算
             ice.BuildVisual(this);
             return ice;
+        }
+
+        /// <summary>
+        /// 在 PixelGroup 下动态创建一个 CrateItem（new GameObject + AddComponent），把区域裁剪到网格内、拼接视觉。
+        ///
+        /// **不像箱子那样生成、也不像箱子那样跳过像素**：木箱盖住的像素本来就是 pixel.cells 里的普通像素
+        /// （所以 LevelLoader 不把木箱格加进 skipCells），木箱只是盖在上面 —— 渲染由
+        /// <see cref="RefreshCrateState"/> 关掉。计数从 0 起算，所以重进关卡天然复位。
+        /// </summary>
+        public CrateItem SpawnCrate(LevelData.CrateData data)
+        {
+            if (data == null)
+                return null;
+
+            int cmin = Mathf.Max(0, Mathf.Min(data.colMin, data.colMax));
+            int cmax = Mathf.Min(columns - 1, Mathf.Max(data.colMin, data.colMax));
+            int rmin = Mathf.Max(0, Mathf.Min(data.rowMin, data.rowMax));
+            int rmax = Mathf.Min(TotalRows - 1, Mathf.Max(data.rowMin, data.rowMax));
+
+            if (cmin > cmax || rmin > rmax)
+            {
+                Debug.LogWarning("[PixelGroup] 木箱区域完全越界，已忽略。");
+                return null;
+            }
+
+            if (cmax - cmin + 1 < 2 || rmax - rmin + 1 < 2)
+            {
+                Debug.LogWarning("[PixelGroup] 木箱区域裁剪后长宽不足 2（" + (cmax - cmin + 1) + "×" +
+                    (rmax - rmin + 1) + "），仍然创建，但请检查关卡数据。");
+            }
+
+            var go = new GameObject("Crate_" + rmin + "_" + cmin);
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+
+            var crate = go.AddComponent<CrateItem>();
+            crate.colMin = cmin;
+            crate.rowMin = rmin;
+            crate.colMax = cmax;
+            crate.rowMax = rmax;
+            crate.destroyAfterMoves = Mathf.Max(1, data.destroyAfterMoves);
+
+            crate.BuildVisual(this);
+            return crate;
         }
 
         /// <summary>

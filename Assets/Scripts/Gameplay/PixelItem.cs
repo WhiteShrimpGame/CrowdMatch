@@ -69,6 +69,14 @@ namespace CrowdMatch
         /// </summary>
         [System.NonSerialized] public bool IsFrozen;
 
+        /// <summary>
+        /// 是否被木箱盖住。被盖住的像素**不可见**（本体渲染器关闭）且**不能操作**
+        /// （GameController.HandleClick 的守卫直接返回、不给任何反馈），
+        /// 同时木箱格是障碍 → 它在暴露计算里天然为「不暴露」，不会出描边。
+        /// 由 PixelGroup.RefreshCrateState 统一写入。
+        /// </summary>
+        [System.NonSerialized] public bool IsCovered;
+
         /// <summary>管道放置中标记：期间 SetExposed 只记录状态、不激活 Animator，待放置完成后统一激活。</summary>
         [System.NonSerialized] public bool placing;
 
@@ -331,6 +339,42 @@ namespace CrowdMatch
         public void SetFrozen(bool frozen)
         {
             IsFrozen = frozen;
+        }
+
+        /// <summary>
+        /// 木箱遮盖：关掉本体渲染器（不可见）与问号物体，恢复时再按「是否未揭晓问号」重算显隐。
+        ///
+        /// **不能改用 SetActive(false)**：那是箱子隐藏像素的做法，而 CountPixels 用
+        /// GetComponentsInChildren 默认扫不到 inactive 物体（箱子的隐藏像素靠 BoxItem.hiddenPixels
+        /// 额外累加才补回来）。木箱盖住的像素是**已经算进 TotalPixelCount** 的普通像素，
+        /// 被漏算一次就成了「不拆箱也能通关」。
+        ///
+        /// **保留点击碰撞体**（与冰冻同理）：射线必须还能打到它。区别在命中之后 ——
+        /// 冰的守卫给阻挡反馈，木箱的守卫什么都不做（那里本来就看着没有像素）。
+        /// 若把碰撞体关掉，射线会直接穿过去打中木箱更后面的像素，那才是真的错。
+        /// </summary>
+        public void SetCovered(bool covered)
+        {
+            if (IsCovered == covered)
+                return;
+            IsCovered = covered;
+
+            for (int i = 0; i < renderers.Count; i++)
+            {
+                var r = renderers[i];
+                if (r != null)
+                    r.enabled = !covered;
+            }
+
+            if (covered)
+            {
+                if (questionObject != null)
+                    questionObject.SetActive(false);
+            }
+            else
+            {
+                RefreshQuestionObject();   // 恢复显示：按「是否未揭晓问号」重算问号物体显隐
+            }
         }
 
         /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。
