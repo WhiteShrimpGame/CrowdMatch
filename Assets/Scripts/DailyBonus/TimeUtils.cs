@@ -1,4 +1,5 @@
 using System;
+using CrowdMatch;
 
 namespace WsGame.Time
 {
@@ -13,9 +14,8 @@ namespace WsGame.Time
 
         private static int DefaultGetCurrentTime()
         {
-            return DateTimeToUnix(DateTime.UtcNow);
+            return DateTimeToUnix(DateTime.UtcNow) + GameData.AddDay * 86400 + GameData.AddHour * 3600;;
         }
-
         /// <summary>
         /// 跨天刷新判断：计算距下次刷新的剩余秒数（用于倒计时显示）。
         /// lastTime 越界（大于当前时间）时回调修正。

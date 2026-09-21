@@ -40,11 +40,17 @@ namespace WsGame.DailyBouns
         /// <summary>领取后刷新顶部金币显示（宿主注入；为空则跳过）</summary>
         public RefreshGoldDelegate onRefreshGold;
 
+        /// <summary>
+        /// 面板首次初始化完成后回调（宿主在这里注入飞币动画等；入口按钮销毁重建面板时只触发一次）。
+        /// </summary>
+        public static System.Action<DailyBonusPanel> OnPanelCreated;
+
         public void Show()
         {
             if (!isInit) Init();
             transform.Find("Bg").DOScale(0.4f, 0.3f).From().SetEase(DG.Tweening.Ease.OutBack);
             UpdateDailyItemState();
+            RefreshGoldText();
             if (TodayDailyBonus == null)
             {
                 countDownText.transform.parent.gameObject.SetActive(true);
@@ -88,7 +94,7 @@ namespace WsGame.DailyBouns
             claimBtn = transform.Find("Bg/BtnGroup/ClaimBtn").GetComponent<UnityEngine.UI.Button>();
             closeBtn = transform.Find("Bg/BackImg/CloseBtn").GetComponent<UnityEngine.UI.Button>();
             countDownText = transform.Find("Bg/BackImg/CountDown/CountDownText").GetComponent<UnityEngine.UI.Text>();
-            var goldTrans = transform.Find("Bg/GoldCount");
+            var goldTrans = transform.Find("Bg/GoldFrame/GoldCount");
             goldCountText = goldTrans != null ? goldTrans.GetComponent<UnityEngine.UI.Text>() : null;
             // 面板根自持 CanvasGroup（子格子 Bg 也有 CanvasGroup，GetComponentInChildren 会抓错）
             mainCanvasGroup = GetComponent<CanvasGroup>();
@@ -117,6 +123,7 @@ namespace WsGame.DailyBouns
 
             UpdateDailyItemState();
             isInit = true;
+            OnPanelCreated?.Invoke(this);
         }
 
         private void ClaimReward()
@@ -140,6 +147,29 @@ namespace WsGame.DailyBouns
             UpdateDailyItemState();
             startTime = true;
             countDownText.transform.parent.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// 把面板内金币数刷成宿主当前金币。只在面板打开时调用。
+        /// 领取后的数字变化交给飞币动画逐帧 SetGoldText，否则文字会先跳到新值、动画就没意义了。
+        /// 预制体里需要有 Bg/GoldFrame/GoldCount 这个 Text 节点；没挂则静默跳过。
+        /// </summary>
+        public void RefreshGoldText()
+        {
+            var handler = rewardHandler != null ? rewardHandler : DailyBounsData.RewardHandler;
+            if (handler == null)
+                return;
+
+            SetGoldText(handler.GetGoldCount());
+        }
+
+        /// <summary>把面板内金币文本设为指定值（飞币动画逐帧回调）。无 GoldCount 节点则跳过。</summary>
+        public void SetGoldText(int value)
+        {
+            if (goldCountText == null)
+                return;
+
+            goldCountText.text = RewardEffect.FormatKMG(value);
         }
 
         public void UpdateDailyItemState()

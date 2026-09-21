@@ -19,15 +19,15 @@ public class FailPanel : MonoBehaviour
     private void OnEnable()
     {
         GameState.GameFail();
-        /*if (StaminaSystemData.IsActive())
+        if (StaminaSystemData.IsActive())
         {
             if (StaminaSystemData.IsInfiniteStamina)
             {
-                Reporter.StaminaGet(1,"unlimitedStamina");
+                //Reporter.StaminaGet(1,"unlimitedStamina");
             }
             StaminaSystemData.CostStamina(1);
-            Reporter.StaminaCost(1,"gameFail");
-        }*/
+            //Reporter.StaminaCost(1,"gameFail");
+        }
         //暂时默认没有保存连胜
         GameData.WinStreak = 0;
         UIManager.IsPanelShow = true;
@@ -87,27 +87,18 @@ public class FailPanel : MonoBehaviour
     /// </summary>
     private void OnRestartBtnClick()
     {
-        
-        /*if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
         {
             UIManager.Instance.ShowStaminaPanel(true); // 弹补充体力弹窗
             return;
         }
-        if (GameController.Instance.isStreakActive && GameData.WinStreak > 0)
+        /*if (GameController.Instance.isStreakActive && GameData.WinStreak > 0)
         {
             Reporter.WinStreakFail();
-        }
-        GameData.WinStreak = 0;
-
-        if (AvatarData.IsUnlock())
-        {
-            AvatarData.Data.CurrentWinStreak = 0;
-            AvatarData.Data.TotalPlayCount++;
-            AvatarData.Save();
         }*/
-
+        GameData.WinStreak = 0;
         UIManager.IsPanelShow = false;
-        AudioManager.Instance.PlayButtonAudioAndVibrate();
         GameController.Instance.ReloadLevel();
         UIManager.Instance.showFailPanel(false);
     }
@@ -117,6 +108,7 @@ public class FailPanel : MonoBehaviour
     /// </summary>
     private void OnBackHomeBtnClick()
     {
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
         /*if (GameController.Instance.isStreakActive && GameData.WinStreak > 0)
         {
             Reporter.WinStreakFail();

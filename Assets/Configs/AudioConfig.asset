@@ -53,3 +53,11 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 398f9ce167d42b64a9ea8eaf5b72fde7, type: 3}
     volume: 1
     isBGM: 0
+  - tag: Button
+    clip: {fileID: 8300000, guid: 69b71cb81dfd96e45bbcb1083125cbfe, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: WinPart
+    clip: {fileID: 8300000, guid: 04c9a280676efc74d823ceba656b3db0, type: 3}
+    volume: 1
+    isBGM: 0

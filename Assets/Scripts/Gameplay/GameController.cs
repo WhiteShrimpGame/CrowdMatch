@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using DG.Tweening;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace CrowdMatch
@@ -132,7 +133,7 @@ namespace CrowdMatch
         {
             CloseRecord();   // 切关：先把上一关的记录文件落盘改名，本关的文件在下面另开
             CleanupLevel();
-
+            UIManager.Instance.gameInnerUI.RefreshGoldCount();
             var gm = GameManager.Instance;
             TextAsset json = gm != null ? gm.GetLevelJson(level) : null;
             if (json == null)
@@ -234,7 +235,7 @@ namespace CrowdMatch
         }
 
         /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
-        private void CheckWin()
+        public void CheckWin()
         {
             if (_transitioning)
                 return;
@@ -244,7 +245,8 @@ namespace CrowdMatch
             {
                 _transitioning = true;
                 GameState.GameWin();
-                Invoke(nameof(DoGameWin), 1.5f);
+                Invoke(nameof(DoGameWin), 2.5f);
+                UIManager.Instance.ShowWinPart();
             }
         }
 
@@ -560,20 +562,19 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
+            // =====新增：如果鼠标在UGUI上，直接跳过3D点击，射线不穿透UI=====
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 鼠标在UI上，跳过物理射线");
+                return;
+            }
             // 提取进行中仍允许点击：每次匹配作为独立批次，各自独立寻路（组间可穿模），无需等待上一批离场。
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 忽略点击：引用缺失 pixelGroup=" + (pixelGroup != null) +
                         " gatherPoint=" + (gatherPoint != null) + " Camera.main=" + (Camera.main != null));
-                return;
-            }
-
-            // 堆积限制：传送带 + 已点未进带 达容量且已累计两次点击时，忽略本次点击
-            if (!PassOverflowClickGate())
-            {
-                if (debugClickLog)
-                    Debug.Log("[Click] 堆积限制：已达容量且累计两次点击，忽略本次点击");
                 return;
             }
 
@@ -610,6 +611,18 @@ namespace CrowdMatch
                 return;
             }
 
+            // ==========【堆积限制移到这里：拿到有效像素item之后才判断】==========
+            if (!PassOverflowClickGate())
+            {
+                if (debugClickLog)
+                {
+                    Debug.Log("[Click] 堆积限制：已达容量且累计两次点击，忽略本次点击");
+                }
+                // 只有点到有效像素才弹提示
+                UIManager.Instance.ShowTip("排队人数过多，请稍后");
+                return;
+            }
+
             if (debugClickLog)
                 Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
                     ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
@@ -620,6 +633,7 @@ namespace CrowdMatch
                     (conveyorZone != null ? conveyorZone.TotalSlots : 0) +
                     " count=" + _overflowClickCount);
         }
+
 
         /// <summary>
         /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。

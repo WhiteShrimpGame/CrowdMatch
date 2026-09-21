@@ -11,8 +11,21 @@ namespace CrowdMatch
         public const string MusicState = "MusicState";
         public const string SoundState = "SoundState";
         public const string VibrateState = "VibrateState";
-        private static int _currentLevel = -1;
+        
+        public static GoldPlayerData Gold
+        {
+            get
+            {
+                if (_gold == null)
+                {
+                    _gold = new GoldPlayerData();
+                }
 
+                return _gold;
+            }
+        }
+        private static GoldPlayerData _gold;
+        private static int _currentLevel = -1;
         /// <summary>当前关卡编号（1 起）。读取时保护：&lt;= 0 一律按第 1 关处理。胜利时 +1，失败重置当前关时不变。</summary>
         public static int CurrentLevel
         {
@@ -48,6 +61,44 @@ namespace CrowdMatch
                 PlayerPrefs.SetInt("WinStreak", value);
             }
         }
+        public static int AddDay
+        {
+            get
+            {
+                if (_addDay < 0)
+                {
+                    _addDay = PlayerPrefs.GetInt("AddDay", 0);
+                }
+
+                return _addDay;
+            }
+            set
+            {
+                _addDay = value;
+                PlayerPrefs.SetInt("AddDay", _addDay);
+            }
+        }
+
+        public static int _addDay = -1;
+        public static int AddHour
+        {
+            get
+            {
+                if (_addHour < 0)
+                {
+                    _addHour = PlayerPrefs.GetInt("AddHourKey", 0);
+                }
+
+                return _addHour;
+            }
+            set
+            {
+                _addHour = value;
+                PlayerPrefs.SetInt("AddHourKey", _addHour);
+            }
+        }
+
+        public static int _addHour = -1;
         /// <summary>当前关卡的连续失败次数。胜利时清零。</summary>
         public static int FailCount { get; set; } = 0;
 
@@ -65,6 +116,18 @@ namespace CrowdMatch
         public static void Init(bool gaming = true)
         {
             IsGaming = gaming;
+            TotalPixelCount = 0;
+            ClearedPixelCount = 0;
+        }
+        // GameData.cs 里新增
+        public static void ResetAll()
+        {
+            _currentLevel = -1;
+            _winStreak = -1;
+            _addDay = -1;
+            _addHour = -1;
+            _gold = null;          // 下次访问重新从 PlayerPrefs 读
+            FailCount = 0;
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
         }

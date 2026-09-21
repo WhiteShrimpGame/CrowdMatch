@@ -987,7 +987,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 412.69995}
+  m_AnchoredPosition: {x: 0, y: 410}
   m_SizeDelta: {x: 463, y: 87}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &1510812759860090452
@@ -1039,6 +1039,7 @@ GameObject:
   - component: {fileID: 3800563341059555956}
   - component: {fileID: 9199660878262624149}
   - component: {fileID: 7502827522507465524}
+  - component: {fileID: 3841032834546512202}
   m_Layer: 5
   m_Name: Text
   m_TagString: Untagged
@@ -1108,6 +1109,22 @@ MonoBehaviour:
     m_VerticalOverflow: 0
     m_LineSpacing: 1
   m_Text: "\u6309\u4F4F\u5C4F\u5E55\u67E5\u770B\u5173\u5361\uFF01"
+--- !u!114 &3841032834546512202
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5118713307668772525}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6e3c4cc20a23f5749bf5a7df5707324c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  startLocalScale: {x: 0.9, y: 0.9, z: 0.9}
+  endLocalScale: {x: 1, y: 1, z: 1}
+  duration: 1
+  aimTarget: {fileID: 3800563341059555956}
 --- !u!1 &5281230166156866969
 GameObject:
   m_ObjectHideFlags: 0
@@ -1783,6 +1800,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8783159860097895649}
   - component: {fileID: 7310692859793334440}
+  - component: {fileID: 1831368652429219393}
   m_Layer: 5
   m_Name: RetryPanel
   m_TagString: Untagged
@@ -1829,6 +1847,18 @@ MonoBehaviour:
   backBtn: {fileID: 2956776632525431966}
   starRoot: {fileID: 7882922412186656593}
   jdText: {fileID: 4821764038205217745}
+--- !u!225 &1831368652429219393
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8783159860097895648}
+  m_Enabled: 1
+  m_Alpha: 1
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0
 --- !u!1 &8783159860660018859
 GameObject:
   m_ObjectHideFlags: 0

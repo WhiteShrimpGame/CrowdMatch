@@ -1,0 +1,11 @@
+{
+  "displayName": "_LuTween",
+  "name": "com.puffer.lutween",
+  "version": "1.0.1",
+  "author":"Warren",
+  "unity": "2019.1",
+  "description": "仿写的DoTween.",
+  "keywords": ["puffer", "dotween"],
+  "dependencies": {
+  }
+}

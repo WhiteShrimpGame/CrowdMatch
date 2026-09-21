@@ -405,8 +405,8 @@ public class UIManager : MonoBehaviour
             winPartPanel = Instantiate(winPartPanelPrefab, transform).transform;
         }
 
-        /*var win = winPartPanel.GetComponent<UIRainBowPanel>();
-        win.rainBowPlay();*/
+        var win = winPartPanel.GetComponent<UIRainBowPanel>();
+        win.rainBowPlay();
     }
 
     public void ShowBanner()

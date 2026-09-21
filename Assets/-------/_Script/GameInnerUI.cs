@@ -630,7 +630,7 @@ public class GameInnerUI : MonoBehaviour
     {
         if (goldCountText != null)
         {
-            //goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
+            goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
         }
     }
 

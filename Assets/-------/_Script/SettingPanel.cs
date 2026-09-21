@@ -108,16 +108,16 @@ public class SettingPanel : MonoBehaviour
         transform.Find("BG/InputField/OkBtn").GetComponent<Button>().onClick.AddListener(_OnCheckBtnClk);
         transform.Find("BG/TestPanel/JumpToLevel/GoBtn").GetComponent<Button>().onClick.AddListener(_OnGoBtnClk);
 
-        //var testRoot = transform.Find("BG/TestPanel");
+        var testRoot = transform.Find("BG/TestPanel");
 
-        /*for (int i = 0; i < testPanel.transform.childCount - 1; i++)
+        for (int i = 0; i < testPanel.transform.childCount - 1; i++)
         {
             var btn = testPanel.transform.GetChild(i + 1).GetComponent<Button>();
             var index = i;
 
             if (btn != null)
                 btn.onClick.AddListener(() => { _OnTestBtnClk(index); });
-        }*/
+        }
 
         _musicBtn.GetComponent<Button>().onClick.AddListener(OnMusicBtnClk);
         _soundBtn.GetComponent<Button>().onClick.AddListener(OnSoundBtnClk);
@@ -129,19 +129,19 @@ public class SettingPanel : MonoBehaviour
         
         ShowSettingState(); 
 
-        /*if (isShowTestPanel)
+        if (isShowTestPanel)
         {
             testInput.gameObject.SetActive(false);
             testPanel.SetActive(!isForbidTestPanel);
-            levelShowText.gameObject.SetActive(true);
+            //levelShowText.gameObject.SetActive(true);
             //ShowLevelText();
         }
         else
         {
             testInput.gameObject.SetActive(false);
             testPanel.SetActive(false);
-            levelShowText.gameObject.SetActive(false);
-        }*/
+            //levelShowText.gameObject.SetActive(false);
+        }
 
         /*vibrateLevelBtn.SetActive(true);
         vibrateTickBtn.SetActive(true);
@@ -249,7 +249,15 @@ public class SettingPanel : MonoBehaviour
 
             _vibrateBtn.GetComponent<Button>().targetGraphic = _vibrateBtn.Find("Close").GetComponent<Image>();
         }
-
+        if (GameData.AddHour == 0)
+        {
+            addHourText.text = "+1H";
+        }
+        else
+        {
+            addHourText.text = "+1H " + GameData.AddHour;
+        }
+        addDay.text = GameData.AddDay.ToString();
         // if (UIManager.Instance.isMainPanelActive)
         // {
         //     _resumeBtn.gameObject.SetActive(false);
@@ -285,7 +293,6 @@ public class SettingPanel : MonoBehaviour
             hideUITip.text = "隐藏UI";
         }
 
-        addDay.text = GameData.AddDay.ToString();
         addDayAfterClose.text = GameData.AddDayAfterClose.ToString();
 
         levelGroupText.text = "关卡组 " + GameData.LevelGroup;
@@ -318,14 +325,7 @@ public class SettingPanel : MonoBehaviour
             levelColorText.text = "颜色模型 " + GameData.LevelColorId;
         }
 
-        if (GameData.AddHour == 0)
-        {
-            addHourText.text = "+1H";
-        }
-        else
-        {
-            addHourText.text = "+1H " + GameData.AddHour;
-        }
+        
 
         if (GameManager.Instance.isAutoPlay)
         {
@@ -391,7 +391,7 @@ public class SettingPanel : MonoBehaviour
         ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
 
-        GameController.Instance.ReloadLevel();
+        GameManager.Instance.ReloadLevel();
         //SceneManager.LoadScene("GameScene");
     }
 
@@ -517,7 +517,7 @@ public class SettingPanel : MonoBehaviour
             GameData.RetryCount = 0;*/
             GameData.CurrentLevel = level;
             //GameManager.Instance.ReloadScene();
-            GameController.Instance.ReloadLevel();
+            GameManager.Instance.ReloadLevel();
             //SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
     }
@@ -527,20 +527,20 @@ public class SettingPanel : MonoBehaviour
         ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
 
-        /*switch (index)
+        switch (index)
         {
             case 0:
                 PlayerPrefs.DeleteAll();
-                GameData.ClearPlayerPref();
-                HandBookData.ClearData();
+                GameData.ResetAll();
+                /*HandBookData.ClearData();
                 CollectionPanelData.ResetData();
-                RaceManager.ClearData();
+                RaceManager.ClearData();*/
                 StaminaSystemData.ResetData();
-                GameManager.Instance.ReloadScene();
-                SkinData.ClearData();
-                BeadPixelData.ClearData();
+                GameManager.Instance.ReloadLevel();
+                /*SkinData.ClearData();
+                BeadPixelData.ClearData();*/
                 break;
-            case 1:
+            /*case 1:
                 if (GameData.IsNoAd == false)
                 {
                     GameData.IsNoAd = true;
@@ -551,19 +551,21 @@ public class SettingPanel : MonoBehaviour
                     GameData.IsNoAd = false;
                     noAdTip.text = "关闭广告";
                 }
-
-                break;
+                break;*/
             case 2:
-                Reporter.GameContinue();
-                GameData.RemovedBoxCount = GameData.TotalBoxCount;
+                //Reporter.GameContinue();
+                //GameData.RemovedBoxCount = GameData.TotalBoxCount;
+                GameData.ClearedPixelCount = GameData.TotalPixelCount;
                 gameObject.SetActive(false);
-                GameController.Instance.curLevel.HideExceptGift();
-                GameController.Instance.GameWin();
+                GameController.Instance.CheckWin();
+                //GameController.Instance.curLevel.HideExceptGift();
+                /*GameManager.Instance.GameWin();
+                UIManager.Instance.showWinPanel(true);*/
                 break;
             case 3:
-                Reporter.GameContinue();
+                //Reporter.GameContinue();
                 GameManager.Instance.GameWin();
-                GameManager.Instance.ReloadScene();
+                GameManager.Instance.ReloadLevel();
 
                 //SceneManager.LoadScene(SceneManager.GetActiveScene().name);
                 break;
@@ -575,23 +577,23 @@ public class SettingPanel : MonoBehaviour
                     gp.RefreshGoldCount();
                 }
 
-                var mp = UIManager.Instance.mainPanel;
+                /*var mp = UIManager.Instance.mainPanel;
                 if (mp != null && mp.gameObject.activeSelf)
                 {
                     mp.GetComponent<MainPanel>().RefreshGoldCount();
-                }
+                }*/
 
                 break;
             case 5:
                 GameData.AddDay++;
-                OnlineRwardTimer.Instance.ReStartTimer();
+                //OnlineRwardTimer.Instance.ReStartTimer();
                 addDay.text = GameData.AddDay.ToString();
                 break;
             case 6:
-                GameData.AddDayAfterClose++;
-                addDayAfterClose.text = GameData.AddDayAfterClose.ToString();
+                gameObject.SetActive(false);
+                UIManager.Instance.showFailPanel(true);
                 break;
-            case 7:
+            /*case 7:
                 ShowOnlineParams();
                 break;
             case 8:
@@ -640,18 +642,18 @@ public class SettingPanel : MonoBehaviour
                     testTaskSystemText.text = "关闭任务测试";
                 }
 
-                break;
+                break;*/
             case 13:
                 GameData.FailCount = 0;
-                GameData.RetryCount = 0;
+                //GameData.RetryCount = 0;
                 if (GameData.CurrentLevel > 1)
                 {
                     GameData.CurrentLevel--;
                 }
 
-                GameManager.Instance.ReloadScene();
+                GameManager.Instance.ReloadLevel();
                 break;
-            case 14:
+            /*case 14:
                 GameData.IsAllSystemOpen = true;
                 break;
             case 15:
@@ -705,13 +707,13 @@ public class SettingPanel : MonoBehaviour
                     maxColorText.text = "减颜色 " + GameData.MaxColorLow;
                 }
 
-                break;
+                break;*/
             case 17:
                 GameData.AddHour++;
-                OnlineRwardTimer.Instance.ReStartTimer();
+                //OnlineRwardTimer.Instance.ReStartTimer();
                 addHourText.text = "+1H " + GameData.AddHour;
                 break;
-            case 18:
+            /*case 18:
                 GameManager.Instance.isAutoPlay = !GameManager.Instance.isAutoPlay;
                 if (GameManager.Instance.isAutoPlay)
                 {
@@ -721,7 +723,6 @@ public class SettingPanel : MonoBehaviour
                 {
                     autoTapeText.text = "自动撕";
                 }
-
                 break;
             case 19:
                 GameManager.Instance.isDebugLevel = !GameManager.Instance.isDebugLevel;
@@ -733,9 +734,8 @@ public class SettingPanel : MonoBehaviour
                 {
                     debugTapeText.text = "随意撕";
                 }
-
-                break;
-            case 20:
+                break;*/
+            /*case 20:
                 GameData.itemPlayerData.AddCount(ItemType.Add, 100, way: "GM", needReport: false);
                 GameData.itemPlayerData.AddCount(ItemType.Remove, 100, way: "GM", needReport: false);
                 GameData.itemPlayerData.AddCount(ItemType.Clear, 100, way: "GM", needReport: false);
@@ -785,11 +785,11 @@ public class SettingPanel : MonoBehaviour
                     Debug.LogError("所有拼豆图已完成");
                 }
 
-                break;
+                break;*/
             case 26:
                 StaminaSystemData.AddInfiniteStamina(600,"GM");
                 break;
-            case 27:
+            /*case 27:
                 if (GameData.LevelColorId >= 4)
                 {
                     GameData.LevelColorId = -1;
@@ -808,10 +808,10 @@ public class SettingPanel : MonoBehaviour
                     levelColorText.text = "颜色模型 " + GameData.LevelColorId;
                 }
 
-                break;
+                break;*/
             default:
                 break;
-        }*/
+        }
     }
 
     /*private void ShowOnlineParamsLast()

@@ -27,10 +27,9 @@ public class GetStaminaPanel : MonoBehaviour
     private string buyLogWay;
     private string adSceneId;
     private StaminaConfig staminaConfig;
-    private Transform race;
     private void Awake()
     {
-        //staminaConfig = GameManager.Instance.staminaConfig;
+        staminaConfig = GameManager.Instance.staminaConfig;
         closeBtn.onClick.AddListener(ClosePanelMethod);
         getCoinBtn.onClick.AddListener(GetPropPanelMethod);
         getADBtn.onClick.AddListener(GetADPropPanelMethod);
@@ -39,17 +38,13 @@ public class GetStaminaPanel : MonoBehaviour
         buyLogWay = "GetStaminaPanel";
         RefreshUI();
         RefreshStaminaUI();
-        race = transform.parent?.Find("RacePanel(Clone)");
-        if (race!=null)
-        {
-            race.Find("BG/GoldRoot/FXShine").gameObject.SetActive(false);
-        }
     }
     /// <summary>
     /// 获得体力
     /// </summary>
     private void GetPropPanelMethod()
     {
+        StaminaSystemData.AddStamina(1,"coin",false);
         /*AudioManager.Instance.PlayButtonAudioAndVibrate();
         int count = StaminaSystemData.MaxStamina - StaminaSystemData.GetCurrentStamina();
         if (price > 0 && GameData.Gold.CheckEnough(price*count))
@@ -86,6 +81,7 @@ public class GetStaminaPanel : MonoBehaviour
     /// </summary>
     private void GetADPropPanelMethod()
     {
+        StaminaSystemData.AddStamina(staminaConfig.AdStaminaValue,"ad",true);
         /*AudioManager.Instance.PlayButtonAudioAndVibrate();
 
         MiniGameSolution.Ad.ShowRewardAd(() =>
@@ -109,7 +105,7 @@ public class GetStaminaPanel : MonoBehaviour
             freeBtn?.gameObject.SetActive(false);
             midObj?.SetActive(false);
             tipText.text = "当前体力已满";
-            moveObj.transform.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, -65);
+            //moveObj.transform.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, -65);
         }
         else if (!StaminaSystemData.IsFirstNoStamina &&StaminaSystemData.GetCurrentStamina()==0 && GameData.CurrentLevel<=5)
         {
@@ -130,14 +126,14 @@ public class GetStaminaPanel : MonoBehaviour
         lifeCoin.text= (StaminaSystemData.MaxStamina- StaminaSystemData.GetCurrentStamina()).ToString();
         price = staminaConfig.GoldBuyPrice;
         allPrice.text = (price*(StaminaSystemData.MaxStamina-StaminaSystemData.GetCurrentStamina())).ToString();
-        //goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
+        goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
     }
 
     private void ClosePanelMethod()
     {
         AudioManager.Instance.PlayButtonAudioAndVibrate();
 
-        //UIManager.Instance.ShowStaminaPanel(false);
+        UIManager.Instance.ShowStaminaPanel(false);
     }
 
     private void OnDisable()
@@ -151,10 +147,6 @@ public class GetStaminaPanel : MonoBehaviour
         getCoinBtn.onClick.RemoveListener(GetPropPanelMethod);
         getADBtn.onClick.RemoveListener(GetADPropPanelMethod);
         fullBtn.onClick.RemoveListener(OnFreeButtOnClick);
-        if (race!=null)
-        {
-            race.Find("BG/GoldRoot/FXShine").gameObject.SetActive(true);
-        }
     }
     private void RefreshStaminaUI()
     {
@@ -177,7 +169,7 @@ public class GetStaminaPanel : MonoBehaviour
         double time = StaminaSystemTimer.Instance.GetRemainRecoverTime();
         int m = Mathf.FloorToInt((float)time / 60);
         int s = Mathf.FloorToInt((float)time % 60);
-        timeText.text = $"{m:D2}:{s:D2}";
+        timeText.text = $"{m:D2}分{s:D2}秒";
     }
     private float staminaRefreshTimer;     
     private void Update()

@@ -59,8 +59,8 @@ namespace CrowdMatch
             // 音频：挂上 AudioManager 并注入配置（AudioSource 首次 Play 时才懒创建）
             var audioManager = gameObject.AddComponent<AudioManager>();
             audioManager.Init(audioConfig);
-            audioManager.MusicEnabled = PlayerPrefs.GetInt("Music", 1) == 1;
-            audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
+            //audioManager.MusicEnabled = PlayerPrefs.GetInt("Music", 1) == 1;
+            //audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
             if (audioConfig != null)
                 audioManager.Play("BGM", loop: true);   // 背景音乐循环播放（跨关卡不重播）
 
@@ -69,6 +69,17 @@ namespace CrowdMatch
             {
                 spawnPool = new SpawnPool();
                 spawnPool.Init(spawnPoolConfig, spawnPoolRoot);
+            }
+            if (staminaConfig != null)
+            {
+                StaminaSystemData.InitData();
+                StaminaSystemTimer.Instance.InitData();
+                if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
+                {   
+                    //刚进游戏时，体力不足回主页
+                    /*TriggerVibrate(1);
+                    ReloadScene(false);*/
+                }
             }
         }
 
@@ -85,6 +96,11 @@ namespace CrowdMatch
             else if (Input.GetKeyDown(KeyCode.B))
             {
                 PrevLevel();
+            }
+            else if (Input.GetKeyDown(KeyCode.G))
+            {
+                PlayerPrefs.DeleteAll();
+                Debug.Log("清除数据");
             }
         }
 #endif
@@ -115,6 +131,11 @@ namespace CrowdMatch
             GameData.CurrentLevel++;
             GameData.WinStreak++;
             GameData.FailCount = 0;
+            var rewardData = new RewardData
+            {
+                gold = GoldConfig.GetWinGold()
+            };
+            rewardData.AddReward(way: "Level");
             //ReloadLevel();
         }
 

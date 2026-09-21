@@ -1,14 +1,14 @@
 ﻿using System;
 using CrowdMatch;
 using DG.Tweening;
-
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
 /// 重试界面
 /// </summary>
-public class RetryPanel : MonoBehaviour
+public class RetryPanel : MonoBehaviour,IPointerDownHandler, IPointerUpHandler
 {
     //[SerializeField] private Button continueBtn;
     [SerializeField] private Button reviveBtn;
@@ -17,7 +17,8 @@ public class RetryPanel : MonoBehaviour
     [SerializeField] private Text jdText;
     //[SerializeField] private GameObject[] jdxList;
     private bool isRevive;
-
+    private CanvasGroup mainCanvasGroup;
+    private bool inCheckFailedCauseAni = false;
     //private Transform starPosRoot;
     private int maxStarCount;
     private int curStarCount;
@@ -25,7 +26,7 @@ public class RetryPanel : MonoBehaviour
     public void Show(bool revive)
     {
         UIManager.IsPanelShow = true;
-
+        mainCanvasGroup = GetComponent<CanvasGroup>();
         isRevive = revive;
 
         if (isRevive)
@@ -194,5 +195,27 @@ public class RetryPanel : MonoBehaviour
     private void OnDisable()
     {
         Destroy(gameObject);
+    }
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (RectTransformUtility.RectangleContainsScreenPoint(GetComponent<RectTransform>(), eventData.position,
+                eventData.enterEventCamera))
+        {
+            inCheckFailedCauseAni = true;
+            mainCanvasGroup.DOKill();
+            mainCanvasGroup.DOFade(0f, 0.15f);
+            
+        }
+    }
+
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        if (RectTransformUtility.RectangleContainsScreenPoint(GetComponent<RectTransform>(), eventData.position,
+                eventData.enterEventCamera))
+        {
+            mainCanvasGroup.DOKill();
+            mainCanvasGroup.DOFade(1f, 0.1f);
+            inCheckFailedCauseAni = false;
+        }
     }
 }

@@ -14,7 +14,7 @@ public class WinPanel : MonoBehaviour
     [SerializeField] private Button getBtn_AD;
     [SerializeField] private Text goldCountText;
     public Text goldText;
-    //[SerializeField] private CoinTweenPanel coinTween;
+    [SerializeField] private CoinTweenPanel coinTween;
 
     [SerializeField] private Transform streakRoot;
     [SerializeField] private Transform starRoot;
@@ -40,7 +40,7 @@ public class WinPanel : MonoBehaviour
         getBtn_Normal.onClick.AddListener(OnGetNormalBtnClick);
         getBtn_AD.onClick.AddListener(OnGetADBtnClick);
 
-        /*rewardData = new RewardData
+        rewardData = new RewardData
         {
             gold = GoldConfig.GetWinGold()
         };
@@ -48,7 +48,7 @@ public class WinPanel : MonoBehaviour
 
         goldText.text = ((float)GameData.Gold.Count - rewardData.gold).ConvertToKMGString();
 
-        goldCountText.text = rewardData.gold.ToString();*/
+        goldCountText.text = rewardData.gold.ToString();
 
         
         var bg = transform.Find("BG");
@@ -107,8 +107,8 @@ public class WinPanel : MonoBehaviour
 
     public void OnAddReward(int multiple = 1, string type = "0")
     {
-        Continue();
-        /*getBtn_AD.interactable = false;
+        //Continue();
+        getBtn_AD.interactable = false;
         getBtn_Normal.interactable = false;
 
         int lastGold = GameData.Gold.Count - rewardData.gold;
@@ -120,10 +120,10 @@ public class WinPanel : MonoBehaviour
         int curGold = GameData.Gold.Count;
         if (curGold > lastGold)
         {
-            DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
+            //DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
             ShowCoinTween(lastGold, curGold, () =>
             {
-                if (MiniGameSolution.Ad.IsShowInterstitial && GameData.IsInterstitialShowAfterClose &&
+                /*if (MiniGameSolution.Ad.IsShowInterstitial && GameData.IsInterstitialShowAfterClose &&
                     !MiniGameSolution.Ad.SkipShowInterstitial(GameData.CurrentLevel - 1, 1))
                 {
                     MiniGameSolution.Instance.ShowMask();
@@ -150,7 +150,8 @@ public class WinPanel : MonoBehaviour
                 else
                 {
                     DOVirtual.DelayedCall(0.2f, Continue);
-                }
+                }*/
+                DOVirtual.DelayedCall(0.2f, Continue);
             });
         }
 
@@ -159,10 +160,10 @@ public class WinPanel : MonoBehaviour
         /*if (GameData.CurrentLevel == 4 && MiniGameSolution.Utilities.HasReview())
         {
             MiniGameSolution.Utilities.OpenReview();
-        }#1#*/
+        }*/
     }
 
-    /*private void ShowCoinTween(int lastCount, int newCount, System.Action onComplete = null)
+    private void ShowCoinTween(int lastCount, int newCount, System.Action onComplete = null)
     {
         var start = coinTween.transform.Find("Image");
         var end = coinTween.transform.Find("CoinImg");
@@ -183,7 +184,7 @@ public class WinPanel : MonoBehaviour
                         })
                     .SetEase(Ease.Linear).OnComplete(() => { onComplete?.Invoke(); });
             }, duration: 1);
-    }*/
+    }
 
     
 

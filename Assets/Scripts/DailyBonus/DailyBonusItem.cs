@@ -23,10 +23,11 @@ namespace WsGame.DailyBouns
     {
         public DailyBonusState DailyBonusState = DailyBonusState.None;
 
-        protected Image bgImg;
-        protected CanvasGroup bgCanvasGroup;
-        [SerializeField] protected Sprite normalBgSprite;
-        [SerializeField] protected Sprite todayBgSprite;
+        //protected Image bgImg;
+        //protected CanvasGroup bgCanvasGroup;
+        //[SerializeField] protected Sprite normalBgSprite;
+        //[SerializeField] protected Sprite todayBgSprite;
+        [SerializeField] protected Image todayBg;
         protected Image icon_CheckImg;
         protected Image maskImg;
         protected Text dayText;
@@ -42,8 +43,8 @@ namespace WsGame.DailyBouns
         public virtual void InitData(DailyBonusPanel mDailyBonusPanel)
         {
             dailyBonusPanel = mDailyBonusPanel;
-            bgImg = transform.Find("Bg").GetComponent<Image>();
-            bgCanvasGroup = bgImg.GetComponent<CanvasGroup>();
+            //bgImg = transform.Find("Bg").GetComponent<Image>();
+            //bgCanvasGroup = bgImg.GetComponent<CanvasGroup>();
             icon_CheckImg = transform.Find("Icon_Check").GetComponent<Image>();
             dayText = transform.Find("Bg/Text_Day").GetComponent<Text>();
             maskImg = transform.Find("Bg/MaskImg").GetComponent<Image>();
@@ -78,7 +79,8 @@ namespace WsGame.DailyBouns
             switch (dailyBonusState)
             {
                 case DailyBonusState.Finished:
-                    bgImg.sprite = normalBgSprite;
+                    //bgImg.sprite = normalBgSprite;
+                    todayBg.gameObject.SetActive(false);
                     //dayText.color = new Color(213f / 255f, 97f / 255f, 20f / 255f, 1f);
                     //if (rewardCountText != null)
                         //rewardCountText.color = new Color(216f / 255f, 111f / 255f, 49f / 255f, 1f);
@@ -87,7 +89,8 @@ namespace WsGame.DailyBouns
                     m_Btn.interactable = false;
                     break;
                 case DailyBonusState.Today:
-                    bgImg.sprite = todayBgSprite;
+                    //bgImg.sprite = todayBgSprite;
+                    todayBg.gameObject.SetActive(true);
                     //dayText.color = new Color(70f / 255f, 123f / 255f, 35f / 255f, 1f);
                     //if (rewardCountText != null)
                         //rewardCountText.color = new Color(67f / 255f, 116f / 255f, 35f / 255f, 1f);
@@ -96,7 +99,8 @@ namespace WsGame.DailyBouns
                     m_Btn.interactable = true;
                     break;
                 case DailyBonusState.UnFinished:
-                    bgImg.sprite = normalBgSprite;
+                    //bgImg.sprite = normalBgSprite;
+                    todayBg.gameObject.SetActive(false);
                     //dayText.color = new Color(213f / 255f, 97f / 255f, 20f / 255f, 1f);
                     //if (rewardCountText != null)
                         //rewardCountText.color = new Color(216f / 255f, 111f / 255f, 49f / 255f, 1f);
