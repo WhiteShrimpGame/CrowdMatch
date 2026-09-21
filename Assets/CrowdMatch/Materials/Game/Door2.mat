@@ -52,7 +52,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: 218192f551ac0f545aaf5429ac51eacc, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MetallicGlossMap:
@@ -88,7 +88,7 @@ Material:
     - _Metallic: 0
     - _Mode: 0
     - _MyFloat: 1
-    - _NDVMaxFrag: 0.45
+    - _NDVMaxFrag: 0
     - _NDVMinFrag: 0
     - _NormalsSource: 0
     - _NormalsUVType: 0
