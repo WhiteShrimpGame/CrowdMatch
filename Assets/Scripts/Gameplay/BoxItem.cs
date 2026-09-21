@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using DG.Tweening;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace CrowdMatch
 {
@@ -44,6 +45,17 @@ namespace CrowdMatch
         [Tooltip("本体内 Pixel 从 y 向下偏移位置平滑升到初始位置的时长（秒）")]
         public float bodyRiseDuration = 0.35f;
 
+        [Header("消失表现")]
+        [Tooltip("开箱后箱子视觉上升的距离（本地 Y，匀速，与「弹一下再缩小」同时进行；0 = 不上升）")]
+        public float disappearRiseDistance = 0.5f;
+
+        /// <summary>
+        /// 消失动画两段的时长（秒）。同时喂给 <c>DisappearWithPop</c> 与上升补间，
+        /// 保证两者**同时结束** —— 不留两份各写一遍的常量。
+        /// </summary>
+        private const float DisappearPopDuration = 0.2f;
+        private const float DisappearShrinkDuration = 0.2f;
+
         [Header("调试")]
         [Tooltip("开箱条件判定时输出详细日志（本体/相邻/可用/容量/结果）")]
         public bool debugOpenLog = true;
@@ -52,6 +64,13 @@ namespace CrowdMatch
         public GameObject cornerPrefab;
         public GameObject edgePrefab;
         public GameObject centerPrefab;
+
+        [Tooltip("勾选后：视觉来自**本物体（整体预制体）自身**，不再按格拼接角/边/中心。" +
+                 "2×2 的整体预制体走这条；由 PixelGroup.SpawnBox / 创建向导自动置位")]
+        public bool wholePrefab;
+
+        [Tooltip("显示箱内 Pixel 总数（= 容量）的 UI Text，留空自动从子物体查找")]
+        public Text countText;
 
         /// <summary>是否已开箱（开箱后仅保留引用，不再参与触发判定）。</summary>
         [System.NonSerialized] public bool opened;
@@ -72,6 +91,26 @@ namespace CrowdMatch
         private const int MaxBlocksPerColor = 64;
 
         public int BodyCount => (colMax - colMin + 1) * (rowMax - rowMin + 1);
+
+        /// <summary>本体尺寸是否 2×2。</summary>
+        public bool Is2x2 => (colMax - colMin + 1) == 2 && (rowMax - rowMin + 1) == 2;
+
+        /// <summary>
+        /// 该矩形是否该用「整体预制体」：**2×2** 且 PixelGroup 配了 <see cref="PixelGroup.boxWholePrefab"/>。
+        /// 运行时 <see cref="PixelGroup.SpawnBox"/> 与编辑器创建向导共用这一条规则，避免两边判定分叉；
+        /// 没配整体预制体时返回 false → 退回按格拼接，不会让箱子变成看不见。
+        /// </summary>
+        public static bool ShouldUseWholePrefab(PixelGroup group, int colMin, int rowMin, int colMax, int rowMax)
+        {
+            return group != null && group.boxWholePrefab != null &&
+                   (colMax - colMin + 1) == 2 && (rowMax - rowMin + 1) == 2;
+        }
+
+        private void Awake()
+        {
+            // 场景里已有（非运行时生成）的箱子不经过 BuildVisual，这里也刷一次总数显示
+            UpdateCountText();
+        }
 
         /// <summary>
         /// 计算箱子「紧邻基础容量」= 本体格子数 + 相邻有效格数（越界/墙体/管道/其它箱子本体不计数）。
@@ -199,27 +238,58 @@ namespace CrowdMatch
                 hiddenPixels.Add(item);
             }
 
-            // 箱子视觉：3 类预制体按格子拼接（§6）
-            for (int r = rowMin; r <= rowMax; r++)
+            if (wholePrefab)
             {
-                for (int c = colMin; c <= colMax; c++)
+                // 整体预制体：视觉就是本物体自己 —— 只把它摆到箱子中心，不拼接、**不改缩放**
+                // （美术按实际尺寸制作；按格拼接那条路才需要乘 unitSize）。
+                // 消失动画会把**所有直接子物体**弹掉；根物体（挂着 BoxItem）保留，
+                // 因为 group.boxes 里还有引用。
+                transform.localPosition = BoxCenterLocal();
+                transform.localRotation = Quaternion.identity;
+
+                for (int i = 0; i < transform.childCount; i++)
+                    _visualPieces.Add(transform.GetChild(i).gameObject);
+            }
+            else
+            {
+                // 箱子视觉：3 类预制体按格子拼接（§6）
+                for (int r = rowMin; r <= rowMax; r++)
                 {
-                    var prefab = ChoosePiecePrefab(c, r);
-                    if (prefab == null)
+                    for (int c = colMin; c <= colMax; c++)
                     {
-                        Debug.LogWarning("[BoxItem] 箱子视觉预制体为空，跳过格子 (" + c + "," + r + ")。");
-                        continue;
+                        var prefab = ChoosePiecePrefab(c, r);
+                        if (prefab == null)
+                        {
+                            Debug.LogWarning("[BoxItem] 箱子视觉预制体为空，跳过格子 (" + c + "," + r + ")。");
+                            continue;
+                        }
+                        var piece = PrefabSpawner.Instantiate(prefab, transform);
+                        if (piece == null)
+                            continue;
+                        piece.name = "BoxPiece_" + r + "_" + c;
+                        piece.transform.localPosition = pg.GetLocalPosition(c, r);
+                        piece.transform.localRotation = Quaternion.identity;
+                        piece.transform.localScale = Vector3.one * pg.unitSize;
+                        _visualPieces.Add(piece);
                     }
-                    var piece = PrefabSpawner.Instantiate(prefab, transform);
-                    if (piece == null)
-                        continue;
-                    piece.name = "BoxPiece_" + r + "_" + c;
-                    piece.transform.localPosition = pg.GetLocalPosition(c, r);
-                    piece.transform.localRotation = Quaternion.identity;
-                    piece.transform.localScale = Vector3.one * pg.unitSize;
-                    _visualPieces.Add(piece);
                 }
             }
+
+            UpdateCountText();
+        }
+
+        /// <summary>
+        /// 刷新「箱内 Pixel 总数」显示（= <see cref="capacity"/>，也就是开箱阈值）。
+        /// 开箱是一次性把内容全部释放，所以这个数在箱子存在期间是常量。
+        /// </summary>
+        public void UpdateCountText()
+        {
+            if (countText == null)
+                countText = GetComponentInChildren<Text>(true);
+            if (countText == null)
+                return;
+
+            countText.text = capacity.ToString();
         }
 
         /// <summary>该格用哪个视觉预制体（角/边/中心，按 §6 规则）。</summary>
@@ -832,19 +902,36 @@ namespace CrowdMatch
             pixel.transform.DOLocalMove(target, bodyRiseDuration);
         }
 
-        /// <summary>箱子 3 类预制体整体先放大后缩小消失（DisappearWithPop）。</summary>
+        /// <summary>
+        /// 箱子视觉消失：先弹出再缩小（DisappearWithPop），**同时**匀速上升一段距离
+        /// （<see cref="disappearRiseDistance"/>）。两者时长相同，所以一起结束。
+        /// </summary>
         private void DisappearVisual()
         {
+            float riseDuration = Mathf.Max(0.0001f, DisappearPopDuration + DisappearShrinkDuration);
+
             for (int i = 0; i < _visualPieces.Count; i++)
             {
                 var piece = _visualPieces[i];
                 if (piece == null)
                     continue;
+
                 piece.transform.DisappearWithPop(() =>
                 {
                     if (piece != null)
                         Destroy(piece);
-                }, restoreScale: false);
+                }, DisappearPopDuration, DisappearShrinkDuration, restoreScale: false);
+
+                // 上升补间必须**在 DisappearWithPop 之后**起：那个方法入口会 DOKill()，
+                // 反过来的话刚起的上升会被它杀掉（表现就是「不上升」）。
+                // 匀速 = Linear。
+                if (disappearRiseDistance != 0f)
+                {
+                    piece.transform
+                        .DOLocalMove(piece.transform.localPosition + Vector3.up * disappearRiseDistance,
+                                     riseDuration)
+                        .SetEase(Ease.Linear);
+                }
             }
             _visualPieces.Clear();
         }

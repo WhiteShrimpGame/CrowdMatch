@@ -74,6 +74,10 @@ namespace CrowdMatch
         [Tooltip("箱子中心格预制体（占一格，可视觉溢出边界）")]
         public GameObject boxCenterPrefab;
 
+        [Tooltip("2×2 箱子的**整体**预制体（根物体需自带 BoxItem 组件）。按**实际尺寸**制作（以自身原点居中），" +
+                 "视觉放在子物体上；脚本只把它摆到箱子中心，**不缩放**。设了它之后 2×2 的箱子直接用它、不再按格拼接角/边/中心")]
+        public GameObject boxWholePrefab;
+
         [Tooltip("地面升降台预制体模板（需自带 ElevatorItem 组件，并配置好 Frame/Door/HoleMask/Pit 视觉子节点）")]
         public GameObject elevatorPrefab;
 
@@ -1219,11 +1223,42 @@ namespace CrowdMatch
                 return null;
             }
 
-            var go = new GameObject("Box_" + rmin + "_" + cmin);
-            go.transform.SetParent(transform, false);
-            go.transform.localPosition = Vector3.zero;
+            // 2×2 且配了整体预制体 → 直接实例化它（BoxItem 来自预制体本身），不再按格拼接
+            bool useWhole = BoxItem.ShouldUseWholePrefab(this, cmin, rmin, cmax, rmax);
 
-            var box = go.AddComponent<BoxItem>();
+            GameObject go;
+            BoxItem box;
+            if (useWhole)
+            {
+                go = PrefabSpawner.Instantiate(boxWholePrefab, transform);
+                if (go == null)
+                    return null;
+                go.name = "Box_" + rmin + "_" + cmin;
+
+                box = go.GetComponent<BoxItem>();
+                if (box == null)
+                {
+                    Debug.LogError("[PixelGroup] boxWholePrefab " + boxWholePrefab.name + " 缺少 BoxItem 组件。");
+                    if (Application.isPlaying)
+                        Destroy(go);
+                    else
+                        DestroyImmediate(go);
+                    return null;
+                }
+                box.wholePrefab = true;
+            }
+            else
+            {
+                go = new GameObject("Box_" + rmin + "_" + cmin);
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = Vector3.zero;
+
+                box = go.AddComponent<BoxItem>();
+                box.cornerPrefab = boxCornerPrefab;
+                box.edgePrefab = boxEdgePrefab;
+                box.centerPrefab = boxCenterPrefab;
+            }
+
             box.colMin = cmin;
             box.rowMin = rmin;
             box.colMax = cmax;
@@ -1231,9 +1266,6 @@ namespace CrowdMatch
             box.colorIds = data.colorIds != null ? (int[])data.colorIds.Clone() : new int[0];
             box.jumpStartInterval = data.jumpStartInterval;
             box.jumpSpawnYOffset = data.jumpSpawnYOffset;
-            box.cornerPrefab = boxCornerPrefab;
-            box.edgePrefab = boxEdgePrefab;
-            box.centerPrefab = boxCenterPrefab;
 
             // 容量以 colorIds（内容数）为准；colorIds 为空时按周围环境（本体 + 相邻 4 方向）兜底。
             // 开箱实际可用格还包括「连通空格」，故不再用周围环境覆盖容量。
