@@ -62,6 +62,13 @@ namespace CrowdMatch
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
+        /// <summary>
+        /// 是否被冰组冻住（所在冰组的冰冻计数还没归 0）。冻住的像素**视为不暴露**：
+        /// 不暴露、不可点击、也不参与同色连通块（与未揭晓问号 Pixel 同待遇）。
+        /// 由 PixelGroup.RefreshIceState 统一写入。
+        /// </summary>
+        [System.NonSerialized] public bool IsFrozen;
+
         /// <summary>管道放置中标记：期间 SetExposed 只记录状态、不激活 Animator，待放置完成后统一激活。</summary>
         [System.NonSerialized] public bool placing;
 
@@ -309,6 +316,21 @@ namespace CrowdMatch
             if (placing)
                 return;   // 管道放置中：只记录状态，不激活动画，放置完成后由 MarkPlaced / RefreshExposed 统一应用
             ApplyExposedState(exposed);
+        }
+
+        /// <summary>
+        /// 设置冰冻状态。
+        ///
+        /// **保留点击碰撞体**（不要 SetClickable(false)）：被冻住时仍然要被射线打到，
+        /// 这样 GameController.HandleClick 的冻结守卫才跑得起来，才能给出与「被别的像素堵住」
+        /// 一样的阻挡反馈（音效 / 震动 / 愤怒表情 / 阻挡位移）。
+        /// 关掉碰撞体的话射线会直接穿过去，守卫根本不会被调用 —— 表现就是「点击毫无反应」。
+        ///
+        /// 所以「不可点击」的门槛始终在 HandleClick 里，与未揭晓问号 Pixel 是同一个套路。
+        /// </summary>
+        public void SetFrozen(bool frozen)
+        {
+            IsFrozen = frozen;
         }
 
         /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。

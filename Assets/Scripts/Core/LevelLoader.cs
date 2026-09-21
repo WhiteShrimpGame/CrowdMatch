@@ -59,6 +59,7 @@ namespace CrowdMatch
                 ApplyGates(pixelGroup, data.gates);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
                 ApplyElevators(pixelGroup, data.elevators, colorConfig);
+                ApplyIces(pixelGroup, data.iceGroups);   // 放最后：箱子 / 升降台的像素也要在，冰才冻得住它们
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
@@ -220,6 +221,35 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 道倍乘门。");
+        }
+
+        /// <summary>
+        /// 清空并重建 PixelGroup 下的冰组（没有成员格的冰组被跳过）。
+        /// **不往 ApplyPixel 的 skipCells 里加冰格** —— 冰下面本来就要有像素。
+        /// </summary>
+        private static void ApplyIces(PixelGroup pg, LevelData.IceGroupData[] iceGroups)
+        {
+            pg.ClearIces();
+
+            if (iceGroups == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var g in iceGroups)
+            {
+                if (g == null || g.cells == null || g.cells.Length == 0)
+                    continue;
+                if (pg.SpawnIce(g) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个冰组。");
         }
 
         /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>

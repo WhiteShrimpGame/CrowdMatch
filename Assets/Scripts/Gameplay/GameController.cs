@@ -183,9 +183,14 @@ namespace CrowdMatch
                 BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
         }
 
-        /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
+        /// <summary>重建整体描边与冰冻状态；各自未使用时都是空操作。</summary>
         private void RefreshFrame()
         {
+            // 冰组的冻结掩码必须跟暴露状态一起刷新：开箱 / 升降台推进会重建网格，
+            // 新生成的像素要立刻带上冻结标志（否则会被漏掉、冻不住）。
+            if (pixelGroup != null)
+                pixelGroup.RefreshIceState();
+
             if (frameItem == null)
                 return;
             frameItem.Build();
@@ -641,6 +646,19 @@ namespace CrowdMatch
                 return;
             }
 
+            // 被冰组冻住的 Pixel 不可点击：冰冻计数归 0 前，组内像素「视为不暴露」。
+            // HandleClick 不看 IsExposed（能否移出由 CanReachFront 判定），所以真正的门槛在这里。
+            // 反馈走同一个 PlayBlockedFeedback：音效 / 震动 / 整组阻挡位移都有，
+            // 但**不播愤怒表情**（冰块下不摆表情）。
+            if (item.IsFrozen)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但被冰组冻住（计数未归 0），播放阻挡反馈（不摆表情）");
+                // 抖的是「冰块内与它相连的同色像素」整组，不含冰块外那部分（见 FloodFrozenSameColor）
+                PlayBlockedFeedback(FloodFrozenSameColor(item), item, playAngryEmoji: false);
+                return;
+            }
+
             if (debugClickLog)
                 Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
                     ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
@@ -712,7 +730,12 @@ namespace CrowdMatch
         /// 并在**被点的那一个像素**上播生气表情（点谁谁生气；必出，同一像素上一张还没播完则忽略——判定在表情管理器里）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
-        private void PlayBlockedFeedback(List<PixelItem> blocked, PixelItem clicked)
+        /// <summary>
+        /// 阻挡反馈：音效 + 震动 + （可选）愤怒表情 + 整组朝首排方向推一下再回位。
+        /// <paramref name="playAngryEmoji"/> = false 时不播愤怒表情 —— 冰块下的点击用这个，
+        /// 其余（被别的像素堵住）保持默认。
+        /// </summary>
+        private void PlayBlockedFeedback(List<PixelItem> blocked, PixelItem clicked, bool playAngryEmoji = true)
         {
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("TapBlocked");
@@ -720,7 +743,7 @@ namespace CrowdMatch
                 GameManager.Instance.TriggerVibrate(1);
 
             var emoji = EmojiManager.Instance;
-            if (emoji != null)
+            if (emoji != null && playAngryEmoji)
                 emoji.TryPlayAngryEmoji(clicked);   // 点谁谁生气：必出、无全局 CD
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
@@ -792,6 +815,10 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
+            // 冰冻：先记下「点击前」各冰组是否已暴露。「暴露才开始融化」要拿它判断，
+            // 所以必须在这个点击的任何副作用之前（开箱 / 升降台推进也会各自刷新暴露状态）。
+            pixelGroup.CaptureIceExposedSnapshot();
+
             // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
             // 同一次点击移出的整组共享一个点击序号，用于传送带入口的「插队」判定
             int clickSeq = ++_clickSeq;
@@ -822,6 +849,10 @@ namespace CrowdMatch
                 }
                 return;
             }
+
+            // 一次成功的「点击移出」= 冰的计数消耗一次（按点击算，不按像素数）。
+            // 放在记录模式的提前返回之后：记录模式只记取出顺序、不玩冰的消耗。
+            pixelGroup.NotifyClickMovedOut();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
@@ -858,6 +889,51 @@ namespace CrowdMatch
                     // 未揭晓问号 Pixel 断开连通：不参与移除、不扩散
                     if (nb.isQuestion && !nb.revealed)
                         continue;
+                    // 被冰冻住的 Pixel 同样断开连通：不参与移除、不扩散。
+                    // 于是点冰旁边的同色像素时，冰里的像素不会被一起带走——必须等冰化开。
+                    if (nb.IsFrozen)
+                        continue;
+                    if (visited.Add(nb))
+                        queue.Enqueue(nb);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 冰冻反馈专用的求组：从被点的像素出发，**只在冻住的格里**扩散同色像素 ——
+        /// 也就是「冰块内相连的同色像素」整组，**不含**冰块外那部分同色像素。
+        ///
+        /// 与 <see cref="FloodFill"/> 只差一个条件、方向正好相反：那边在冻住的格处**断开**，
+        /// 这边只在冻住的格里**连通**。两个不能混用 —— 用错就会把冰块外的同色一起抖起来。
+        /// </summary>
+        private List<PixelItem> FloodFrozenSameColor(PixelItem start)
+        {
+            var result = new List<PixelItem>();
+            if (start == null)
+                return result;
+
+            var visited = new HashSet<PixelItem>();
+            var queue = new Queue<PixelItem>();
+
+            queue.Enqueue(start);
+            visited.Add(start);
+            int color = start.colorId;
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                result.Add(cur);
+
+                foreach (var nb in GetNeighbors(cur))
+                {
+                    if (nb == null || nb.colorId != color)
+                        continue;
+                    if (nb.isQuestion && !nb.revealed)
+                        continue;   // 与 FloodFill 一致：未揭晓问号断开连通
+                    if (!nb.IsFrozen)
+                        continue;   // ← 只穿冻住的格（FloodFill 是「不穿」）
                     if (visited.Add(nb))
                         queue.Enqueue(nb);
                 }

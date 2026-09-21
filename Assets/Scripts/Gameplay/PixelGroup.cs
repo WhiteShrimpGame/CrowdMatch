@@ -77,6 +77,9 @@ namespace CrowdMatch
         [Tooltip("地面升降台预制体模板（需自带 ElevatorItem 组件，并配置好 Frame/Door/HoleMask/Pit 视觉子节点）")]
         public GameObject elevatorPrefab;
 
+        [Tooltip("冰冻组预制体模板（需自带 IceItem 组件，并含单元模板子物体与计数 Text 子物体）。每个冰组实例化一份")]
+        public GameObject icePrefab;
+
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
 
@@ -99,6 +102,10 @@ namespace CrowdMatch
         /// <summary>倍率图 [column, row]：该格所属各门倍数之积（不在任何区域内为 1）。嵌套即连乘。</summary>
         [System.NonSerialized] public int[,] gateMultiplier;
 
+        /// <summary>冻结掩码 [column, row]：该格所在冰组尚未融化（计数 &gt; 0）。
+        /// 冰格**不是**障碍——它只把组内像素「视为不暴露」，寻路与暴露 BFS 照常穿过。</summary>
+        [System.NonSerialized] public bool[,] iceFrozenMask;
+
         /// <summary>箱子占用表 [column, row]：true = 该格被未开箱的 BoxItem 占据（作为障碍参与暴露与寻路）。</summary>
         [System.NonSerialized] public bool[,] boxGrid;
 
@@ -107,6 +114,9 @@ namespace CrowdMatch
 
         /// <summary>运行时收集到的所有倍乘门（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<GateItem> gates = new List<GateItem>();
+
+        /// <summary>运行时收集到的所有冰组（重建 grid 时刷新）。</summary>
+        [System.NonSerialized] public List<IceItem> iceGroups = new List<IceItem>();
 
         /// <summary>运行时收集到的所有箱子（重建 grid 时刷新；含已开箱的，用 opened 区分）。</summary>
         [System.NonSerialized] public List<BoxItem> boxes = new List<BoxItem>();
@@ -144,6 +154,7 @@ namespace CrowdMatch
             gateGrid = new GateItem[columns, TotalRows];
             gateRegionMask = new bool[columns, TotalRows];
             gateMultiplier = new int[columns, TotalRows];
+            iceFrozenMask = new bool[columns, TotalRows];
             for (int c = 0; c < columns; c++)
                 for (int r = 0; r < TotalRows; r++)
                     gateMultiplier[c, r] = 1;
@@ -151,6 +162,7 @@ namespace CrowdMatch
             boxes = new List<BoxItem>();
             elevators = new List<ElevatorItem>();
             gates = new List<GateItem>();
+            iceGroups = new List<IceItem>();
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -244,6 +256,21 @@ namespace CrowdMatch
                     gateMultiplier[cell.x, cell.y] *= mult;   // 嵌套 = 各门倍数连乘
                 }
             }
+
+            // 冰组：只登记引用。冰格**不写 wallGrid / pipeGrid / boxGrid**（冰不是障碍），
+            // 它只通过 iceFrozenMask 把组内像素「视为不暴露」。
+            // 冰面由各 IceItem 按**自己**的成员格独立生成（单色填充），所以这里既不需要全局归属表，
+            // 也不需要变体图，枚举顺序无关紧要。
+            foreach (var ice in GetComponentsInChildren<IceItem>())
+            {
+                if (ice == null)
+                    continue;
+                ice.group = this;
+                ice.RefreshCells();   // 字段可能在 Inspector 里被改过，用最新的格列表
+                iceGroups.Add(ice);
+            }
+
+            RefreshIceState();
         }
 
         /// <summary>
@@ -449,6 +476,143 @@ namespace CrowdMatch
             return n;
         }
 
+        // ===== 冰冻组 =====
+
+        /// <summary>该格是否被冻住（所在冰组尚未融化）。</summary>
+        public bool IsFrozenCell(int col, int row)
+        {
+            if (iceFrozenMask == null || !IsInRange(col, row))
+                return false;
+            return iceFrozenMask[col, row];
+        }
+
+        /// <summary>落在该冰组成员格上的静态网格像素数（供 Inspector 显示）。</summary>
+        public int CountPixelsInIce(IceItem ice)
+        {
+            if (ice == null || grid == null)
+                return 0;
+
+            int n = 0;
+            foreach (var cell in ice.CellSet)
+                if (IsInRange(cell.x, cell.y) && grid[cell.x, cell.y] != null)
+                    n++;
+            return n;
+        }
+
+        /// <summary>不在任何**冻结中**冰组内的像素数。为 0 且还有冰没融化 = 没有可点的像素来推进计数（死锁提示用）。</summary>
+        public int CountUnfrozenPixels()
+        {
+            if (grid == null)
+                return 0;
+
+            int n = 0;
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    if (grid[c, r] != null && !IsFrozenCell(c, r))
+                        n++;
+            return n;
+        }
+
+        /// <summary>
+        /// 刷新冰冻状态：初始化尚未初始化的计数、按融化情况重填冻结掩码、把冻结标志写到各像素上。
+        ///
+        /// **只初始化、不重置**：RebuildGrid 在开箱 / 升降台推进时也会被调用（见 OnBoxOpened 等），
+        /// 若在这里 ResetCount 会凭空解冻。复位只发生在 <see cref="SpawnIce"/>（新关卡导入）。
+        /// </summary>
+        public void RefreshIceState()
+        {
+            if (iceFrozenMask == null || iceGroups == null || grid == null)
+                return;
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    iceFrozenMask[c, r] = false;
+
+            for (int i = 0; i < iceGroups.Count; i++)
+            {
+                var ice = iceGroups[i];
+                if (ice == null)
+                    continue;
+                if (ice.remaining < 0)
+                    ice.ResetCount();
+                if (ice.Melted)
+                    continue;
+
+                foreach (var cell in ice.CellSet)
+                    if (IsInRange(cell.x, cell.y))
+                        iceFrozenMask[cell.x, cell.y] = true;
+            }
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                {
+                    var item = grid[c, r];
+                    if (item != null)
+                        item.SetFrozen(iceFrozenMask[c, r]);
+                }
+        }
+
+        /// <summary>
+        /// 记下「这次点击发生**之前**」每个冰组是否已暴露。必须在本次点击引起的
+        /// <see cref="RefreshExposed"/> **之前**调用 —— <see cref="NotifyClickMovedOut"/> 要用它判断
+        /// 「暴露才开始融化」。
+        /// </summary>
+        public void CaptureIceExposedSnapshot()
+        {
+            if (iceGroups == null)
+                return;
+
+            for (int i = 0; i < iceGroups.Count; i++)
+            {
+                var ice = iceGroups[i];
+                if (ice != null)
+                    ice.exposedAtCapture = ice.hasExposedMember;
+            }
+        }
+
+        /// <summary>
+        /// 一次成功的「点击移出」→ 每个冰组的计数各 -1。
+        /// 计数的粒度是**点击**而不是像素数：一次点击不管移出几颗，都只消耗一次；
+        /// 范围是**全局**的：任意一次有效点击都推进所有冰组（不限于被点的那组里的像素）。
+        /// 点击无效（没通过 CanReachFront 校验）时不会调到这里。
+        ///
+        /// 「暴露才开始融化」用**点击前**的暴露状态判断，于是同时满足两条：
+        ///   · 还没暴露时点击不消耗；
+        ///   · 「使之暴露的那一次点击」也不消耗 —— 那一刻按点击前的状态它仍未暴露。
+        ///
+        /// 只有真有冰组融化到 0 时才重建（冰面 / 冻结掩码 / 暴露），避免每次点击都跑全网格刷新。
+        /// </summary>
+        public void NotifyClickMovedOut()
+        {
+            if (iceGroups == null || iceGroups.Count == 0)
+                return;
+
+            bool anyMelted = false;
+            for (int i = 0; i < iceGroups.Count; i++)
+            {
+                var ice = iceGroups[i];
+                if (ice == null)
+                    continue;
+
+                if (ice.meltOnlyWhenExposed && !ice.exposedAtCapture)
+                    continue;                    // 未暴露（或本次点击才让它暴露）：这次不消耗
+
+                if (ice.ConsumeOne())
+                    anyMelted = true;
+                else
+                    ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
+            }
+
+            if (!anyMelted)
+                return;
+
+            RefreshIceState();
+            for (int i = 0; i < iceGroups.Count; i++)
+                if (iceGroups[i] != null)
+                    iceGroups[i].BuildVisual(this);
+            RefreshExposed();   // 冰化开后组内像素要立刻恢复可点
+        }
+
         /// <summary>
         /// 校验所有倍乘门（调用前应先 <see cref="RebuildGrid"/> 让掩码与区域刷新）。通过返回 null，否则返回错误描述。
         /// 查三件事：① 线段轴对齐；② 每道门都围出了非空闭合区域；③ 门格互不重叠
@@ -513,6 +677,10 @@ namespace CrowdMatch
         {
             if (grid == null)
                 RebuildGrid();
+
+            // 冰冻掩码先刷新到最新：下面同色连通块的扩散要「碰到冰冻中的冰格就停」，
+            // 靠的就是 iceFrozenMask。放在这里是为了不依赖调用顺序（调用方可能刚改过冰组、刚融化）。
+            RefreshIceState();
 
             int cols = columns;
             int totalRows = TotalRows;
@@ -579,7 +747,9 @@ namespace CrowdMatch
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null || IsBlocked(c, r) || visited[c, r])
+                    // 冰冻中的冰格**不参与**同色连通块：它既不做块的种子、也不能被扩散穿过
+                    // （两条守卫缺一不可）。于是「只有隔着冰才连到外面的同色像素」不会被整块点亮。
+                    if (grid[c, r] == null || IsBlocked(c, r) || visited[c, r] || IsFrozenCell(c, r))
                         continue;
 
                     int color = grid[c, r].colorId;
@@ -614,6 +784,8 @@ namespace CrowdMatch
                             var nb = grid[nx, nz];
                             if (nb == null || IsBlocked(nx, nz) || nb.colorId != color)
                                 continue;
+                            if (IsFrozenCell(nx, nz))
+                                continue;   // 冰冻中的冰格 = 块边界，不扩散进去（见上面的说明）
 
                             visited[nx, nz] = true;
                             queue.Enqueue(new Vector2Int(nx, nz));
@@ -636,7 +808,45 @@ namespace CrowdMatch
                 }
             }
 
-            // 3. 应用到各像素
+            // 3. 冰组是否已暴露（供「暴露才开始消耗」门槛与计数数字的显隐用）。
+            //    冰格已被排除在同色连通块之外（见上面两处守卫），所以它在 active 里天然为 false、
+            //    不会出描边，不需要额外遮盖。这里改用 directlyExposed 判断 ——
+            //    「冰的位置暴露」= 冰组里至少有一格紧邻通向出口的空格（或就在首排）。
+            if (iceGroups != null && iceGroups.Count > 0)
+            {
+                for (int i = 0; i < iceGroups.Count; i++)
+                {
+                    var ice = iceGroups[i];
+                    if (ice == null)
+                        continue;
+
+                    bool hasExposed = false;
+                    foreach (var cell in ice.CellSet)
+                    {
+                        if (!IsInRange(cell.x, cell.y))
+                            continue;
+                        if (directlyExposed[cell.x, cell.y])
+                        {
+                            hasExposed = true;
+                            break;
+                        }
+                    }
+                    ice.hasExposedMember = hasExposed;
+                }
+
+                // 暴露状态刚算完 → 顺带刷新计数数字的显隐。
+                // 必须在这里刷：显隐读的就是 hasExposedMember，而勾了「暴露才开始消耗」时，
+                // **暴露的那一刻**就要把数字显示出来（而不是等到第一次消耗）——
+                // 让它暴露的那次点击既不消耗、过去也不刷新，于是数字一直不出现。
+                for (int i = 0; i < iceGroups.Count; i++)
+                {
+                    var ice = iceGroups[i];
+                    if (ice != null)
+                        ice.UpdateDisplay();
+                }
+            }
+
+            // 4. 应用到各像素
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -725,6 +935,27 @@ namespace CrowdMatch
             gateRegionMask = null;
             gateMultiplier = null;
             gates = new List<GateItem>();
+        }
+
+        /// <summary>清空所有 IceItem 子物体（供关卡重载时重建冰组）。</summary>
+        public void ClearIces()
+        {
+            var items = GetComponentsInChildren<IceItem>();
+            for (int i = items.Length - 1; i >= 0; i--)
+            {
+                var ice = items[i];
+                if (ice == null)
+                    continue;
+                ice.Clear();
+                ice.transform.SetParent(null, true);
+                if (Application.isPlaying)
+                    Destroy(ice.gameObject);
+                else
+                    DestroyImmediate(ice.gameObject);
+            }
+
+            iceFrozenMask = null;
+            iceGroups = new List<IceItem>();
         }
 
         /// <summary>
@@ -912,6 +1143,55 @@ namespace CrowdMatch
             gate.group = this;
             gate.BuildVisual(this);
             return gate;
+        }
+
+        /// <summary>
+        /// 在 PixelGroup 下实例化一个冰组（每个冰组一份 icePrefab）。参数取 <see cref="LevelData.IceGroupData"/>，
+        /// 与 <see cref="SpawnBox"/> / <see cref="SpawnElevator"/> 一致 —— 编辑器创建与关卡 JSON 导入共用同一条路径，
+        /// 字段（含计数数字的偏移与放大倍数）不会两头漏配。
+        /// 冰组**不清除**格上的像素——冰下面本来就要有像素——所以没有快照 / 还原一说。
+        /// </summary>
+        public IceItem SpawnIce(LevelData.IceGroupData data)
+        {
+            if (data == null)
+                return null;
+
+            if (icePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] icePrefab 为空，无法生成冰组（请指定自带 IceItem 组件的预制体）。");
+                return null;
+            }
+
+            string iceName = "Ice_" + (transform.childCount + 1);   // 先取名，避免实例化后再数子物体多算一个
+            var go = PrefabSpawner.Instantiate(icePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = iceName;
+
+            var ice = go.GetComponent<IceItem>();
+            if (ice == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + icePrefab.name + " 缺少 IceItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
+            // 显式写一遍所有来自数据的字段：预制体上可能留着旧的序列化值，不写就会被它盖掉。
+            // JSON 是外部输入，这两个值在这里兜底（旧 JSON 没有字段时取默认；fontScale 为 0 会让字看不见）。
+            ice.cells = (data.cells != null) ? new List<Vector2>(data.cells) : new List<Vector2>();
+            ice.freezeCount = Mathf.Max(1, data.count);
+            ice.meltOnlyWhenExposed = data.meltWhenExposed;
+            ice.countOffset = data.countOffset;
+            ice.countFontScale = data.fontScale > 0f ? data.fontScale : 1f;
+
+            ice.group = this;
+            ice.RefreshCells();
+            ice.ResetCount();          // 新冰组的计数从 freezeCount 起算
+            ice.BuildVisual(this);
+            return ice;
         }
 
         /// <summary>

@@ -189,6 +189,7 @@ namespace CrowdMatch
                 pixelGroup.ClearGates();
                 pixelGroup.ClearBoxes();
                 pixelGroup.ClearElevators();
+                pixelGroup.ClearIces();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -349,6 +350,24 @@ namespace CrowdMatch
                 });
             }
             data.gates = gates.ToArray();
+
+            // 冰组：扫描 PixelGroup 下的 IceItem，逐格存成员格 + 冰冻计数 + 「暴露才开始融化」选项。
+            // 每个冰组独立、顺序无关（单色填充不依赖组间下标），所以按层级顺序写即可。
+            var iceGroups = new List<LevelData.IceGroupData>();
+            foreach (var ice in pg.GetComponentsInChildren<IceItem>())
+            {
+                if (ice == null || ice.cells == null || ice.cells.Count == 0)
+                    continue;
+                iceGroups.Add(new LevelData.IceGroupData
+                {
+                    cells = ice.cells.ToArray(),
+                    count = Mathf.Max(1, ice.freezeCount),
+                    meltWhenExposed = ice.meltOnlyWhenExposed,
+                    countOffset = ice.countOffset,
+                    fontScale = ice.countFontScale,
+                });
+            }
+            data.iceGroups = iceGroups.ToArray();
 
             return data;
         }
