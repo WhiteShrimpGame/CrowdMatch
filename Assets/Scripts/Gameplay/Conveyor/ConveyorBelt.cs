@@ -32,6 +32,13 @@ namespace CrowdMatch
         [Tooltip("运动速度倍率 / Speed multiplier")]
         public float speed = 1f;
 
+        [Header("Empty-grid speed-up / 空场加速")]
+        [Tooltip("网格内像素已全部被点走后，传送带速度倍率逐渐升到的上限（1 = 不加速）/ Speed-scale ceiling reached after every pixel has left the grid")]
+        public float clearedSpeedMultiplier = 2.5f;
+
+        [Tooltip("从常规速度匀速升到上限所需秒数（<= 0 = 立即到上限）/ Seconds to ramp linearly from normal speed up to the ceiling")]
+        public float clearedAccelDuration = 3f;
+
         [Header("Slots / 槽位")]
         [Tooltip("等距槽位数量（= 传送带总容量）/ Number of evenly-spaced slots (= total capacity)")]
         public int slotCount = 12;
@@ -94,6 +101,12 @@ namespace CrowdMatch
         /// <summary>队首所在槽位（-1 = 无队首 / 空传送带）。队首不参与追赶，其余元素向其靠拢。</summary>
         private int _leaderSlot = -1;
 
+        /// <summary>空场加速的当前倍率（1 = 常规速度）。运行时值，不序列化；实际线速度 = speed × 本值。</summary>
+        [System.NonSerialized] public float clearedSpeedScale = 1f;
+
+        /// <summary>本关是否已进入空场加速（闩锁，只由 <see cref="ResetSpeed"/> 清除）。</summary>
+        [System.NonSerialized] private bool _clearedSpeedUp;
+
         /// <summary>追赶周期计时器。</summary>
         private float _catchUpTimer = 0f;
 
@@ -138,6 +151,7 @@ namespace CrowdMatch
             _catchUpTimer = 0f;
             _unavailableSlot = -1;
             _phaseShifts.Clear();
+            ResetSpeed();
             _initialized = true;
         }
 
@@ -212,8 +226,45 @@ namespace CrowdMatch
         /// <summary>推进循环偏移。/ Advances the loop offset.</summary>
         private void Advance()
         {
-            offset += Time.deltaTime * speed / cycleTime;
+            AdvanceClearedSpeed();
+            offset += Time.deltaTime * speed * clearedSpeedScale / cycleTime;
             offset %= 1f;
+        }
+
+        /// <summary>
+        /// 空场加速：从常规速度**匀速**升到 <see cref="clearedSpeedMultiplier"/>（时长 = <see cref="clearedAccelDuration"/>）。
+        /// 只在 <see cref="BeginClearedSpeedUp"/> 之后生效；配置的时长 ≤ 0 则立即到上限。
+        /// </summary>
+        private void AdvanceClearedSpeed()
+        {
+            if (!_clearedSpeedUp)
+                return;
+
+            float target = Mathf.Max(1f, clearedSpeedMultiplier);
+            if (clearedAccelDuration <= 0f)
+            {
+                clearedSpeedScale = target;
+                return;
+            }
+
+            float rate = (target - 1f) / clearedAccelDuration;   // 每秒升多少倍率
+            clearedSpeedScale = Mathf.MoveTowards(clearedSpeedScale, target, rate * Time.deltaTime);
+        }
+
+        /// <summary>
+        /// 网格内像素已全部被点走：开始逐渐加速到 <see cref="clearedSpeedMultiplier"/>（幂等，本关内保持）。
+        /// 复位只由 <see cref="ResetSpeed"/>（进下一关 / 重载关卡）负责。
+        /// </summary>
+        public void BeginClearedSpeedUp()
+        {
+            _clearedSpeedUp = true;
+        }
+
+        /// <summary>回到常规速度（进入下一关 / 重载关卡时调用）。</summary>
+        public void ResetSpeed()
+        {
+            _clearedSpeedUp = false;
+            clearedSpeedScale = 1f;
         }
 
         /// <summary>

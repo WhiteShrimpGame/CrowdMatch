@@ -480,6 +480,19 @@ namespace CrowdMatch
             return n;
         }
 
+        /// <summary>网格上是否已经没有任何像素（箱子隐藏像素 / 升降台地下像素不算：它们还没落到格子上）。</summary>
+        public bool IsGridEmpty()
+        {
+            if (grid == null)
+                return true;
+
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < TotalRows; r++)
+                    if (grid[c, r] != null)
+                        return false;
+            return true;
+        }
+
         // ===== 冰冻组 =====
 
         /// <summary>该格是否被冻住（所在冰组尚未融化）。</summary>
