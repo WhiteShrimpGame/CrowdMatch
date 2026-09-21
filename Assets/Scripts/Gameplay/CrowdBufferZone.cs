@@ -87,6 +87,12 @@ namespace CrowdMatch
         [Tooltip("移向入口边阶段，同一列（同入口点）像素排队的前后间距（世界单位），前方未进物理前后方不追尾")]
         public float entryQueueSpacing = 0.5f;
 
+        [Tooltip("【离场时机 · 可选模式】勾选后：像素只有**站在 row 0（最前排）**上才允许被判为离场 —— 会被 dist 一路导到最前排，再从那里飞出去。\n" +
+                 "不勾选（默认）= 现状：只要同列前方全空，在**任何 row** 都能直接离场（在网格深处就开始飞）。\n" +
+                 "代价对比：勾上后整体出网格更慢（深层像素要多走若干格才到最前排），但「离场像素在网格内的飞行路径」变得极短，\n" +
+                 "因此由「离场像素在网格里长距离飞行」引起的重合会明显减少。保留此开关用于对比两种离场时机")]
+        public bool exitOnlyFromRow0 = false;
+
         [Header("释放")]
         [Tooltip("距缺口中心多近触发释放（缺口已封口，需 ≥ radius + wallThickness/2，否则贴墙像素够不到释放范围、卡死）")]
         public float releaseRadius = 0.6f;
@@ -103,6 +109,11 @@ namespace CrowdMatch
 
         [Tooltip("释放后像素进入的闭环传送带；留空则回退到旧的集结位置 + gatheredItems 路径。指定后关闭按帧释放，改由 ConveyorBeltZone 槽位过关口时调 CollectNearest 收集")]
         public ConveyorBeltZone conveyorZone;
+
+        [Header("调试")]
+        [Tooltip("开启后，每次「空格挑中某颗像素作为下一步」（波前传播阶段 PickBestPixel 出结果时）打一条日志：" +
+                 "当前格 → 目标格，外加该像素当前位置（可直接对照格心，看位置与逻辑格是否同步）")]
+        public bool debugMoveLog = true;
 
         /// <summary>抵达集结位置 / 落位点的判定阈值（世界单位）</summary>
         private const float ArriveEpsilon = 0.05f;
@@ -121,6 +132,11 @@ namespace CrowdMatch
             public float animT;         // 动画进度 0..1
 
             public bool exiting;        // 已离开网格、正在移向入口边
+
+            // 倍乘门（离开门格时按该门倍数裂变）
+            public GateItem gate;         // 正在处理的门；不在门格上时为 null
+            public int gateBudget;        // 在这道门格里还要裂变出几个分身（首次进入门格时初始化为 倍数−1）
+            public bool multiplyPending;  // 本 tick 判定要裂变（apply 阶段生成分身）
 
             // 本 tick 的决策（瞬态，每次 sweep 前重置）
             public bool pendingExit;            // 本 tick 决定退出网格
@@ -168,6 +184,35 @@ namespace CrowdMatch
                 return n;
             }
         }
+
+        /// <summary>是否仍有像素在**网格内寻路**（尚未 <c>exiting</c>）。离场像素已不在网格里，不算。
+        /// 供失败判定做「静止门槛」：网格里还有像素在走，说明这批像素还没全部走出网格 ——
+        /// 倍乘门的分身可能尚未生成，此时判失败会把它们一并复活收走，实际送出的像素数与
+        /// <c>GameData.TotalPixelCount</c> 就对不上了。</summary>
+        public bool HasGridPathfindingPixels
+        {
+            get
+            {
+                for (int b = 0; b < _batches.Count; b++)
+                {
+                    var batch = _batches[b];
+                    if (batch == null)
+                        continue;
+                    for (int i = 0; i < batch.extracting.Count; i++)
+                    {
+                        var st = batch.extracting[i];
+                        if (st != null && !st.exiting)
+                            return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        /// <summary>「网格内寻路的最后一颗像素走出网格」那一刻触发一次（由 <see cref="StepExtracting"/> 边沿检测）。
+        /// 失败判定借此做延迟复查：网格里还有像素时不能判失败（见 <see cref="HasGridPathfindingPixels"/>），
+        /// 得等这一刻补一次检测，否则「带满且不匹配」的关卡会一直不判失败。</summary>
+        public event System.Action OnGridPathfindingFinished;
 
         /// <summary>该格是否被提取中的像素「占用」：有等待停靠的像素，或有正在进入该格的像素。
         /// 仅有正在离开该格（已决定移入下一格）的像素视为不占用。供管道蛇头判断前方格是否可进入。
@@ -414,6 +459,8 @@ namespace CrowdMatch
 
             float dt = Time.deltaTime;
 
+            bool hadGridPixels = HasGridPathfindingPixels;
+
             RefreshGeometry(out Vector3 entrance, out _, out Vector3 axis, out Vector3 perp, out _);
 
             for (int b = _batches.Count - 1; b >= 0; b--)
@@ -504,6 +551,12 @@ namespace CrowdMatch
                 ClearExtractionWalkableFlags();
                 _extractGroup = null;
             }
+
+            // 5. 网格内寻路的最后一颗像素本帧走出网格 → 通知一次。
+            //    用「本帧开始时还有 / 本帧结束时没有了」的边沿判定，避免之后每帧都重复通知
+            //    （批次里可能还有 exiting 像素在飞，sweep 仍会空转）。
+            if (hadGridPixels && !HasGridPathfindingPixels)
+                OnGridPathfindingFinished?.Invoke();
         }
 
         /// <summary>本批网格内是否仍有像素在播放格子到格子的移动动画（用于在动画结束后才触发下一次 sweep）。</summary>
@@ -536,6 +589,7 @@ namespace CrowdMatch
                 st.pendingExit = false;
                 st.pendingNext = new Vector2Int(-1, -1);
                 st.resolved = false;
+                st.multiplyPending = false;
             }
 
             // 静态距离场：dist[c,r] = 到前排出口的最短步数（只把未匹配球当墙，忽略本批匹配球）。
@@ -576,7 +630,13 @@ namespace CrowdMatch
                     exits.Add(st);
                     st.resolved = true;
                     st.pendingExit = true;
-                    vacated[st.col, st.row] = true;
+
+                    // 倍乘门：本体正要**直接从门格离场** → 判定是否还要裂变。
+                    // 要裂变时本体照常离场，但这一格**不 vacate**：分身会接管它，格子始终被占用。
+                    if (IsLeavingGate(st, -1, -1) && TakeGateBudget(st))
+                        st.multiplyPending = true;
+                    else
+                        vacated[st.col, st.row] = true;
                 }
             }
 
@@ -645,12 +705,35 @@ namespace CrowdMatch
                     if (winner == null)
                         continue;   // 没人想进 / 进不了，格保持空
 
+                    if (debugMoveLog && winner.item != null)
+                    {
+                        Vector3 lp = winner.item.transform.localPosition;
+                        Vector3 expect = _extractGroup.GetLocalPosition(winner.col, winner.row);
+                        Debug.Log("[寻路] 批次#" + _batches.IndexOf(batch) + " " + winner.item.name +
+                            "(id=" + winner.item.GetInstanceID() + ")" +
+                            " 当前格(" + winner.col + "," + winner.row + ") → 目标格(" + cell.x + "," + cell.y + ")" +
+                            " 当前位置=" + lp.ToString("F3") +
+                            (Vector3.Distance(lp, expect) > 0.001f
+                                ? "  ⚠偏离格心 " + Vector3.Distance(lp, expect).ToString("F4") + "（格心应为 " + expect.ToString("F3") + "）"
+                                : "") +
+                            " wait=" + winner.waitCount);
+                    }
+
+                    // 倍乘门：winner 正要**走出门格**（目标格已不在同一道门里）→ 判定是否还要裂变。
+                    // 要裂变时：本体照常前进，但本体原来的门格**不 vacate、也不进下一层 frontier**——
+                    // 分身会接管这一格，格子始终被占用，别的像素不许填进来（否则同 tick 两颗挤在同一格）。
+                    if (IsLeavingGate(winner, cell.x, cell.y) && TakeGateBudget(winner))
+                        winner.multiplyPending = true;
+                    else
+                    {
+                        vacated[winner.col, winner.row] = true;
+                        next.Add(new Vector2Int(winner.col, winner.row));
+                    }
+
                     movers.Add(winner);
                     winner.resolved = true;
                     winner.pendingNext = cell;
                     claimed[cell.x, cell.y] = true;
-                    vacated[winner.col, winner.row] = true;
-                    next.Add(new Vector2Int(winner.col, winner.row));
                 }
                 frontier = next;
             }
@@ -666,7 +749,22 @@ namespace CrowdMatch
             // 原子更新占用表 + 触发动画
             foreach (var st in exits)
             {
-                batch.matchedOccupied[st.col, st.row] = false;
+                // 倍乘门：分身接管本体刚离开的门格，所以这一格**保持占用**（不置 false）
+                if (st.multiplyPending)
+                {
+                    st.multiplyPending = false;
+                    var clone = SpawnGateClone(st, st.gateBudget);
+                    if (clone != null)
+                    {
+                        batch.extracting.Add(clone);
+                        batch.matchedOccupied[clone.col, clone.row] = true;
+                    }
+                }
+                else
+                {
+                    batch.matchedOccupied[st.col, st.row] = false;
+                }
+
                 st.waitCount = 0;
                 st.moving = false;
                 st.exiting = true;
@@ -675,6 +773,19 @@ namespace CrowdMatch
             {
                 batch.matchedOccupied[st.col, st.row] = false;
                 batch.matchedOccupied[st.pendingNext.x, st.pendingNext.y] = true;
+
+                // 倍乘门：先腾格再让分身接管（顺序不能反，否则刚置 true 又被置回 false）
+                if (st.multiplyPending)
+                {
+                    st.multiplyPending = false;
+                    var clone = SpawnGateClone(st, st.gateBudget);   // 用更新前的 st.col/st.row = 门格
+                    if (clone != null)
+                    {
+                        batch.extracting.Add(clone);
+                        batch.matchedOccupied[clone.col, clone.row] = true;
+                    }
+                }
+
                 StartCellMove(st, st.pendingNext);
                 st.col = st.pendingNext.x;
                 st.row = st.pendingNext.y;
@@ -696,6 +807,19 @@ namespace CrowdMatch
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
         private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied)
         {
+            // 【离场时机 · 可选模式】exitOnlyFromRow0：只有站在最前排（row 0）才允许离场 —— 先把像素
+            // 一路导到最前排，再从那里飞出去。关上（默认）是现状：同列前方全空就能在任意 row 直接离场。
+            if (exitOnlyFromRow0 && row != 0)
+                return false;
+
+            // 倍乘门守卫（**只在「不勾 row0」模式下需要**）：处在某道门闭环区域内的像素不许直接离场 ——
+            // 否则它会从区域深处原地飞出去、越过门格却不占用它，裂变不触发、嵌套的外门也会被整层跳过。
+            // 钩上 row0 模式时不需要这条：闭环区域里**不可能有 row 0 的格子**
+            // （GateRegion.ComputeRegion 把 row 0 上所有「非障碍、非门格」的格都当外部种子），
+            // 所以区域内的像素本来就走不到 row 0、只能经门走过去，必然占用门格 → 裂变照常发生。
+            if (!exitOnlyFromRow0 && _extractGroup != null && _extractGroup.MustWalkToGate(col, row, out _))
+                return false;
+
             // 只有 row 小于「正在释放管道」轨迹占据的 row 最小值时才离场：
             // 提取球必须走到管道轨迹的最前排之前（row 更小）才算真正越过管道，方可离场。
             // 不再考虑像素是否恰好落在某条管道轨迹格上。
@@ -711,6 +835,87 @@ namespace CrowdMatch
                     return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// st 是否「正要离开门格」——当前格在某道门的门格上，而目标格已经不在同一道门里。
+        /// 目标格传 (-1,-1) 表示「直接从门格离场」。换到**另一道门**的格子也算离开本门（嵌套时两道门各裂变一次）。
+        /// </summary>
+        private bool IsLeavingGate(ExtractState st, int destCol, int destRow)
+        {
+            if (_extractGroup == null)
+                return false;
+
+            var gate = _extractGroup.GateAt(st.col, st.row);
+            if (gate == null)
+                return false;                                        // 当前格不是门格
+
+            if (destCol < 0 && destRow < 0)
+                return true;                                         // 直接从门格离开网格
+
+            return _extractGroup.GateAt(destCol, destRow) != gate;    // 走到别的格（含别的门）= 离开本门
+        }
+
+        /// <summary>
+        /// 门格上的裂变预算结算：首次到达某道门格时按该门倍数初始化为 倍数−1（换门则重新初始化，
+        /// 于是嵌套的每道门各自算一份预算）。预算 &gt; 0 → 扣 1 并返回 true（本次要生成一个分身）；
+        /// 预算 == 0 → 返回 false（本体直接走，不再裂变）。
+        /// 调用后 <c>st.gateBudget</c> 即为分身的初始预算。
+        /// </summary>
+        private bool TakeGateBudget(ExtractState st)
+        {
+            if (_extractGroup == null)
+                return false;
+
+            var gate = _extractGroup.GateAt(st.col, st.row);
+            if (gate == null)
+                return false;
+
+            if (st.gate != gate)
+            {
+                st.gate = gate;                             // 换到另一道门：按那道门的倍数重新计预算（嵌套各算一份）
+                st.gateBudget = Mathf.Max(1, gate.multiplier) - 1;
+            }
+
+            if (st.gateBudget <= 0)
+                return false;
+
+            st.gateBudget--;
+            return true;
+        }
+
+        /// <summary>
+        /// 在 st 当前的门格生成一个分身像素，包装成「接手这一格」的 ExtractState（本 tick 不参与决策）。
+        /// **不写 grid[,]**：在途（提取中）像素本来就不在 grid 里（ResolveMatch 已把该格置空），
+        /// 写进去会变成新的障碍、还会被暴露 BFS 当成实体像素。
+        /// </summary>
+        private ExtractState SpawnGateClone(ExtractState src, int budget)
+        {
+            if (src == null || src.item == null || _extractGroup == null)
+                return null;
+
+            var clone = _extractGroup.SpawnPixel(src.col, src.row, src.item.colorId, null, false, false);
+            if (clone == null)
+                return null;
+
+            clone.group = _extractGroup;
+            clone.SetClickable(false);
+
+            var gc = GameController.Instance;
+            if (gc == null || !gc.recordMode)
+                clone.SetWalking(true);   // 与 ResolveMatch 里对匹配像素的处理一致（记录模式下像素随即消失，不需要走动画）
+
+            return new ExtractState
+            {
+                item = clone,
+                col = src.col,
+                row = src.row,
+                moving = false,
+                waitCount = 0,
+                resolved = true,          // 本 tick 的 stateAt / vacated 都已算完，不再参与本 tick
+                gate = src.gate,          // 继承同一道门与剩余预算 → 下一次由它继续裂变
+                gateBudget = budget,
+            };
         }
 
         /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的本批匹配球</summary>

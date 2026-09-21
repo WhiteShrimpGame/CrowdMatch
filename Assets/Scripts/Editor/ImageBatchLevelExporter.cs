@@ -266,7 +266,17 @@ namespace CrowdMatch
 
         private static bool GenerateContainers(ContainerGroup cg, PixelGroup pg, ColorConfig config)
         {
-            // 1. 扫描像素 → (layer, color)，layer 0 = 最前排（gridZ 0）
+            // 0. 倍乘门校验：不闭合就算不出有多少像素会经过门，容器容量必然错。
+            //    批量工具不适合逐关弹窗，故只打错误日志并跳过该关。
+            pg.RebuildGrid();
+            string gateErr = pg.ValidateGates();
+            if (gateErr != null)
+            {
+                Debug.LogError(Tag + " 倍乘门校验失败：" + gateErr);
+                return false;
+            }
+
+            // 1. 扫描像素 → (layer, color)，layer 0 = 最前排（gridZ 0）；倍乘门区域内按倍率多计
             int colorCount = config != null ? config.Count : 0;
             var pixels = new List<(int layer, int color)>();
             int maxColorId = -1;
@@ -274,7 +284,10 @@ namespace CrowdMatch
             {
                 if (it == null || !pg.IsInRange(it.gridX, it.gridZ))
                     continue;
-                pixels.Add((it.gridZ, it.colorId));
+
+                int mult = Mathf.Max(1, pg.GateMultiplierAt(it.gridX, it.gridZ));
+                for (int k = 0; k < mult; k++)
+                    pixels.Add((it.gridZ, it.colorId));
                 if (it.colorId > maxColorId)
                     maxColorId = it.colorId;
             }

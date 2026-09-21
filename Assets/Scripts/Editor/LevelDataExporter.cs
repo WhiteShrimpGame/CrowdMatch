@@ -186,6 +186,7 @@ namespace CrowdMatch
                 pixelGroup.ClearPixels();
                 pixelGroup.ClearWalls();
                 pixelGroup.ClearPipes();
+                pixelGroup.ClearGates();
                 pixelGroup.ClearBoxes();
                 pixelGroup.ClearElevators();
                 pixelGroup.RebuildGrid();
@@ -333,6 +334,21 @@ namespace CrowdMatch
                 });
             }
             data.elevators = elevators.ToArray();
+
+            // 倍乘门：扫描 PixelGroup 下的 GateItem，每道门存起终点格 + 倍数
+            var gates = new List<LevelData.GateData>();
+            foreach (var gate in pg.GetComponentsInChildren<GateItem>())
+            {
+                if (gate == null)
+                    continue;
+                gates.Add(new LevelData.GateData
+                {
+                    start = gate.start,
+                    end = gate.end,
+                    multiplier = Mathf.Max(1, gate.multiplier),
+                });
+            }
+            data.gates = gates.ToArray();
 
             return data;
         }

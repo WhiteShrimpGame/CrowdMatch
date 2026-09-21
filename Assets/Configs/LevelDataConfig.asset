@@ -19,6 +19,7 @@ MonoBehaviour:
   - {fileID: 4900000, guid: 0813caf88eb5b09469918937b4ef7cf2, type: 3}
   - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
+  - {fileID: 4900000, guid: 474d5d0f4f984754885237059c8c403d, type: 3}
   loopLevels:
   - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
   - {fileID: 4900000, guid: cb0ac343b9cdfbe418dbce5bf8b361cf, type: 3}
@@ -26,3 +27,4 @@ MonoBehaviour:
   - {fileID: 4900000, guid: 0813caf88eb5b09469918937b4ef7cf2, type: 3}
   - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
+  - {fileID: 4900000, guid: 474d5d0f4f984754885237059c8c403d, type: 3}

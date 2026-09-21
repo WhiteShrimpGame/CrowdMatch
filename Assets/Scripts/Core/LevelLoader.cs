@@ -53,9 +53,10 @@ namespace CrowdMatch
                 return;
             if (pixelGroup != null)
             {
-                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, colorConfig);
+                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, data.gates, colorConfig);
                 ApplyWalls(pixelGroup, data.walls);
                 ApplyPipes(pixelGroup, data.pipes);
+                ApplyGates(pixelGroup, data.gates);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
                 ApplyElevators(pixelGroup, data.elevators, colorConfig);
             }
@@ -63,7 +64,7 @@ namespace CrowdMatch
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, LevelData.GateData[] gates, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -115,6 +116,16 @@ namespace CrowdMatch
                     for (int r = rmin; r <= rmax; r++)
                         for (int c = cmin; c <= cmax; c++)
                             skipCells.Add(new Vector2Int(c, r));
+                }
+            }
+            if (gates != null)
+            {
+                foreach (var g in gates)
+                {
+                    if (g == null)
+                        continue;
+                    // 门格上不放像素（创建门时那些像素已被清掉），导入时同样跳过
+                    GateItem.CollectCells(g.start, g.end, skipCells);
                 }
             }
             for (int r = 0; r < totalRows; r++)
@@ -183,6 +194,32 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
+        }
+
+        /// <summary>清空并重建 PixelGroup 下的倍乘门（线段不合法的门被跳过）。</summary>
+        private static void ApplyGates(PixelGroup pg, LevelData.GateData[] gates)
+        {
+            pg.ClearGates();
+
+            if (gates == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var g in gates)
+            {
+                if (g == null)
+                    continue;
+                if (pg.SpawnGate(g.start, g.end, g.multiplier) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 道倍乘门。");
         }
 
         /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>
