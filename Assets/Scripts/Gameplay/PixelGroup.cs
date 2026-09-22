@@ -474,6 +474,28 @@ namespace CrowdMatch
             return !IsActivePipeBlocked(col, row);
         }
 
+        /// <summary>
+        /// 暴露判定里，相邻格 (nc,nr) 能否算作「连通首排的空格」供 (c,r) 借光。
+        ///
+        /// 与旧逻辑（直接读 reachableEmpty）的唯一区别：**门格只对「该门闭合区域内」的格子作数**。
+        /// 门对区域外的像素等同墙，所以门框外侧紧邻的像素不再因为贴着门格而点亮；
+        /// 区域内的像素照旧靠门格连到首排（否则整个闭环区域都不可点）。
+        /// 口径与 <see cref="IsGateBlockedFor"/> 一致。
+        ///
+        /// 注：`reachableEmpty` 本身仍允许流经门格（区域内部的格必须靠它才连得上首排），
+        /// 而「区域外的格能不能借门格的光」由这里挡住 —— 两件事分开判，互不干扰。
+        /// </summary>
+        private bool NeighbourReachableForExposure(int c, int r, int nc, int nr, bool[,] reachableEmpty)
+        {
+            if (!reachableEmpty[nc, nr])
+                return false;
+
+            var gate = GateAt(nc, nr);
+            if (gate == null)
+                return true;                                    // 不是门格：与旧逻辑一致
+            return gate.regionMask != null && gate.regionMask[c, r];
+        }
+
         /// <summary>该格是否是某道倍乘门的门格。</summary>
         public bool IsGateCell(int col, int row)
         {
@@ -530,6 +552,55 @@ namespace CrowdMatch
                 return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// 这批像素「允许穿过」的门集合 = 像素所在格落在该门**闭合区域内**的那些门。
+        ///
+        /// 口径（已与用户核对）：**倍乘门对闭合区域外的像素等同墙** —— 区域外的像素不许走门格、
+        /// 不许靠门格连到首排，也因此不会从门格上蹭到倍乘（`TakeGateBudget` 只看门格、不校验来路，
+        /// 所以「不许进门格」才是拦点）。区域内的像素必须穿过门格才能出去，所以必须拿得到这份通行证。
+        ///
+        /// 为什么按**整组**判定而不是逐颗：一次点击移出的是同一组同色连通像素、一个提取批次也是整组一起走，
+        /// 而门两侧不可能同色连通（门格上没有像素），所以整组必然同侧。组内只要有一颗在区域内，
+        /// 整组就都拿这道门的通行证 —— 否则组里先走出去的那几颗会让剩下的卡在门里。
+        /// </summary>
+        public HashSet<GateItem> CollectPassGates(IEnumerable<PixelItem> pixels)
+        {
+            var pass = new HashSet<GateItem>();
+            if (pixels == null || gates == null || gates.Count == 0)
+                return pass;
+
+            foreach (var p in pixels)
+            {
+                if (p == null || !IsInRange(p.gridX, p.gridZ))
+                    continue;
+
+                for (int i = 0; i < gates.Count; i++)
+                {
+                    var g = gates[i];
+                    if (g == null || g.regionMask == null)
+                        continue;
+                    if (g.regionMask[p.gridX, p.gridZ])
+                        pass.Add(g);
+                }
+            }
+            return pass;
+        }
+
+        /// <summary>
+        /// 该格对「持有 <paramref name="passGates"/> 通行证的像素」是否被倍乘门挡住。
+        /// 不是门格 → 不挡；是门格且该门在通行证里 → 不挡；其余（含区域外像素遇到门格）→ 挡。
+        /// <paramref name="passGates"/> 传 null 表示「调用方不区分来路」，一律不挡（= 旧行为）。
+        /// </summary>
+        public bool IsGateBlockedFor(int col, int row, HashSet<GateItem> passGates)
+        {
+            var gate = GateAt(col, row);
+            if (gate == null)
+                return false;                                   // 不是门格
+            if (passGates == null)
+                return false;                                   // 无门上下文：保持旧行为
+            return !passGates.Contains(gate);
         }
 
         /// <summary>落在该门闭合区域内的静态网格像素数（供 Inspector 显示与校验提示）。</summary>
@@ -924,7 +995,9 @@ namespace CrowdMatch
                 }
             }
 
-            // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）
+            // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）。
+            //    门格另有一条：只对**该门闭合区域内**的格子作数 —— 区域外的像素把门格当墙，
+            //    于是「门框外侧紧邻的像素」不再因为贴着门格而点亮（口径见 IsGateBlockedFor）。
             var directlyExposed = new bool[cols, totalRows];
             for (int c = 0; c < cols; c++)
             {
@@ -934,10 +1007,10 @@ namespace CrowdMatch
                         continue;
                     directlyExposed[c, r] =
                         r == 0 ||                                            // 前方：出口（第一排）
-                        (r - 1 >= 0 && reachableEmpty[c, r - 1]) ||          // 前方空（连通首排）
-                        (r + 1 < totalRows && reachableEmpty[c, r + 1]) ||   // 后方空（连通首排）
-                        (c - 1 >= 0 && reachableEmpty[c - 1, r]) ||          // 左方空（连通首排）
-                        (c + 1 < cols && reachableEmpty[c + 1, r]);          // 右方空（连通首排）
+                        (r - 1 >= 0 && NeighbourReachableForExposure(c, r, c, r - 1, reachableEmpty)) ||
+                        (r + 1 < totalRows && NeighbourReachableForExposure(c, r, c, r + 1, reachableEmpty)) ||
+                        (c - 1 >= 0 && NeighbourReachableForExposure(c, r, c - 1, r, reachableEmpty)) ||
+                        (c + 1 < cols && NeighbourReachableForExposure(c, r, c + 1, r, reachableEmpty));
                 }
             }
 

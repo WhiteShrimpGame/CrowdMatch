@@ -150,6 +150,14 @@ namespace CrowdMatch
             public readonly List<ExtractState> extracting = new List<ExtractState>();
             public bool[,] matchedOccupied;   // 本批尚未离开的匹配像素占用的格（每次 sweep 原子更新）
             public float tickTimer;           // 本批的 sweep 时间片计时器
+
+            /// <summary>
+            /// 本批「允许穿过」的倍乘门（<see cref="PixelGroup.CollectPassGates"/> 在批次创建时按**来路**算一次）。
+            /// 门对闭合区域外的像素等同墙：门格对本批是障碍还是通路，全看这道门在不在这个集合里。
+            /// **批次创建时定死、之后不变** —— 像素走出去之后就不再落在区域格里，逐 tick 重算会让
+            /// 门格在半路变成障碍，把已经进门的像素卡死（门上的分身也不是区域格，更算不出来）。
+            /// </summary>
+            public HashSet<GateItem> passGates = new HashSet<GateItem>();
         }
 
         /// <summary>提取中的批次（每次匹配一组 = 一个独立批次）</summary>
@@ -298,6 +306,9 @@ namespace CrowdMatch
             var batch = new Batch();
             batch.matchedOccupied = new bool[group.columns, group.TotalRows];
             batch.tickTimer = 0f;
+            // 来路身份：本批来自哪些门的闭合区域内 → 只有这些门格对它可通行（门对区域外像素等同墙）。
+            // 必须在像素还站在原始格上时算 —— 见 Batch.passGates 的说明。
+            batch.passGates = group.CollectPassGates(matched);
 
             foreach (var item in matched)
             {
@@ -594,7 +605,7 @@ namespace CrowdMatch
 
             // 静态距离场：dist[c,r] = 到前排出口的最短步数（只把未匹配球当墙，忽略本批匹配球）。
             // 它只表达"该往哪走"的方向信息，不受本 tick 腾出/抢占影响，故每个 sweep 算一次即可。
-            int[,] dist = ComputeExitDistance(cols, rows);
+            int[,] dist = ComputeExitDistance(cols, rows, batch);
 
             // 网格内像素：位置查找表（快照，逐 sweep 重建，与 matchedOccupied 一致）+ 参与决策列表
             var stateAt = new ExtractState[cols, rows];
@@ -625,7 +636,7 @@ namespace CrowdMatch
             });
             foreach (var st in seeds)
             {
-                if (CanExit(st.col, st.row, vacated, claimed, batch.matchedOccupied))
+                if (CanExit(st.col, st.row, vacated, claimed, batch.matchedOccupied, batch))
                 {
                     exits.Add(st);
                     st.resolved = true;
@@ -663,7 +674,7 @@ namespace CrowdMatch
             var frontier = new List<Vector2Int>();
             for (int c = 0; c < cols; c++)
                 for (int r = 0; r < rows; r++)
-                    if (!IsObstacle(c, r, vacated, claimed, batch.matchedOccupied))
+                    if (!IsObstacle(c, r, vacated, claimed, batch.matchedOccupied, batch))
                         frontier.Add(new Vector2Int(c, r));
 
             // 步骤 1..N：逐层传播 —— 每个可用格从相邻像素里挑 wait 最高者填入（空格找像素）。
@@ -805,7 +816,7 @@ namespace CrowdMatch
         }
 
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
-        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied)
+        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied, Batch batch)
         {
             // 【离场时机 · 可选模式】exitOnlyFromRow0：只有站在最前排（row 0）才允许离场 —— 先把像素
             // 一路导到最前排，再从那里飞出去。关上（默认）是现状：同列前方全空就能在任意 row 直接离场。
@@ -831,7 +842,8 @@ namespace CrowdMatch
 
             for (int r = 0; r < row; r++)
             {
-                if (IsObstacle(col, r, vacated, claimed, matchedOccupied))
+                // 前方任何一格对本批是障碍（含「不是本批来路的倍乘门门格」）→ 不能从这里离场
+                if (IsObstacle(col, r, vacated, claimed, matchedOccupied, batch))
                     return false;
             }
             return true;
@@ -918,10 +930,17 @@ namespace CrowdMatch
             };
         }
 
-        /// <summary>某格是否为障碍：墙体/管道本体、未匹配球（管道蛇形生成中的像素除外，视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的本批匹配球</summary>
-        private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied)
+        /// <summary>
+        /// 某格是否为障碍：墙体/管道本体、**不是本批来路的倍乘门门格**、未匹配球（管道蛇形生成中的像素除外，
+        /// 视为可通行）、本 tick 已被抢占、尚未离开且本 tick 未腾出的本批匹配球。
+        /// 门格这一条的口径：门对闭合区域外的像素等同墙，只有「本批来自该门区域内」时才可通行
+        /// （见 <see cref="PixelGroup.IsGateBlockedFor"/> 与 <see cref="Batch.passGates"/>）。
+        /// </summary>
+        private bool IsObstacle(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied, Batch batch)
         {
             if (_extractGroup.IsBlocked(col, row))
+                return true;
+            if (_extractGroup.IsGateBlockedFor(col, row, batch != null ? batch.passGates : null))
                 return true;
             var gridItem = _extractGroup.grid[col, row];
             if (gridItem != null && !gridItem.walkableDuringExtraction)
@@ -933,14 +952,17 @@ namespace CrowdMatch
             return false;
         }
 
-        /// <summary>该格是否对提取寻路「可通行」：非墙体/管道自身格，且为空或为管道蛇形生成中（walkableDuringExtraction）的像素。</summary>
-        private bool IsEmptyForExtraction(int col, int row)
+        /// <summary>该格是否对提取寻路「可通行」：非墙体/管道自身格、对本来路可通行的门格，
+        /// 且为空或为管道蛇形生成中（walkableDuringExtraction）的像素。</summary>
+        private bool IsEmptyForExtraction(int col, int row, Batch batch)
         {
             if (_extractGroup == null)
                 return false;
             if (!_extractGroup.IsInRange(col, row))
                 return false;
             if (_extractGroup.IsBlocked(col, row))
+                return false;
+            if (_extractGroup.IsGateBlockedFor(col, row, batch != null ? batch.passGates : null))
                 return false;
             var item = _extractGroup.grid[col, row];
             if (item == null)
@@ -965,11 +987,13 @@ namespace CrowdMatch
         /// <summary>
         /// 计算静态距离场：dist[c,r] = 从 (c,r) 走到「前排出口格」的最短步数（BFS）。
         /// 只把未匹配球（_extractGroup.grid != null）当墙；本批匹配球正在离开，不作为墙。
+        /// **不是本批来路的倍乘门门格也当墙** —— 于是区域外的像素不会把门格当捷径穿过去
+        /// （穿过去就会在走出门格时白拿一次倍乘，见 <see cref="Batch.passGates"/>）。
         /// 前排 row 0 上非静态的格子即出口（dist=0）；被静态障碍围死的格子 dist 保持不可达。
         /// 这是"移动方向"的唯一依据——像素每 tick 只朝 dist 更小的邻格走一步，从而在拐角处
         /// 紧跟前面刚腾出的格子，而不是等整条走廊都清空才动。
         /// </summary>
-        private int[,] ComputeExitDistance(int cols, int rows)
+        private int[,] ComputeExitDistance(int cols, int rows, Batch batch)
         {
             const int INF = 1000000;
             var dist = new int[cols, rows];
@@ -980,7 +1004,7 @@ namespace CrowdMatch
             var queue = new Queue<Vector2Int>();
             for (int c = 0; c < cols; c++)
             {
-                if (IsEmptyForExtraction(c, 0))
+                if (IsEmptyForExtraction(c, 0, batch))
                 {
                     dist[c, 0] = 0;
                     queue.Enqueue(new Vector2Int(c, 0));
@@ -1000,7 +1024,7 @@ namespace CrowdMatch
                         continue;
                     if (dist[nx, nz] != INF)
                         continue;
-                    if (!IsEmptyForExtraction(nx, nz))
+                    if (!IsEmptyForExtraction(nx, nz, batch))
                         continue;
                     dist[nx, nz] = dist[cur.x, cur.y] + 1;
                     queue.Enqueue(new Vector2Int(nx, nz));

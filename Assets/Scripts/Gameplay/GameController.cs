@@ -801,6 +801,8 @@ namespace CrowdMatch
         /// <summary>
         /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。
         /// 「空」与暴露判定完全对齐：活跃管道覆盖（新蛇即将填充）的格视为障碍，不可穿过。
+        /// 倍乘门门格同样按「门对区域外像素等同墙」处理：只有本组**来自该门闭合区域内**时才可穿过
+        /// （见 <see cref="PixelGroup.CollectPassGates"/>）—— 否则区域内的组会被门格挡死、永远点不动。
         /// 有路径即可点击离开（组能寻路到出口）；否则组被其他像素完全包围、无法离开。
         /// </summary>
         private bool CanReachFront(List<PixelItem> matched)
@@ -811,6 +813,9 @@ namespace CrowdMatch
             var inGroup = new HashSet<PixelItem>(matched);
             var visited = new bool[cols, rows];
             var queue = new Queue<Vector2Int>();
+
+            // 本组能穿哪些门：按**来路**算一次（组内只要有一颗在该门区域内 → 整组都能过这道门）
+            var passGates = pixelGroup.CollectPassGates(matched);
 
             foreach (var it in matched)
             {
@@ -839,6 +844,8 @@ namespace CrowdMatch
                         continue;
                     if (pixelGroup.IsBlocked(nx, nz) || pixelGroup.IsActivePipeBlocked(nx, nz))
                         continue;   // 墙体/管道/活跃管道覆盖（新蛇即将填充）= 障碍，不可穿过
+                    if (pixelGroup.IsGateBlockedFor(nx, nz, passGates))
+                        continue;   // 不是本组来路的倍乘门门格 = 障碍（门对区域外像素等同墙）
 
                     var cell = pixelGroup.grid[nx, nz];
                     if (cell != null && !inGroup.Contains(cell))
