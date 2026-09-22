@@ -67,9 +67,16 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 校验 record 与关卡是否一致：像素总数一致，且各颜色计数一致。
-        /// 墙体/管道自身占据的格子不生成 Pixel（Record 也不含），需从网格格数中扣除；
-        /// 管道波次会额外生成像素（轨道格数 × 波次数），需加回。通过返回 null，否则返回错误描述。
+        /// 校验 record 与关卡是否一致：像素总数一致，且各颜色计数一致。通过返回 null，否则返回错误描述。
+        ///
+        /// 口径与运行时**逐项对齐** <c>PixelGroup.CollectPlanningSources</c>（也就是 GameData.TotalPixelCount 的底座），
+        /// 枚举四类源，每颗按其**所在格**的倍率计入（不在任何门区域内为 1、区域内为所属各门倍数之连乘）：
+        ///   1. 网格像素（跳过墙/管道格与空格）；
+        ///   2. 管道波次：轨道格数 × 波次数，逐格查倍率；
+        ///   3. 箱子隐藏像素：释放到哪些格运行时才定，倍率一律按箱子锚点格 (colMin,rowMin) 取
+        ///      —— 与运行时同口径，整箱跨门边界时是已知的近似（编辑器会另给告警）；
+        ///   4. 升降台分组像素：按每组 cells 的 (col,row,color) 三元组逐颗查倍率。
+        /// 于是校验总数 = 运行时 TotalPixelCount，倍乘门/箱子/升降台都不会漏。
         /// </summary>
         public static string Validate(LevelData data, IReadOnlyList<int> seq)
         {
@@ -79,70 +86,96 @@ namespace CrowdMatch
             if (data.pixel.cells == null || data.pixel.cells.Length < gridCells)
                 return "关卡像素 cells 数量不足（需要 " + gridCells + "）。";
 
-            // 收集墙体 + 管道自身占据的格（这些格不生成 Pixel，Record 中也不包含）
-            var skipCells = new HashSet<Vector2Int>();
+            // 墙体 + 管道自身占据的格。两个用途：这些格不生成 Pixel（Record 中也不含）；
+            // 同时它们是倍乘门求闭合区域时的**永久障碍**（与运行时 GateRegion 约定一致：
+            // 箱子会开、会消失，不能当永久围栏，所以不算障碍）。
+            var barrierCells = new HashSet<Vector2Int>();
             if (data.walls != null)
                 foreach (var w in data.walls)
                     if (w != null && w.points != null)
-                        WallItem.CollectOccupiedCells(w.points, w.closed, skipCells);
+                        WallItem.CollectOccupiedCells(w.points, w.closed, barrierCells);
             if (data.pipes != null)
                 foreach (var p in data.pipes)
                     if (p != null && p.points != null && p.points.Length >= 1)
-                        skipCells.Add(PipeItem.GetPipeCell(p.points));
+                        barrierCells.Add(PipeItem.GetPipeCell(p.points));
 
-            // 初始像素数 = 网格格数 − 墙/管道格 − 空像素格（仅统计网格范围内的非跳过、非空格）
-            int skipInGrid = 0;
-            int emptyCells = 0;
-            for (int r = 0; r < totalRows; r++)
-                for (int c = 0; c < columns; c++)
-                {
-                    if (skipCells.Contains(new Vector2Int(c, r)))
-                        skipInGrid++;
-                    else if (data.pixel.cells[r * columns + c] < 0)
-                        emptyCells++;
-                }
-            int initialPixels = gridCells - skipInGrid - emptyCells;
+            var multiplier = BuildGateMultiplier(data, columns, totalRows, barrierCells);
 
-            // 管道额外生成的像素数 = Σ 轨道格数 × 波次数
-            int pipePixels = 0;
-            if (data.pipes != null)
-                foreach (var p in data.pipes)
-                    if (p != null && p.points != null && p.points.Length >= 2 && p.colors != null)
-                        pipePixels += PipeItem.CountTrackCells(p.points, columns, totalRows) * p.colors.Length;
-
-            int pixelTotal = initialPixels + pipePixels;
-
-            if (seq.Count != pixelTotal)
-                return "Record 像素数(" + seq.Count + ")与关卡像素数(" + pixelTotal +
-                    "，含管道生成 " + pipePixels + "，扣除墙/管道格 " + skipInGrid + "、空像素 " + emptyCells + ")不一致。";
-
-            var recordCounts = new Dictionary<int, int>();
-            foreach (var c in seq)
-                recordCounts[c] = recordCounts.TryGetValue(c, out int rc) ? rc + 1 : 1;
-
-            // 关卡颜色计数 = 初始像素（跳过墙/管道格）+ 管道计划生成颜色
             var pixelCounts = new Dictionary<int, int>();
+            int gridPixels = 0, pipePixels = 0, boxPixels = 0, elevatorPixels = 0;
+
+            // 累加一个源像素：按其所在格的倍率计入（格子越界或不在任何门区域内 → 1）
+            void Add(int color, int col, int row, ref int subtotal)
+            {
+                int mult = col >= 0 && col < columns && row >= 0 && row < totalRows ? multiplier[col, row] : 1;
+                if (mult < 1)
+                    mult = 1;
+                pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + mult : mult;
+                subtotal += mult;
+            }
+
+            // 1. 网格像素：跳过墙/管道格与空像素格
             for (int r = 0; r < totalRows; r++)
                 for (int c = 0; c < columns; c++)
                 {
-                    if (skipCells.Contains(new Vector2Int(c, r)))
+                    if (barrierCells.Contains(new Vector2Int(c, r)))
                         continue;
                     int color = data.pixel.cells[r * columns + c];
                     if (color < 0)
                         continue;   // 空像素（-1）
-                    pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + 1 : 1;
+                    Add(color, c, r, ref gridPixels);
                 }
+
+            // 2. 管道波次：每波在整条轨道上各生成 1 颗
+            var trackCells = new List<Vector2Int>();
             if (data.pipes != null)
                 foreach (var p in data.pipes)
                 {
                     if (p == null || p.points == null || p.points.Length < 2 || p.colors == null)
                         continue;
-                    int track = PipeItem.CountTrackCells(p.points, columns, totalRows);
-                    if (track <= 0)
-                        continue;
+                    PipeItem.CollectTrackCells(p.points, columns, totalRows, trackCells);
                     foreach (int color in p.colors)
-                        pixelCounts[color] = pixelCounts.TryGetValue(color, out int pc) ? pc + track : track;
+                        for (int i = 0; i < trackCells.Count; i++)
+                            Add(color, trackCells[i].x, trackCells[i].y, ref pipePixels);
                 }
+
+            // 3. 箱子隐藏像素：释放到哪些格运行时才定（BoxItem.PlanAssignments 按当时空位分配），
+            //    故倍率一律按箱子锚点格取 —— 与运行时 CollectPlanningSources 同一处理。
+            if (data.boxes != null)
+                foreach (var b in data.boxes)
+                {
+                    if (b == null || b.colorIds == null)
+                        continue;
+                    int count = Mathf.Min(b.capacity, b.colorIds.Length);
+                    for (int i = 0; i < count; i++)
+                        Add(b.colorIds[i], b.colMin, b.rowMin, ref boxPixels);
+                }
+
+            // 4. 升降台分组像素：每组 cells 是 (col, row, color) 三元组
+            if (data.elevators != null)
+                foreach (var e in data.elevators)
+                {
+                    if (e == null || e.groups == null)
+                        continue;
+                    foreach (var g in e.groups)
+                    {
+                        if (g == null || g.cells == null)
+                            continue;
+                        for (int i = 0; i + 2 < g.cells.Length; i += 3)
+                            Add(g.cells[i + 2], g.cells[i], g.cells[i + 1], ref elevatorPixels);
+                    }
+                }
+
+            int pixelTotal = gridPixels + pipePixels + boxPixels + elevatorPixels;
+
+            if (seq.Count != pixelTotal)
+                return "Record 像素数(" + seq.Count + ")与关卡像素数(" + pixelTotal + ")不一致（网格 " + gridPixels +
+                    "、管道 " + pipePixels + "、箱子 " + boxPixels + "、升降台 " + elevatorPixels +
+                    "；各数已含倍乘门倍率，网格数已扣除墙/管道格与空像素）。";
+
+            var recordCounts = new Dictionary<int, int>();
+            foreach (var c in seq)
+                recordCounts[c] = recordCounts.TryGetValue(c, out int rc) ? rc + 1 : 1;
 
             if (recordCounts.Count != pixelCounts.Count)
                 return "Record 与关卡的颜色种类数不一致（" + recordCounts.Count + " vs " + pixelCounts.Count + "）。";
@@ -154,6 +187,47 @@ namespace CrowdMatch
                     return "颜色 " + kv.Key + " 数量不一致：像素 " + kv.Value + "，Record " + rc + "。";
             }
             return null;
+        }
+
+        /// <summary>
+        /// 倍率图 [column, row]：与运行时 <c>PixelGroup.RebuildGrid</c> 的算法完全一致 ——
+        /// 每道门把**门格也当障碍**、从最前排（row 0）四向 BFS 求出闭合区域，
+        /// 区域内的每格乘上该门倍数（多道门嵌套即连乘），区域外恒为 1。
+        /// 障碍只取「墙 ∪ 管道自身格」（<paramref name="barrierCells"/>）。
+        /// </summary>
+        private static int[,] BuildGateMultiplier(LevelData data, int columns, int totalRows, HashSet<Vector2Int> barrierCells)
+        {
+            var multiplier = new int[columns, totalRows];
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < totalRows; r++)
+                    multiplier[c, r] = 1;
+
+            if (data.gates == null)
+                return multiplier;
+
+            foreach (var gate in data.gates)
+            {
+                if (gate == null)
+                    continue;
+
+                var gateCells = new HashSet<Vector2Int>();
+                GateItem.CollectCells(gate.start, gate.end, gateCells);
+                if (gateCells.Count == 0)
+                    continue;
+
+                var region = GateRegion.ComputeRegion(
+                    columns, totalRows, (c, r) => barrierCells.Contains(new Vector2Int(c, r)), gateCells);
+
+                int mult = Mathf.Max(1, gate.multiplier);
+                foreach (var cell in region)
+                {
+                    if (cell.x < 0 || cell.x >= columns || cell.y < 0 || cell.y >= totalRows)
+                        continue;
+                    multiplier[cell.x, cell.y] *= mult;
+                }
+            }
+
+            return multiplier;
         }
 
         /// <summary>
