@@ -361,7 +361,7 @@ namespace CrowdMatch
             consumingCount = Mathf.Max(0, consumingCount - 1);
             var gc = GameController.Instance;
             if (gc != null)
-                gc.TryCheckFail();
+                gc.TryCheckFail(GameController.FailCheckpoint.PixelConsumed);
             if (!isLast)
                 return;
             if (destroyInPlace)
@@ -375,7 +375,7 @@ namespace CrowdMatch
         {
             var gc = GameController.Instance;
             if (gc != null)
-                gc.TryCheckFail();
+                gc.TryCheckFail(GameController.FailCheckpoint.CarArrivedFront);
             TryExitIfAtFront(item, col);
         }
 

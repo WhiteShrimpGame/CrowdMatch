@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: LevelDataConfig
   m_EditorClassIdentifier: 
   levels:
+  - {fileID: 4900000, guid: 9ace7a944d6697646ba4469f61f2ace5, type: 3}
   - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
   - {fileID: 4900000, guid: cb0ac343b9cdfbe418dbce5bf8b361cf, type: 3}
   - {fileID: 4900000, guid: 6e72ef97fccb3914a9d461e19997623d, type: 3}
@@ -21,6 +22,7 @@ MonoBehaviour:
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
   - {fileID: 4900000, guid: 474d5d0f4f984754885237059c8c403d, type: 3}
   loopLevels:
+  - {fileID: 4900000, guid: 9ace7a944d6697646ba4469f61f2ace5, type: 3}
   - {fileID: 4900000, guid: d3b8c2dd5bd6570419d5f604830418b8, type: 3}
   - {fileID: 4900000, guid: cb0ac343b9cdfbe418dbce5bf8b361cf, type: 3}
   - {fileID: 4900000, guid: 6e72ef97fccb3914a9d461e19997623d, type: 3}
@@ -28,3 +30,5 @@ MonoBehaviour:
   - {fileID: 4900000, guid: 4093d851673a23047b09ca921fff4712, type: 3}
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
   - {fileID: 4900000, guid: 474d5d0f4f984754885237059c8c403d, type: 3}
+  levelDiff: 0000000001000000020000000100000002000000000000000100000001000000
+  levelDiffLoop: 0200000001000000020000000100000000000000010000000000000000000000

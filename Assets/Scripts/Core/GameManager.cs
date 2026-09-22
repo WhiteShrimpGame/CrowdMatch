@@ -43,6 +43,7 @@ namespace CrowdMatch
         [Tooltip("表情包管理器（场景里单独建一个物体挂上，再拖到这里）；留空则所有表情播放自动跳过")]
         public EmojiManager emojiManager;
 
+        public StaminaConfig staminaConfig;
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -58,8 +59,8 @@ namespace CrowdMatch
             // 音频：挂上 AudioManager 并注入配置（AudioSource 首次 Play 时才懒创建）
             var audioManager = gameObject.AddComponent<AudioManager>();
             audioManager.Init(audioConfig);
-            audioManager.MusicEnabled = PlayerPrefs.GetInt("Music", 1) == 1;
-            audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
+            //audioManager.MusicEnabled = PlayerPrefs.GetInt("Music", 1) == 1;
+            //audioManager.SoundEnabled = PlayerPrefs.GetInt("Sound", 1) == 1;
             if (audioConfig != null)
                 audioManager.Play("BGM", loop: true);   // 背景音乐循环播放（跨关卡不重播）
 
@@ -68,6 +69,17 @@ namespace CrowdMatch
             {
                 spawnPool = new SpawnPool();
                 spawnPool.Init(spawnPoolConfig, spawnPoolRoot);
+            }
+            if (staminaConfig != null)
+            {
+                StaminaSystemData.InitData();
+                StaminaSystemTimer.Instance.InitData();
+                if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
+                {   
+                    //刚进游戏时，体力不足回主页
+                    /*TriggerVibrate(1);
+                    ReloadScene(false);*/
+                }
             }
         }
 
@@ -79,10 +91,16 @@ namespace CrowdMatch
             if (Input.GetKeyDown(KeyCode.N))
             {
                 GameWin();
+                ReloadLevel();
             }
             else if (Input.GetKeyDown(KeyCode.B))
             {
                 PrevLevel();
+            }
+            else if (Input.GetKeyDown(KeyCode.G))
+            {
+                PlayerPrefs.DeleteAll();
+                Debug.Log("清除数据");
             }
         }
 #endif
@@ -111,8 +129,14 @@ namespace CrowdMatch
         public void GameWin()
         {
             GameData.CurrentLevel++;
+            GameData.WinStreak++;
             GameData.FailCount = 0;
-            ReloadLevel();
+            var rewardData = new RewardData
+            {
+                gold = GoldConfig.GetWinGold()
+            };
+            rewardData.AddReward(way: "Level");
+            //ReloadLevel();
         }
 
         /// <summary>上一关：关卡序号 -1（不低于 1），连败清零，重载关卡。</summary>
@@ -131,7 +155,7 @@ namespace CrowdMatch
         }
 
         /// <summary>重载当前关卡（原地重建，不重载场景）：重置计数后交由 GameController 重新初始化。</summary>
-        private void ReloadLevel()
+        public void ReloadLevel()
         {
             CleanupSpawnPool();   // 关卡重建前回收对象池：在用对象全部归还并裁回 preloadCount
             GameData.Init(true);
