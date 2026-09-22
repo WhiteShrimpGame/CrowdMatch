@@ -205,11 +205,44 @@ namespace CrowdMatch
                 Debug.LogWarning("[BoxCreator] colorIds 数量(" + colorIds.Length + ") 与 capacity(" + capacity +
                     ") 不一致，运行时按较小值处理。");
 
-            var go = new GameObject("Box_" + RowMin + "_" + ColMin);
-            go.transform.SetParent(Group.transform, false);
-            go.transform.localPosition = Vector3.zero;
+            // 2×2 且配了整体预制体 → 与运行时（PixelGroup.SpawnBox）共用同一条判定，避免两边分叉
+            bool useWhole = BoxItem.ShouldUseWholePrefab(Group, ColMin, RowMin, ColMax, RowMax);
 
-            var box = go.AddComponent<BoxItem>();
+            GameObject go;
+            BoxItem box;
+            if (useWhole)
+            {
+                go = PrefabSpawner.Instantiate(Group.boxWholePrefab, Group.transform);
+                if (go == null)
+                {
+                    Debug.LogError("[BoxCreator] boxWholePrefab 实例化失败。");
+                    Undo.CollapseUndoOperations(undoGroup);
+                    return;
+                }
+                go.name = "Box_" + RowMin + "_" + ColMin;
+
+                box = go.GetComponent<BoxItem>();
+                if (box == null)
+                {
+                    Debug.LogError("[BoxCreator] boxWholePrefab 缺少 BoxItem 组件。");
+                    Undo.CollapseUndoOperations(undoGroup);
+                    Undo.DestroyObjectImmediate(go);
+                    return;
+                }
+                box.wholePrefab = true;
+            }
+            else
+            {
+                go = new GameObject("Box_" + RowMin + "_" + ColMin);
+                go.transform.SetParent(Group.transform, false);
+                go.transform.localPosition = Vector3.zero;
+
+                box = go.AddComponent<BoxItem>();
+                box.cornerPrefab = Group.boxCornerPrefab;
+                box.edgePrefab = Group.boxEdgePrefab;
+                box.centerPrefab = Group.boxCenterPrefab;
+            }
+
             box.colMin = ColMin;
             box.rowMin = RowMin;
             box.colMax = ColMax;
@@ -218,9 +251,6 @@ namespace CrowdMatch
             box.colorIds = colorIds;
             box.jumpStartInterval = jumpStartInterval;
             box.jumpSpawnYOffset = jumpSpawnYOffset;
-            box.cornerPrefab = Group.boxCornerPrefab;
-            box.edgePrefab = Group.boxEdgePrefab;
-            box.centerPrefab = Group.boxCenterPrefab;
 
             Undo.RegisterCreatedObjectUndo(go, "创建箱子");
             Undo.CollapseUndoOperations(undoGroup);

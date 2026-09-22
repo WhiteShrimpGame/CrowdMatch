@@ -17,6 +17,9 @@ namespace CrowdMatch
         public PipeData[] pipes = new PipeData[0];
         public BoxData[] boxes = new BoxData[0];
         public ElevatorData[] elevators = new ElevatorData[0];
+        public GateData[] gates = new GateData[0];
+        public IceGroupData[] iceGroups = new IceGroupData[0];
+        public CrateData[] crates = new CrateData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -57,6 +60,12 @@ namespace CrowdMatch
 
             /// <summary>true = 问号车（开盖揭晓前隐藏真实颜色）。旧 JSON 无此字段时为 false。</summary>
             public bool question;
+
+            /// <summary>
+            /// 绳子组 id：0 = 未连接。同 id（且非 0）的车分处相邻的 N 列、按列序成链，必须全部匹配完毕才可同时出库。
+            /// 旧 JSON 无此字段时为 0（无绳子）；洗牌开启时运行时忽略该字段。
+            /// </summary>
+            public int ropeGroupId;
         }
 
         /// <summary>一段墙体：端点序列（网格坐标，x = 列 col，y = 行 row），相邻两点构成一段，每段平行于 X 或 Z 轴。</summary>
@@ -117,6 +126,59 @@ namespace CrowdMatch
         public class ElevatorGroupData
         {
             public int[] cells = new int[0];
+        }
+
+        /// <summary>
+        /// 一道倍乘门：一条轴对齐的笔直线段（起点/终点格，网格坐标 x = 列 col、y = 行 row）+ 倍数 N。
+        /// 像素寻路离开 PixelGroup 时经过这道门会裂变，1 颗变 N 颗。门格在 pixel.cells 里是 -1（门格上没有像素）。
+        /// </summary>
+        [Serializable]
+        public class GateData
+        {
+            public Vector2 start;
+            public Vector2 end;
+
+            /// <summary>倍数 N（≥1；1 = 只当通道、不倍乘）。旧 JSON 无此字段时为 2。</summary>
+            public int multiplier = 2;
+        }
+
+        /// <summary>
+        /// 一个冰组：一片**任意形状的连通格**（逐格记录，网格坐标 x = 列 col、y = 行 row）+ 冰冻计数。
+        /// 计数归 0 前，组内像素视为不暴露；每有一颗 pixel 上车（进入传送带）全局计数 -1。
+        /// 冰下面**有**像素（与门格不同），所以这些格在 pixel.cells 里是正常颜色。
+        /// </summary>
+        [Serializable]
+        public class IceGroupData
+        {
+            public Vector2[] cells = new Vector2[0];
+
+            /// <summary>冰冻计数初值。旧 JSON 无此字段时为 5。</summary>
+            public int count = 5;
+
+            /// <summary>是否暴露才开始融化（勾选后未暴露时不显示计数、不递减）。旧 JSON 无此字段时为 false。</summary>
+            public bool meltWhenExposed;
+
+            /// <summary>计数数字的偏移（锚点 = 冰组包围矩形中心）。旧 JSON 无此字段时为 (0, 2, −0.55)。</summary>
+            public Vector3 countOffset = IceItem.DefaultCountOffset;
+
+            /// <summary>计数数字的放大倍数（1 = 预制体上的原尺寸）。旧 JSON 无此字段时为 1。</summary>
+            public float fontScale = 1f;
+        }
+
+        /// <summary>
+        /// 一个木箱：**完整矩形**区域（左上 + 右下，长宽均 ≥ 2）。它**盖住**范围内的像素（不可见、不能操作），
+        /// 那些像素在 pixel.cells 里是**正常颜色** —— 与 <see cref="BoxData"/> 相反：木箱下面本来就有像素，
+        /// 既不生成、也不跳过，所以导入时**不把木箱格加进 skipCells**。
+        /// 每有一次相邻（上下左右 4 邻）像素被点击移出记 1 次（同组同时移出只算 1 次），
+        /// 计满 destroyAfterMoves 次即拆掉，底下像素恢复可见、可点。
+        /// </summary>
+        [Serializable]
+        public class CrateData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+
+            /// <summary>拆箱所需的相邻移出次数。旧 JSON 无此字段时为 3。</summary>
+            public int destroyAfterMoves = 3;
         }
     }
 

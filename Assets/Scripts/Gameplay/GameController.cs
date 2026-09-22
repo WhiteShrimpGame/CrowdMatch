@@ -133,7 +133,7 @@ namespace CrowdMatch
         {
             CloseRecord();   // 切关：先把上一关的记录文件落盘改名，本关的文件在下面另开
             CleanupLevel();
-            UIManager.Instance.gameInnerUI.RefreshGoldCount();
+
             var gm = GameManager.Instance;
             TextAsset json = gm != null ? gm.GetLevelJson(level) : null;
             if (json == null)
@@ -145,7 +145,7 @@ namespace CrowdMatch
             LevelData data = LevelLoader.Parse(json);
             if (data == null)
                 return;
-            UIManager.Instance.Init();
+
             Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
 
 #if UNITY_EDITOR
@@ -234,6 +234,15 @@ namespace CrowdMatch
             return n;
         }
 
+        /// <summary>
+        /// 统计倍乘门额外产生的像素总数（= Σ(所在格倍率 − 1)），计入胜利判定。
+        /// 与容器规划同源（PixelGroup.CollectPlanningPixels 的同一份底座），口径不会发散。
+        /// </summary>
+        private int CountGateExtraPixels()
+        {
+            return pixelGroup != null ? pixelGroup.CountGateExtraPixels() : 0;
+        }
+
         /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
         public void CheckWin()
         {
@@ -251,9 +260,10 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排）。
-        /// 判定在「静止且死锁」时成立：传送带满、无小车正在出库/补位/已开启匹配尚未抵达前排、
-        /// 无像素正在上车，且带上所有像素都没有同色可匹配容器。触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
+        /// 事件驱动的失败检测入口：仅在关键事件点调用（小人进入传送带 / 完成上车 / 未满小车抵达前排 /
+        /// 网格内寻路全部结束）。判定在「静止且死锁」时成立：传送带满、无像素还在网格内寻路、
+        /// 无小车正在出库/补位/已开启匹配尚未抵达前排、无像素正在上车，且带上所有像素都没有同色可匹配容器。
+        /// 触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
         /// </summary>
         public void TryCheckFail()
         {
@@ -280,6 +290,13 @@ namespace CrowdMatch
             if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
                 return false;   // 传送带未满
             if (containerGroup == null)
+                return false;
+
+            // 静止门槛：有像素还在网格内寻路 → 还有进度，不判失败。
+            // 关键原因是倍乘门：网格里没走完的像素可能还没穿过门（分身尚未生成），
+            // 此时判失败会让复活把它们直接收走，实际送出的像素数就与 TotalPixelCount 对不上。
+            // 最后一颗像素走出网格时 CrowdBufferZone 会回调 OnGridPathfindingFinished 补一次检测。
+            if (crowdBuffer != null && crowdBuffer.HasGridPathfindingPixels)
                 return false;
 
             // 静止门槛：有车正在出库/补位/已开启匹配尚未抵达前排 → 还有进度，不判失败
@@ -340,6 +357,13 @@ namespace CrowdMatch
 
             _overflowClickCount = 0;   // 复活清空堆积点击计数
 
+            // 复活会重排缓冲区、把溢出像素直接送上车：先把场上的生气表情全收掉。
+            // 跟随模式下表情是像素的子物体，不收就会跟着像素一起进车（乘客头上顶着生气脸）；
+            // 网格上残留的「点击受阻」生气脸在复活之后也没有意义了。
+            var emoji = EmojiManager.Instance;
+            if (emoji != null)
+                emoji.ClearAngryEmojis();
+
             // 1. 收集溢出像素：传送带溢出（保留 reviveKeepBeltCount 个）+ 缓冲区全部（含未上传送带的）
             var overflow = new List<PixelItem>();
             overflow.AddRange(conveyorZone.DrainBeltKeep(reviveKeepBeltCount));
@@ -378,7 +402,10 @@ namespace CrowdMatch
             gatheredItems.Clear();
 
             if (conveyorZone != null)
+            {
                 conveyorZone.ClearBelt();
+                conveyorZone.ResetSpeed();   // 进新关：传送带回到常规速度
+            }
 
             if (crowdBuffer != null)
                 crowdBuffer.ResetAll();
@@ -485,6 +512,8 @@ namespace CrowdMatch
 
         private void OnDestroy()
         {
+            if (crowdBuffer != null)
+                crowdBuffer.OnGridPathfindingFinished -= TryCheckFail;
             CloseRecord();
         }
 
@@ -623,6 +652,32 @@ namespace CrowdMatch
                 return;
             }
 
+            // 被木箱盖住的 Pixel：**无任何反馈**直接返回 —— 那里看起来本来就没有像素，点了就该像没点到。
+            // 碰撞体是保留的（见 PixelItem.SetCovered）：关掉的话射线会穿过去打中木箱更后面的像素，
+            // 那才是真的错。整块木箱矩形都算障碍，所以木箱格上的这种像素不会被别组带走。
+            //
+            // 这条守卫在冰冻之前：木箱是盖在最上面的，一个格子同时被冰和木箱占住时以木箱为准
+            // （否则会打出冰块那套「有反馈但不摆表情」的表现，而木箱的要求是完全没有反馈）。
+            if (item.IsCovered)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但被木箱盖住，忽略点击（无反馈）");
+                return;
+            }
+
+            // 被冰组冻住的 Pixel 不可点击：冰冻计数归 0 前，组内像素「视为不暴露」。
+            // HandleClick 不看 IsExposed（能否移出由 CanReachFront 判定），所以真正的门槛在这里。
+            // 反馈走同一个 PlayBlockedFeedback：音效 / 震动 / 整组阻挡位移都有，
+            // 但**不播愤怒表情**（冰块下不摆表情）。
+            if (item.IsFrozen)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但被冰组冻住（计数未归 0），播放阻挡反馈（不摆表情）");
+                // 抖的是「冰块内与它相连的同色像素」整组，不含冰块外那部分（见 FloodFrozenSameColor）
+                PlayBlockedFeedback(FloodFrozenSameColor(item), item, playAngryEmoji: false);
+                return;
+            }
+
             if (debugClickLog)
                 Debug.Log("[Click] 命中 " + item.name + " 颜色 " + item.colorId + " @(" + item.gridX + "," + item.gridZ +
                     ") 已暴露=" + item.IsExposed + "，进入 ResolveMatch");
@@ -692,10 +747,15 @@ namespace CrowdMatch
         /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
         /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
-        /// 并按概率在组内随机一个像素上播生气表情（是否播由表情管理器的概率与全局 CD 决定）。
+        /// 并在**被点的那一个像素**上播生气表情（点谁谁生气；必出，同一像素上一张还没播完则忽略——判定在表情管理器里）。
         /// 回位锚点取网格坐标而非当前 localPosition，避免晃动途中被重复点击导致逐次向前漂移。
         /// </summary>
-        private void PlayBlockedFeedback(List<PixelItem> blocked)
+        /// <summary>
+        /// 阻挡反馈：音效 + 震动 + （可选）愤怒表情 + 整组朝首排方向推一下再回位。
+        /// <paramref name="playAngryEmoji"/> = false 时不播愤怒表情 —— 冰块下的点击用这个，
+        /// 其余（被别的像素堵住）保持默认。
+        /// </summary>
+        private void PlayBlockedFeedback(List<PixelItem> blocked, PixelItem clicked, bool playAngryEmoji = true)
         {
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("TapBlocked");
@@ -703,8 +763,8 @@ namespace CrowdMatch
                 GameManager.Instance.TriggerVibrate(1);
 
             var emoji = EmojiManager.Instance;
-            if (emoji != null)
-                emoji.TryPlayAngryEmoji(blocked);
+            if (emoji != null && playAngryEmoji)
+                emoji.TryPlayAngryEmoji(clicked);   // 点谁谁生气：必出、无全局 CD
 
             float distance = Mathf.Max(0f, blockedNudgeDistance);
             float duration = Mathf.Max(0.0001f, blockedNudgeDuration);
@@ -742,7 +802,7 @@ namespace CrowdMatch
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
                         "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
-                PlayBlockedFeedback(matched);
+                PlayBlockedFeedback(matched, start);
                 return;
             }
 
@@ -775,6 +835,10 @@ namespace CrowdMatch
                 return a.gridX.CompareTo(b.gridX);
             });
 
+            // 冰冻：先记下「点击前」各冰组是否已暴露。「暴露才开始融化」要拿它判断，
+            // 所以必须在这个点击的任何副作用之前（开箱 / 升降台推进也会各自刷新暴露状态）。
+            pixelGroup.CaptureIceExposedSnapshot();
+
             // 从网格移除（匹配格先置空，并关闭其暴露状态与点击碰撞体，开始走动画）
             // 同一次点击移出的整组共享一个点击序号，用于传送带入口的「插队」判定
             int clickSeq = ++_clickSeq;
@@ -800,11 +864,37 @@ namespace CrowdMatch
             {
                 for (int i = 0; i < matched.Count; i++)
                 {
-                    RecordBall(matched[i].colorId);
-                    Destroy(matched[i].gameObject);
+                    var item = matched[i];
+
+                    // 倍乘门：这条路径**不经过缓冲区**，裂变（CrowdBufferZone.SpawnGateClone）永远不触发，
+                    // 所以按「所在格倍率」补记 N 份——否则记录条数比 TotalPixelCount 少
+                    // （后者含 CountGateExtraPixels），文件名里的 total 与 rec 就对不上了。
+                    // 口径与 PixelGroup.CollectPlanningSources 一致：查的是**像素所在格**，
+                    // 区域内的格按所属各门连乘（嵌套门），区域外为 1。
+                    // 顺序上把 N 份紧挨着写：真实裂变也是本体先出门格、分身随后一个个离开。
+                    int mult = pixelGroup.GateMultiplierAt(item.gridX, item.gridZ);
+                    for (int k = 0; k < mult; k++)
+                        RecordBall(item.colorId);
+
+                    Destroy(item.gameObject);
                 }
                 return;
             }
+
+            // 一次成功的「点击移出」= 冰的计数消耗一次（按点击算，不按像素数）。
+            // 放在记录模式的提前返回之后：记录模式只记取出顺序、不玩冰的消耗。
+            pixelGroup.NotifyClickMovedOut();
+
+            // 木箱：与本次移出像素上下左右（4 邻）相接的木箱各计一次（同组同时移出只算一次）；
+            // 计满的当场拆掉，底下像素恢复可见。返回 true = 有木箱被拆 → 整体描边要重画
+            // （上面的 RefreshFrame 在这之前，那时木箱还盖着）。
+            if (pixelGroup.NotifyPixelsMovedOut(matched))
+                RefreshFrame();
+
+            // 网格已被点空（本项目内的最后一颗都走了）：传送带逐渐加速，把带上的存量尽快送进容器。
+            // 本关内不再回退；复位只发生在进下一关 / 重载关卡的 CleanupLevel。
+            if (conveyorZone != null && pixelGroup.IsGridEmpty())
+                conveyorZone.NotifyGridEmptied();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
@@ -841,6 +931,56 @@ namespace CrowdMatch
                     // 未揭晓问号 Pixel 断开连通：不参与移除、不扩散
                     if (nb.isQuestion && !nb.revealed)
                         continue;
+                    // 被冰冻住的 Pixel 同样断开连通：不参与移除、不扩散。
+                    // 于是点冰旁边的同色像素时，冰里的像素不会被一起带走——必须等冰化开。
+                    if (nb.IsFrozen)
+                        continue;
+                    // 被木箱盖住的 Pixel 也断开连通：不参与移除、不扩散。
+                    // 这条守卫是必须的 —— 木箱格虽然算障碍，但 FloodFill 根本不看 IsBlocked
+                    // （同色相邻就连上），漏了它就会点木箱旁边的同色像素时把木箱里的像素也一起移出去。
+                    if (nb.IsCovered)
+                        continue;
+                    if (visited.Add(nb))
+                        queue.Enqueue(nb);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 冰冻反馈专用的求组：从被点的像素出发，**只在冻住的格里**扩散同色像素 ——
+        /// 也就是「冰块内相连的同色像素」整组，**不含**冰块外那部分同色像素。
+        ///
+        /// 与 <see cref="FloodFill"/> 只差一个条件、方向正好相反：那边在冻住的格处**断开**，
+        /// 这边只在冻住的格里**连通**。两个不能混用 —— 用错就会把冰块外的同色一起抖起来。
+        /// </summary>
+        private List<PixelItem> FloodFrozenSameColor(PixelItem start)
+        {
+            var result = new List<PixelItem>();
+            if (start == null)
+                return result;
+
+            var visited = new HashSet<PixelItem>();
+            var queue = new Queue<PixelItem>();
+
+            queue.Enqueue(start);
+            visited.Add(start);
+            int color = start.colorId;
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                result.Add(cur);
+
+                foreach (var nb in GetNeighbors(cur))
+                {
+                    if (nb == null || nb.colorId != color)
+                        continue;
+                    if (nb.isQuestion && !nb.revealed)
+                        continue;   // 与 FloodFill 一致：未揭晓问号断开连通
+                    if (!nb.IsFrozen)
+                        continue;   // ← 只穿冻住的格（FloodFill 是「不穿」）
                     if (visited.Add(nb))
                         queue.Enqueue(nb);
                 }

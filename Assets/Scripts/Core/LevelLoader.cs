@@ -53,17 +53,20 @@ namespace CrowdMatch
                 return;
             if (pixelGroup != null)
             {
-                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, colorConfig);
+                ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, data.gates, colorConfig);
                 ApplyWalls(pixelGroup, data.walls);
                 ApplyPipes(pixelGroup, data.pipes);
+                ApplyGates(pixelGroup, data.gates);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
                 ApplyElevators(pixelGroup, data.elevators, colorConfig);
+                ApplyIces(pixelGroup, data.iceGroups);   // 放最后：箱子 / 升降台的像素也要在，冰才冻得住它们
+                ApplyCrates(pixelGroup, data.crates);    // 木箱同理：它盖的像素必须是已经存在的
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
         }
 
-        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, ColorConfig config)
+        private static void ApplyPixel(PixelGroup pg, LevelData.PixelData d, LevelData.WallData[] walls, LevelData.PipeData[] pipes, LevelData.BoxData[] boxes, LevelData.GateData[] gates, ColorConfig config)
         {
             int columns = Mathf.Max(1, d.columns);
             int totalRows = Mathf.Max(0, d.rows) + Mathf.Max(0, d.tailRows);
@@ -115,6 +118,16 @@ namespace CrowdMatch
                     for (int r = rmin; r <= rmax; r++)
                         for (int c = cmin; c <= cmax; c++)
                             skipCells.Add(new Vector2Int(c, r));
+                }
+            }
+            if (gates != null)
+            {
+                foreach (var g in gates)
+                {
+                    if (g == null)
+                        continue;
+                    // 门格上不放像素（创建门时那些像素已被清掉），导入时同样跳过
+                    GateItem.CollectCells(g.start, g.end, skipCells);
                 }
             }
             for (int r = 0; r < totalRows; r++)
@@ -185,6 +198,90 @@ namespace CrowdMatch
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
         }
 
+        /// <summary>清空并重建 PixelGroup 下的倍乘门（线段不合法的门被跳过）。</summary>
+        private static void ApplyGates(PixelGroup pg, LevelData.GateData[] gates)
+        {
+            pg.ClearGates();
+
+            if (gates == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var g in gates)
+            {
+                if (g == null)
+                    continue;
+                if (pg.SpawnGate(g.start, g.end, g.multiplier) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 道倍乘门。");
+        }
+
+        /// <summary>
+        /// 清空并重建 PixelGroup 下的冰组（没有成员格的冰组被跳过）。
+        /// **不往 ApplyPixel 的 skipCells 里加冰格** —— 冰下面本来就要有像素。
+        /// </summary>
+        private static void ApplyIces(PixelGroup pg, LevelData.IceGroupData[] iceGroups)
+        {
+            pg.ClearIces();
+
+            if (iceGroups == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var g in iceGroups)
+            {
+                if (g == null || g.cells == null || g.cells.Length == 0)
+                    continue;
+                if (pg.SpawnIce(g) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个冰组。");
+        }
+
+        /// <summary>
+        /// 清空并重建 PixelGroup 下的木箱（区域越界或长宽不足 2 的会被警告）。
+        /// **不往 ApplyPixel 的 skipCells 里加木箱格** —— 与冰同理：木箱盖住的像素本来就要在。
+        /// </summary>
+        private static void ApplyCrates(PixelGroup pg, LevelData.CrateData[] crates)
+        {
+            pg.ClearCrates();
+
+            if (crates == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var c in crates)
+            {
+                if (c == null)
+                    continue;
+                if (pg.SpawnCrate(c) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();   // 末尾会 RefreshCrateState → 关掉被盖像素的渲染器
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个木箱。");
+        }
+
         /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>
         private static void ApplyBoxes(PixelGroup pg, LevelData.BoxData[] boxes, ColorConfig config)
         {
@@ -253,7 +350,7 @@ namespace CrowdMatch
                         Debug.LogWarning("[LevelLoader] 容器越界被忽略：x=" + it.x + " y=" + it.y);
                         continue;
                     }
-                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question);
+                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question, it.ropeGroupId);
                 }
             }
 

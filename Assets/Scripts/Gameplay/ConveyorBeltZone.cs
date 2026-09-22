@@ -293,11 +293,7 @@ namespace CrowdMatch
             if (GameManager.Instance != null)
                 GameManager.Instance.TriggerVibrate(0);
 
-            // 上传送带：收掉该像素的生气表情（跟随模式下它是像素的子物体，不主动收会跟着一起上带）
-            var emoji = EmojiManager.Instance;
-            if (emoji != null)
-                emoji.RemoveAngryEmoji(pixel);
-
+            // 生气表情**保留**：缓冲区 → 传送带不收，直到「上车」才移除（见 OnLeave）。
             // 插队判定：本像素上车时，缓冲区里是否还有比它更早点击、且颜色不同的像素在等
             CheckQueueJump(pixel);
 
@@ -336,8 +332,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 插队判定：本像素刚上带，若缓冲区里还有「比它更早被点击、且颜色不同」的像素仍在排队（后点的先上了带），
-        /// 就把等待队列与这个上带像素交给表情管理器——按 概率系数 × 人数 决定是否在其中随机一个上播生气表情。
-        /// 概率与 CD 都在管理器里（与「点击阻挡」复用同一个 emoji，但各自独立 CD）。
+        /// 就把等待队列与这个上带像素交给表情管理器，由它按各自的概率 / 门槛 / CD 决定是否触发：
+        /// 生气表情落在**被插队者**中随机一个头上、开心表情落在**插队者（本像素）**头上，两者相互独立（可能同帧一起出现）。
         /// </summary>
         private void CheckQueueJump(PixelItem boardingPixel)
         {
@@ -350,8 +346,11 @@ namespace CrowdMatch
                 return;
 
             var emoji = EmojiManager.Instance;
-            if (emoji != null)
-                emoji.TryPlayAngryEmojiForJumped(_waitingBuffer, boardingPixel);
+            if (emoji == null)
+                return;
+
+            emoji.TryPlayAngryEmojiForJumped(_waitingBuffer, boardingPixel);
+            emoji.TryPlayHappyEmojiForJumped(_waitingBuffer, boardingPixel);
         }
 
         /// <summary>上车收敛：localPosition 平滑到槽位 0 点的途中，前半段 localRotation 归 0、后半段 localEulerY 匀速转至 -90。每个小球一条协程，互不阻塞。</summary>
@@ -467,10 +466,14 @@ namespace CrowdMatch
             if (pixel == null)
                 return;
 
-            // 匹配上车：立刻收掉犯困表情——跟随模式下它是像素的子物体，不主动收会跟着像素一起进车
+            // 上车：收掉犯困表情与生气表情——跟随模式下它们是像素的子物体，不主动收会跟着像素一起进车。
+            // 生气表情在缓冲区 → 传送带这一段是**保留**的（只在这里、也就是真正上车时才移除）。
             var emoji = EmojiManager.Instance;
             if (emoji != null)
+            {
                 emoji.RemoveSleepEmoji(pixel);
+                emoji.RemoveAngryEmoji(pixel);
+            }
 
             var gc = GameController.Instance;
             if (gc != null && gc.recordMode)
@@ -575,6 +578,23 @@ namespace CrowdMatch
                 belt.ClearSlot(i);
                 Destroy(pixel.gameObject);
             }
+        }
+
+        /// <summary>
+        /// 网格内像素已全部被点走：传送带开始逐渐加速到自己的上限（幂等）。
+        /// 触发点在「点击移出」之后，此时带上的存量还在绕圈等匹配，加速纯粹是为了收尾快一些。
+        /// </summary>
+        public void NotifyGridEmptied()
+        {
+            if (belt != null)
+                belt.BeginClearedSpeedUp();
+        }
+
+        /// <summary>回到常规速度（进入下一关 / 重载关卡时调用）。</summary>
+        public void ResetSpeed()
+        {
+            if (belt != null)
+                belt.ResetSpeed();
         }
 
         /// <summary>

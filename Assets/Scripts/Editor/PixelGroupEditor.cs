@@ -62,12 +62,25 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "「统计颜色总数」输出当前网格每种颜色的总数，并检查是否被 3 整除（不能整除则显示余数）。",
+                "「统计颜色总数」输出当前网格每种颜色的总数（含管道计划生成与倍乘门额外产生的像素），" +
+                "并检查是否被 3 整除（不能整除则显示余数）。",
                 MessageType.Info);
 
             if (GUILayout.Button("统计颜色总数 (Debug.Log)"))
             {
+                group.RebuildGrid();   // 保证倍乘门掩码/倍率是最新的，统计结果才含倍乘
                 LogColorCounts(group);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
+                "「校验倍乘门」检查每道倍乘门是否围出了闭合区域、门格是否重叠，并报出倍乘带来的额外像素数。\n" +
+                "创建门时**不**检查闭合（按设计），只有这里与「生成 Containers」会检查，不通过会弹窗。",
+                MessageType.Info);
+
+            if (GUILayout.Button("校验倍乘门"))
+            {
+                ValidateGates(group);
             }
 
             EditorGUILayout.Space();
@@ -613,31 +626,39 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>先统计总数是否被 3 整除，再统计每种颜色的总数（实际像素 + 管道计划生成）及各自是否被 3 整除（不能整除则显示余数）。</summary>
+        /// <summary>
+        /// 先统计总数是否被 3 整除，再统计每种颜色的总数（实际像素 + 管道计划生成 + 倍乘门额外产生）
+        /// 及各自是否被 3 整除（不能整除则显示余数）。
+        /// 倍乘部分按每颗像素**所在格**的倍率（所属各门倍数之积）计入，与容器规划同一份口径。
+        /// </summary>
         private void LogColorCounts(PixelGroup group)
         {
-            // 实际像素颜色
+            // 实际像素颜色（倍乘门区域内按倍率多算）
             var actual = new Dictionary<int, int>();
             foreach (var it in group.GetComponentsInChildren<PixelItem>())
             {
                 if (it == null) continue;
+                int mult = group.GateMultiplierAt(it.gridX, it.gridZ);
                 actual.TryGetValue(it.colorId, out int c);
-                actual[it.colorId] = c + 1;
+                actual[it.colorId] = c + Mathf.Max(1, mult);
             }
 
-            // 管道计划生成的颜色数量（每波颜色 × 轨道格数）
+            // 管道计划生成的颜色数量（每波颜色 × 轨道格数；轨道格各自按所在格倍率计入）
             var planned = new Dictionary<int, int>();
             foreach (var pipe in group.GetComponentsInChildren<PipeItem>())
             {
                 if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null)
                     continue;
-                int track = PipeItem.CountTrackCells(pipe.points, group.columns, group.TotalRows);
-                if (track <= 0)
+                var trackCells = pipe.TrackCells();
+                if (trackCells.Count == 0)
                     continue;
+                int weighted = 0;
+                for (int k = 0; k < trackCells.Count; k++)
+                    weighted += Mathf.Max(1, group.GateMultiplierAt(trackCells[k].x, trackCells[k].y));
                 foreach (int color in pipe.colors)
                 {
                     planned.TryGetValue(color, out int n);
-                    planned[color] = n + track;
+                    planned[color] = n + weighted;
                 }
             }
 
@@ -657,7 +678,7 @@ namespace CrowdMatch
             foreach (var kv in planned)
                 grandTotal += kv.Value;
             int grandRem = grandTotal % 3;
-            Debug.Log("[PixelGroup] 总数 " + grandTotal + " 个，" +
+            Debug.Log("[PixelGroup] 总数 " + grandTotal + " 个（含管道计划与倍乘门额外像素），" +
                 (grandRem == 0 ? "✓ 被 3 整除" : "✗ 余 " + grandRem));
 
             var config = ColorConfigLocator.Find();
@@ -687,6 +708,43 @@ namespace CrowdMatch
 
             Debug.Log("[PixelGroup] 统计完成：共 " + ids.Count + " 种颜色，" +
                 (notDivisible == 0 ? "全部能被 3 整除。" : notDivisible + " 种不能被 3 整除。"));
+        }
+
+        /// <summary>
+        /// 校验倍乘门：闭合 / 门格重叠 / 数量口径。通过则日志 + 弹窗报数，不通过则弹窗指出原因。
+        /// 这是「创建门时不检查闭合」之外的那次检查（另一次在「生成 Containers」开头）。
+        /// </summary>
+        private void ValidateGates(PixelGroup group)
+        {
+            group.RebuildGrid();   // 掩码与区域必须先刷新
+
+            if (group.gates == null || group.gates.Count == 0)
+            {
+                EditorUtility.DisplayDialog("校验倍乘门", "当前 PixelGroup 下没有倍乘门。", "确定");
+                return;
+            }
+
+            string err = group.ValidateGates();
+            if (err != null)
+            {
+                Debug.LogError("[PixelGroup] 倍乘门校验失败：" + err);
+                EditorUtility.DisplayDialog("校验倍乘门", "校验失败：\n" + err, "确定");
+                return;
+            }
+
+            int extra = group.CountGateExtraPixels();
+            int withGate = group.CollectPlanningPixels().Count;
+            int baseCount = withGate - extra;
+
+            string msg = "校验通过。\n\n" +
+                "倍乘门 " + group.gates.Count + " 道\n" +
+                "基础像素 " + baseCount + " 个\n" +
+                "倍乘额外 +" + extra + " 个\n" +
+                "合计 " + withGate + " 个（容器总容量应与此一致）";
+
+            Debug.Log("[PixelGroup] 倍乘门校验通过：门 " + group.gates.Count + " 道，基础 " + baseCount +
+                "，倍乘额外 " + extra + "，合计 " + withGate + "。");
+            EditorUtility.DisplayDialog("校验倍乘门", msg, "确定");
         }
 
         // ===== 颜色导入 / 导出 =====
