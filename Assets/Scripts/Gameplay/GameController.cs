@@ -80,6 +80,10 @@ namespace CrowdMatch
         [Tooltip("开启后打印每次点击的判定结果（提取中忽略 / 射线未命中 / 无点击体 / 已移出网格 / 无法连通首排 / 命中成功），用于定位「起身时点击不到」")]
         public bool debugClickLog = true;
 
+        [Tooltip("开启后打印每次失败判定**没判失败**的结果（检查点 / 被哪条门禁挡下 / 传送带占用），" +
+                 "用于定位「该判失败却不判、关卡卡住」")]
+        public bool debugFailLog = true;
+
         /// <summary>处于聚集点中的单位</summary>
         public List<PixelItem> gatheredItems = new List<PixelItem>();
 
@@ -88,6 +92,9 @@ namespace CrowdMatch
         private string _recordFileBase;   // 记录文件名前缀（不含 _rec<N> 与扩展名）
         private int _recordedCount;       // 当前记录文件已写入的像素数
         private bool _transitioning;
+
+        /// <summary>上一条失败判定诊断行：内容完全相同时不重复打印（复活期间会有几十次上车回调，行内容一模一样）。</summary>
+        private string _lastFailCheckLog;
 
         /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
         private int _overflowClickCount;
@@ -115,6 +122,11 @@ namespace CrowdMatch
                 frameItem = FindObjectOfType<FrameItem>();
 
             _clickMask = LayerMask.GetMask("Click");
+
+            // 网格内寻路全部结束时的补一次失败检测（网格里还有像素时 IsFail 会跳过，见 IsFail 的静止门槛）
+            // 用独立的方法而不是 `+= TryCheckFail`：TryCheckFail 带检查点名参数，且 OnDestroy 的 -= 必须是同一个委托
+            if (crowdBuffer != null)
+                crowdBuffer.OnGridPathfindingFinished += OnGridPathfindingFinished;
 
             Init();
         }
@@ -264,56 +276,102 @@ namespace CrowdMatch
         /// 网格内寻路全部结束）。判定在「静止且死锁」时成立：传送带满、无像素还在网格内寻路、
         /// 无小车正在出库/补位/已开启匹配尚未抵达前排、无像素正在上车，且带上所有像素都没有同色可匹配容器。
         /// 触发后等待 1.5s 复活（保留部分像素在带、其余匹配后排车）。
+        ///
+        /// 未判失败时按 <see cref="debugFailLog"/> 打印诊断：**检查点 / 被哪条门禁挡下 / 传送带占用**
+        /// ——这是定位「该判失败却不判」的主要手段（门禁编号与 <c>Docs/FailDetectionReview.md</c> §3 一致）。
         /// </summary>
-        public void TryCheckFail()
+        /// <param name="checkpoint">调用方的检查点名（见 <see cref="FailCheckpoint"/> 与各调用点），只用于日志。</param>
+        public void TryCheckFail(string checkpoint = FailCheckpoint.Unspecified)
         {
             if (_transitioning)
+            {
+                LogFailCheck(checkpoint, "已锁定 _transitioning（胜负过渡中）");
                 return;
+            }
             if (recordMode)
-                return;   // Record 模式不判失败（容器不参与吸收）
-            if (IsFail())
+            {
+                LogFailCheck(checkpoint, "Record 模式不判失败（容器不参与吸收）");
+                return;
+            }
+            if (IsFail(out string reason))
             {
                 _transitioning = true;
+                _lastFailCheckLog = null;   // 真判了失败：清掉去重记忆，复活后的诊断不被旧行压掉
                 //GameState.GameFail();
-                UIManager.Instance.showRevivePanel(true);
                 //Invoke(nameof(DoRevive), 1.5f);
+                UIManager.Instance.showRevivePanel(true);
+                return;
             }
+            LogFailCheck(checkpoint, reason);
         }
 
-        /// <summary>失败判定：传送带满 + 无出库/补位/上车进行中 + 带满且每个槽位像素都没有同色可匹配容器。</summary>
-        private bool IsFail()
+        /// <summary>
+        /// 失败判定：传送带满 + 无出库/补位/上车进行中 + 带满且每个槽位像素都没有同色可匹配容器。
+        /// <paramref name="reason"/> 为「判定为非失败」的原因（含挡下它的门禁编号），判定为失败时为 null。
+        /// </summary>
+        private bool IsFail(out string reason)
         {
+            // 门禁编号与 `Docs/FailDetectionReview.md` §3 一一对应，便于日志与文档互查
+            reason = null;
+
             if (conveyorZone == null || conveyorZone.belt == null)
+            {
+                reason = "门禁1 没有传送带（conveyorZone / belt 为空）";
                 return false;
+            }
             if (conveyorZone.TotalSlots <= 0)
+            {
+                reason = "门禁2 传送带容量为 0";
                 return false;
+            }
             if (conveyorZone.OccupiedSlots < conveyorZone.TotalSlots)
+            {
+                reason = "门禁3 传送带未满（还有空槽可进像素）";
                 return false;   // 传送带未满
+            }
             if (containerGroup == null)
+            {
+                reason = "门禁4 没有容器组";
                 return false;
+            }
 
             // 静止门槛：有像素还在网格内寻路 → 还有进度，不判失败。
             // 关键原因是倍乘门：网格里没走完的像素可能还没穿过门（分身尚未生成），
             // 此时判失败会让复活把它们直接收走，实际送出的像素数就与 TotalPixelCount 对不上。
             // 最后一颗像素走出网格时 CrowdBufferZone 会回调 OnGridPathfindingFinished 补一次检测。
             if (crowdBuffer != null && crowdBuffer.HasGridPathfindingPixels)
+            {
+                reason = "门禁5 网格内还有像素在寻路（倍乘门分身可能尚未生成）";
                 return false;
+            }
 
             // 静止门槛：有车正在出库/补位/已开启匹配尚未抵达前排 → 还有进度，不判失败
             if (containerGroup.HasPendingFrontTransition())
+            {
+                reason = "门禁6 有车正在补位 / 后排车已开盖且前方已放行（即将抵达前排）";
                 return false;
+            }
 
             // 静止门槛：有像素正在上车（jump 或回退 lerp）→ 还有进度，不判失败
             if (containerGroup.consumingCount > 0)
+            {
+                reason = "门禁7 有 " + containerGroup.consumingCount + " 个像素正在上车";
                 return false;
+            }
 
             // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
             if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
+            {
+                reason = "门禁8 有 " + pixelGroup.releasingBoxesCount + " 个木箱正在释放";
                 return false;
+            }
 
             // 静止门槛：有升降台正在推进（开门/升起未完成）→ 还有进度，不判失败
             if (pixelGroup != null && pixelGroup.advancingElevatorsCount > 0)
+            {
+                reason = "门禁9 有 " + pixelGroup.advancingElevatorsCount + " 个升降台正在推进";
                 return false;
+            }
 
             var belt = conveyorZone.belt;
             for (int i = 0; i < belt.slotCount; i++)
@@ -322,9 +380,60 @@ namespace CrowdMatch
                 if (pixel == null)
                     continue;
                 if (containerGroup.HasMatchableContainerOfColor(pixel.colorId))
+                {
+                    reason = "门禁10 带上槽位 " + i + " 的像素（colorId=" + pixel.colorId + "）有同色可匹配容器";
                     return false;   // 至少一个可匹配 → 未失败
+                }
             }
+
             return true;
+        }
+
+        /// <summary>
+        /// 失败判定「没判失败」时的诊断日志：一行内给出**检查点 / 被哪条门禁挡下 / 传送带占用**。
+        /// 由 <see cref="debugFailLog"/> 开关控制；与上一条完全相同的行不重复打印。
+        /// </summary>
+        private void LogFailCheck(string checkpoint, string reason)
+        {
+            if (!debugFailLog)
+                return;
+
+            string belt = conveyorZone != null
+                ? conveyorZone.OccupiedSlots + "/" + conveyorZone.TotalSlots
+                : "无传送带";
+
+            string line = "[失败判定] 检查点=" + checkpoint + " ｜ 传送带=" + belt + " ｜ 未判失败：" + reason;
+
+            if (line == _lastFailCheckLog)
+                return;
+            _lastFailCheckLog = line;
+
+            Debug.Log(line);
+        }
+
+        /// <summary>检查点名常量：只用于失败判定日志，便于与 <c>Docs/FailDetectionReview.md</c> §2 的四条调用点对照。</summary>
+        public static class FailCheckpoint
+        {
+            /// <summary>检查点 1：像素上带（ConveyorBeltZone.OnSlotPassedEntry）。</summary>
+            public const string SlotEntered = "像素上带";
+
+            /// <summary>检查点 2：单个像素上车落定（ContainerGroup.OnPixelConsumed）。</summary>
+            public const string PixelConsumed = "上车落定";
+
+            /// <summary>检查点 3：补位车抵达前排（ContainerGroup.OnCarArrivedFront）。</summary>
+            public const string CarArrivedFront = "补位车抵达前排";
+
+            /// <summary>检查点 4：网格内寻路的最后一颗像素走出网格（CrowdBufferZone 事件）。</summary>
+            public const string GridPathfindingFinished = "网格寻路排空";
+
+            /// <summary>调用方未标注检查点名。</summary>
+            public const string Unspecified = "未标注";
+        }
+
+        /// <summary>检查点 4 的处理器：订阅 / 退订用同一个具名方法，保证 <c>-=</c> 能解绑。</summary>
+        private void OnGridPathfindingFinished()
+        {
+            TryCheckFail(FailCheckpoint.GridPathfindingFinished);
         }
 
         private void DoGameWin()
@@ -513,7 +622,7 @@ namespace CrowdMatch
         private void OnDestroy()
         {
             if (crowdBuffer != null)
-                crowdBuffer.OnGridPathfindingFinished -= TryCheckFail;
+                crowdBuffer.OnGridPathfindingFinished -= OnGridPathfindingFinished;
             CloseRecord();
         }
 
@@ -688,7 +797,6 @@ namespace CrowdMatch
                     (conveyorZone != null ? conveyorZone.TotalSlots : 0) +
                     " count=" + _overflowClickCount);
         }
-
 
         /// <summary>
         /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。
