@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.44300634, g: 0.4921952, b: 0.5719241, a: 1}
+  m_IndirectSpecularColor: {r: 0.44300658, g: 0.4921953, b: 0.57192475, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -1226,9 +1226,9 @@ MonoBehaviour:
   boxWholePrefab: {fileID: 6898552183250439212, guid: b5f5dc90e80d5794bacd2ae72e13020a, type: 3}
   elevatorPrefab: {fileID: 2551135059901201391, guid: 9f53810ad24b66c4581e815e9e9ef7ac, type: 3}
   icePrefab: {fileID: 4587829874173678951, guid: fed2247fa3deff24c809041741cac32f, type: 3}
-  crateCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
-  crateEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
-  crateCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  crateCornerPrefab: {fileID: 4488746321237894919, guid: 54c30786f5f71274f96da6bb4f9cbf89, type: 3}
+  crateEdgePrefab: {fileID: 3233401219397590539, guid: dfbe1c5c9ef64304c8aa91613cc23c62, type: 3}
+  crateCenterPrefab: {fileID: 2196358846936830575, guid: 86b770999f3279a43907c10271bf2c2a, type: 3}
   crateSealPrefab: {fileID: 6609499673052173810, guid: a240a7d387941de418733934c8514e5f, type: 3}
   crateNailPrefab: {fileID: 3341524908737008507, guid: d656daae28cf81642844a8196fd7a284, type: 3}
   crateSealInset: {x: 0.3, y: 0.3}
