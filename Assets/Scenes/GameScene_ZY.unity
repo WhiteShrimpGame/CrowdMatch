@@ -609,6 +609,8 @@ MonoBehaviour:
   path: {fileID: 1785929099}
   cycleTime: 6
   speed: 1.5
+  clearedSpeedMultiplier: 2.5
+  clearedAccelDuration: 3
   slotCount: 30
   cellPrefab: {fileID: 2575043199601490989, guid: 32373529656aa3345b2cc74fbe01d607, type: 3}
   cellYOffset: 0.12
@@ -913,7 +915,12 @@ MonoBehaviour:
   boxCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  boxWholePrefab: {fileID: 0}
   elevatorPrefab: {fileID: 2551135059901201391, guid: 9f53810ad24b66c4581e815e9e9ef7ac, type: 3}
+  icePrefab: {fileID: 0}
+  crateCornerPrefab: {fileID: 0}
+  crateEdgePrefab: {fileID: 0}
+  crateCenterPrefab: {fileID: 0}
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
 --- !u!4 &882082745
 Transform:
@@ -1235,7 +1242,7 @@ MonoBehaviour:
   rows: 40
   xSpacing: 2
   zSpacing: 1.2
-  shuffleContainers: 0
+  shuffleContainers: 1
   pixelGroup: {fileID: 882082744}
   minCapacity: 3
   maxCapacity: 3
@@ -1783,7 +1790,7 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: de4918b0563b09647964c0fd7a48e729, type: 3}
+  - {fileID: 4900000, guid: 81e6d6b747ebb0f43945851ff5c4022e, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
