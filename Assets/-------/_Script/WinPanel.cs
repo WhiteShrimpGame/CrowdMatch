@@ -20,9 +20,11 @@ public class WinPanel : MonoBehaviour
     [SerializeField] private Transform starRoot;
     [SerializeField] private Transform extra;
 
-    [SerializeField] private RectTransform coinAniStartPosTran;
+    [SerializeField] private RectTransform coinAniStartPosTran1;
+    [SerializeField] private RectTransform coinAniStartPosTran2;
     [SerializeField] private RewardEffect rewardEffect;
     [SerializeField] private Text jdText;
+    private RectTransform coinAniStartPosTran;
     private Transform coinTweenStartRoot;
     private RewardData rewardData;
 
@@ -115,6 +117,11 @@ public class WinPanel : MonoBehaviour
         if (multiCount > 1)
         {
             rewardData.AddReward(multiple - 1, way: "Level", type: type);
+            coinAniStartPosTran = coinAniStartPosTran2;
+        }
+        else
+        {
+            coinAniStartPosTran = coinAniStartPosTran1;
         }
         UIManager.Instance.gameInnerUI.RefreshGoldCount();
         int curGold = GameData.Gold.Count;

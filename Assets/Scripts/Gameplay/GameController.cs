@@ -147,7 +147,7 @@ namespace CrowdMatch
                 return;
 
             Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
-
+            UIManager.Instance.Init();
 #if UNITY_EDITOR
             LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
 #endif

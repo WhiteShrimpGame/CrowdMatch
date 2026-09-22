@@ -43,7 +43,7 @@ public class GameInnerUI : MonoBehaviour
 
     [SerializeField] private Transform levelBgHardImg, levelBgSuperHardImg;
     [SerializeField] private Transform hardTip;
-    [SerializeField] private Transform hardTipHardText, hardTipSuperHardText;
+    [SerializeField] private Text hardTipText,hardTipHardText, hardTipSuperHardText;
     [SerializeField] private Transform hardTipHardImg, hardTipSuperHardImg;
     [SerializeField] private Image alertImg;
     [SerializeField] private Image arrowTipsImg;
@@ -756,7 +756,7 @@ public class GameInnerUI : MonoBehaviour
             img.position = hardImgPos;
             img.localScale = hardImgScale;
             hardTipHardText.gameObject.SetActive(true);
-            //SetOutlineHex("#6406c2");
+            hardTipText.color = WSGameTools.HexToColor("#973cd3");
             endImg.parent.gameObject.SetActive(true);
 
             levelBgSuperHardImg.parent.gameObject.SetActive(false);
@@ -774,6 +774,7 @@ public class GameInnerUI : MonoBehaviour
             img.position = superHardImgPos;
             img.localScale = superHardImgScale;
             hardTipSuperHardText.gameObject.SetActive(true);
+            hardTipText.color = WSGameTools.HexToColor("#C32A25");
             endImg.parent.gameObject.SetActive(true);
 
             levelBgHardImg.parent.gameObject.SetActive(false);

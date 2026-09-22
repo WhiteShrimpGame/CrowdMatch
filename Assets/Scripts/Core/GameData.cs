@@ -140,8 +140,8 @@ namespace CrowdMatch
                 //var levelIndex = CurrentLevelIndex;
                 int count = GameManager.Instance.levelDataConfig.levels.Count;
                 int countLoop = GameManager.Instance.levelDataConfig.loopLevels.Count;
-                Debug.Log(count);
-                Debug.Log(countLoop);
+                /*Debug.Log(count);
+                Debug.Log(countLoop);*/
                 if (CurrentLevel <= count)
                 {
                     Debug.Log(CurrentLevel-1);

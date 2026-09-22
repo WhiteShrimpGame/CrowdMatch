@@ -626,7 +626,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704969479172, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
       propertyPath: m_Pivot.x
@@ -849,11 +849,13 @@ MonoBehaviour:
   extractSpeed: 10
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
+  exitOnlyFromRow0: 0
   releaseRadius: 0.8
   minReleaseInterval: 0.3
   releaseSpeed: 8
   collectPoint: {fileID: 786388044}
   conveyorZone: {fileID: 1582382721}
+  debugMoveLog: 1
 --- !u!4 &424865908
 Transform:
   m_ObjectHideFlags: 0
@@ -992,16 +994,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b942e5ef6b950f6458c8671dd472e821, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  emojiDuration: 3
-  emojiScale: 0.6
-  speeds:
+  emojiDuration: 2
+  emojiScale: 0.0012
+  speeds: []
+  durations:
   - tag: EmojiHappy
-    speed: 2
+    duration: 1
   happyChance: 0.6
   happyTag: EmojiHappy
+  happyJumpChance: 0.7
+  happyJumpMinJumped: 4
+  happyJumpCooldown: 3
   sleepTag: EmojiSleep
-  angryChance: 0.7
-  angryCooldown: 3
   angryTag: EmojiAngry
   angryJumpChancePerPixel: 0.1
   angryJumpCooldown: 3
@@ -1054,6 +1058,8 @@ MonoBehaviour:
   path: {fileID: 1785929099}
   cycleTime: 6
   speed: 1.5
+  clearedSpeedMultiplier: 2.5
+  clearedAccelDuration: 3
   slotCount: 30
   cellPrefab: {fileID: 2575043199601490989, guid: 32373529656aa3345b2cc74fbe01d607, type: 3}
   cellYOffset: 0.12
@@ -1455,10 +1461,16 @@ MonoBehaviour:
   wallEndPrefab: {fileID: 1259992199522606913, guid: d76de89cd46056749b9cb5a5d460796c, type: 3}
   wallSinglePrefab: {fileID: 3046988623496833886, guid: 9dc31b516109b7d448491e4adef104db, type: 3}
   pipePrefab: {fileID: 100000, guid: e326c31249f06b64898badcdd0dd8d0f, type: 3}
+  gatePrefab: {fileID: 0}
   boxCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  boxWholePrefab: {fileID: 0}
   elevatorPrefab: {fileID: 2551135059901201391, guid: 9f53810ad24b66c4581e815e9e9ef7ac, type: 3}
+  icePrefab: {fileID: 0}
+  crateCornerPrefab: {fileID: 0}
+  crateEdgePrefab: {fileID: 0}
+  crateCenterPrefab: {fileID: 0}
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
 --- !u!4 &882082745
 Transform:
@@ -1889,6 +1901,20 @@ MonoBehaviour:
   maxOpenRows: 4
   consumeSpeed: 10
   refillSpeed: 10
+  ropeMaterial: {fileID: 0}
+  ropeLinkCount: 8
+  ropeDiameter: 0.15
+  ropeSwayAmplitude: 0.05
+  ropeSwayFrequency: 1.2
+  ropeSwayWaves: 1
+  ropeSwayVerticalRatio: 0.45
+  ropeLayerName: Rope
+  ropeEnabled: 1
+  ropeExitHeadGap: 0.2
+  ropeExitStagger: 0.2
+  ropeGizmoYOffset: 1
+  ropeGizmoColor: {r: 0.1, g: 1, b: 1, a: 1}
+  ropeGizmoAnchorRadius: 0.1
 --- !u!4 &1428373512
 Transform:
   m_ObjectHideFlags: 0
