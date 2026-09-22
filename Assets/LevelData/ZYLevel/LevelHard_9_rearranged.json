@@ -83,8 +83,8 @@
             -1,
             5,
             5,
-            0,
-            0,
+            4,
+            4,
             12,
             12,
             12,
@@ -98,8 +98,8 @@
             5,
             5,
             5,
-            0,
-            0,
+            4,
+            4,
             12,
             -1,
             -1,
@@ -113,7 +113,7 @@
             1,
             5,
             5,
-            0,
+            4,
             1,
             1,
             -1,
@@ -121,14 +121,14 @@
             -1,
             -1,
             -1,
-            0,
-            0,
+            8,
+            8,
             5,
             5,
             5,
             -1,
             5,
-            0,
+            4,
             1,
             1,
             -1,
@@ -136,9 +136,9 @@
             4,
             4,
             -1,
-            0,
-            0,
-            0,
+            8,
+            8,
+            8,
             5,
             5,
             -1,
@@ -151,7 +151,7 @@
             4,
             4,
             -1,
-            0,
+            8,
             -1,
             -1,
             -1,
@@ -209,9 +209,9 @@
             6,
             6,
             -1,
-            1,
-            1,
-            1,
+            6,
+            6,
+            6,
             -1,
             4,
             11,
@@ -224,9 +224,9 @@
             6,
             6,
             -1,
-            1,
-            1,
-            1,
+            6,
+            6,
+            6,
             -1,
             11,
             11,
@@ -468,7 +468,7 @@
             {
                 "x": 0,
                 "y": 0,
-                "colorId": 1,
+                "colorId": 22,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -476,7 +476,7 @@
             {
                 "x": 0,
                 "y": 1,
-                "colorId": 8,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -492,7 +492,7 @@
             {
                 "x": 0,
                 "y": 3,
-                "colorId": 2,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -500,7 +500,7 @@
             {
                 "x": 0,
                 "y": 4,
-                "colorId": 11,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -508,7 +508,7 @@
             {
                 "x": 0,
                 "y": 5,
-                "colorId": 11,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -516,7 +516,7 @@
             {
                 "x": 0,
                 "y": 6,
-                "colorId": 11,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -524,14 +524,6 @@
             {
                 "x": 0,
                 "y": 7,
-                "colorId": 22,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 8,
                 "colorId": 6,
                 "capacity": 3,
                 "question": false,
@@ -539,8 +531,16 @@
             },
             {
                 "x": 0,
+                "y": 8,
+                "colorId": 1,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
                 "y": 9,
-                "colorId": 0,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -548,7 +548,7 @@
             {
                 "x": 0,
                 "y": 10,
-                "colorId": 2,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -564,7 +564,7 @@
             {
                 "x": 0,
                 "y": 12,
-                "colorId": 12,
+                "colorId": 22,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -572,7 +572,7 @@
             {
                 "x": 0,
                 "y": 13,
-                "colorId": 0,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -580,7 +580,7 @@
             {
                 "x": 0,
                 "y": 14,
-                "colorId": 0,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -588,7 +588,7 @@
             {
                 "x": 0,
                 "y": 15,
-                "colorId": 1,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -596,22 +596,6 @@
             {
                 "x": 0,
                 "y": 16,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 17,
-                "colorId": 1,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 18,
                 "colorId": 12,
                 "capacity": 3,
                 "question": false,
@@ -619,8 +603,24 @@
             },
             {
                 "x": 0,
+                "y": 17,
+                "colorId": 11,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 18,
+                "colorId": 22,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
                 "y": 19,
-                "colorId": 5,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -628,7 +628,7 @@
             {
                 "x": 0,
                 "y": 20,
-                "colorId": 4,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -644,7 +644,7 @@
             {
                 "x": 0,
                 "y": 22,
-                "colorId": 6,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -652,7 +652,7 @@
             {
                 "x": 0,
                 "y": 23,
-                "colorId": 2,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -660,7 +660,7 @@
             {
                 "x": 0,
                 "y": 24,
-                "colorId": 0,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -668,7 +668,7 @@
             {
                 "x": 0,
                 "y": 25,
-                "colorId": 0,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -684,7 +684,7 @@
             {
                 "x": 0,
                 "y": 27,
-                "colorId": 1,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -692,14 +692,6 @@
             {
                 "x": 0,
                 "y": 28,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 29,
                 "colorId": 11,
                 "capacity": 3,
                 "question": false,
@@ -707,8 +699,16 @@
             },
             {
                 "x": 0,
+                "y": 29,
+                "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
                 "y": 30,
-                "colorId": 1,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -716,7 +716,7 @@
             {
                 "x": 0,
                 "y": 31,
-                "colorId": 11,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -724,7 +724,7 @@
             {
                 "x": 1,
                 "y": 0,
-                "colorId": 5,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -740,7 +740,7 @@
             {
                 "x": 1,
                 "y": 2,
-                "colorId": 2,
+                "colorId": 22,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -748,7 +748,7 @@
             {
                 "x": 1,
                 "y": 3,
-                "colorId": 6,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -756,7 +756,7 @@
             {
                 "x": 1,
                 "y": 4,
-                "colorId": 6,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -764,7 +764,7 @@
             {
                 "x": 1,
                 "y": 5,
-                "colorId": 6,
+                "colorId": 12,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -780,7 +780,7 @@
             {
                 "x": 1,
                 "y": 7,
-                "colorId": 0,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -796,7 +796,7 @@
             {
                 "x": 1,
                 "y": 9,
-                "colorId": 11,
+                "colorId": 1,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -804,7 +804,7 @@
             {
                 "x": 1,
                 "y": 10,
-                "colorId": 22,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -820,7 +820,7 @@
             {
                 "x": 1,
                 "y": 12,
-                "colorId": 22,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -828,62 +828,6 @@
             {
                 "x": 1,
                 "y": 13,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 14,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 15,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 16,
-                "colorId": 0,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 17,
-                "colorId": 0,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 18,
-                "colorId": 0,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 19,
-                "colorId": 12,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 20,
                 "colorId": 1,
                 "capacity": 3,
                 "question": false,
@@ -891,23 +835,31 @@
             },
             {
                 "x": 1,
-                "y": 21,
-                "colorId": 4,
+                "y": 14,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
             },
             {
                 "x": 1,
-                "y": 22,
-                "colorId": 4,
+                "y": 15,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
             },
             {
                 "x": 1,
-                "y": 23,
+                "y": 16,
+                "colorId": 1,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 17,
                 "colorId": 6,
                 "capacity": 3,
                 "question": false,
@@ -915,15 +867,23 @@
             },
             {
                 "x": 1,
-                "y": 24,
-                "colorId": 4,
+                "y": 18,
+                "colorId": 22,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
             },
             {
                 "x": 1,
-                "y": 25,
+                "y": 19,
+                "colorId": 11,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 20,
                 "colorId": 2,
                 "capacity": 3,
                 "question": false,
@@ -931,8 +891,48 @@
             },
             {
                 "x": 1,
+                "y": 21,
+                "colorId": 8,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 22,
+                "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 23,
+                "colorId": 12,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 24,
+                "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 25,
+                "colorId": 0,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
                 "y": 26,
-                "colorId": 4,
+                "colorId": 12,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -948,14 +948,6 @@
             {
                 "x": 1,
                 "y": 28,
-                "colorId": 0,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 29,
                 "colorId": 11,
                 "capacity": 3,
                 "question": false,
@@ -963,8 +955,16 @@
             },
             {
                 "x": 1,
-                "y": 30,
+                "y": 29,
                 "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 30,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -972,7 +972,7 @@
             {
                 "x": 1,
                 "y": 31,
-                "colorId": 12,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -988,7 +988,7 @@
             {
                 "x": 2,
                 "y": 1,
-                "colorId": 1,
+                "colorId": 12,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1004,7 +1004,7 @@
             {
                 "x": 2,
                 "y": 3,
-                "colorId": 8,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1012,7 +1012,7 @@
             {
                 "x": 2,
                 "y": 4,
-                "colorId": 2,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1020,7 +1020,7 @@
             {
                 "x": 2,
                 "y": 5,
-                "colorId": 2,
+                "colorId": 12,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1028,7 +1028,7 @@
             {
                 "x": 2,
                 "y": 6,
-                "colorId": 2,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1036,7 +1036,7 @@
             {
                 "x": 2,
                 "y": 7,
-                "colorId": 11,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1044,7 +1044,7 @@
             {
                 "x": 2,
                 "y": 8,
-                "colorId": 22,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1052,7 +1052,7 @@
             {
                 "x": 2,
                 "y": 9,
-                "colorId": 6,
+                "colorId": 1,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1068,7 +1068,7 @@
             {
                 "x": 2,
                 "y": 11,
-                "colorId": 11,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1076,7 +1076,7 @@
             {
                 "x": 2,
                 "y": 12,
-                "colorId": 5,
+                "colorId": 22,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1084,30 +1084,6 @@
             {
                 "x": 2,
                 "y": 13,
-                "colorId": 12,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 14,
-                "colorId": 12,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 15,
-                "colorId": 12,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 16,
                 "colorId": 5,
                 "capacity": 3,
                 "question": false,
@@ -1115,8 +1091,32 @@
             },
             {
                 "x": 2,
-                "y": 17,
+                "y": 14,
                 "colorId": 0,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
+                "y": 15,
+                "colorId": 2,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
+                "y": 16,
+                "colorId": 2,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
+                "y": 17,
+                "colorId": 12,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1124,14 +1124,6 @@
             {
                 "x": 2,
                 "y": 18,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 19,
                 "colorId": 0,
                 "capacity": 3,
                 "question": false,
@@ -1139,7 +1131,7 @@
             },
             {
                 "x": 2,
-                "y": 20,
+                "y": 19,
                 "colorId": 4,
                 "capacity": 3,
                 "question": false,
@@ -1147,8 +1139,16 @@
             },
             {
                 "x": 2,
+                "y": 20,
+                "colorId": 12,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
                 "y": 21,
-                "colorId": 4,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1164,7 +1164,7 @@
             {
                 "x": 2,
                 "y": 23,
-                "colorId": 22,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1172,7 +1172,7 @@
             {
                 "x": 2,
                 "y": 24,
-                "colorId": 8,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1180,7 +1180,7 @@
             {
                 "x": 2,
                 "y": 25,
-                "colorId": 22,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1188,7 +1188,7 @@
             {
                 "x": 2,
                 "y": 26,
-                "colorId": 0,
+                "colorId": 11,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1196,7 +1196,7 @@
             {
                 "x": 2,
                 "y": 27,
-                "colorId": 11,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1204,7 +1204,7 @@
             {
                 "x": 2,
                 "y": 28,
-                "colorId": 11,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1212,7 +1212,7 @@
             {
                 "x": 2,
                 "y": 29,
-                "colorId": 12,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1220,7 +1220,7 @@
             {
                 "x": 2,
                 "y": 30,
-                "colorId": 8,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1443,8 +1443,8 @@
                 }
             ],
             "colors": [
-                6,
-                11
+                11,
+                6
             ]
         },
         {
