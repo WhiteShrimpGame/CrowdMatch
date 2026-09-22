@@ -20,15 +20,14 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Box
-  m_Shader: {fileID: 4800000, guid: ef3178aabaab247448c46c904e37bf43, type: 3}
+  m_Name: Box2
+  m_Shader: {fileID: 4800000, guid: 7ffc1bc2bbb1ef64f84b552b2d2f0619, type: 3}
   m_ValidKeywords:
   - TCP2_REFLECTIONS_FRESNEL
   - TCP2_RIM_LIGHTING_LIGHTMASK
   - TCP2_SHADOW_LIGHT_COLOR
-  - TCP2_SPECULAR
+  m_InvalidKeywords:
   - TCP2_UV_NORMALS_FULL
-  m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -39,7 +38,7 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _BaseMap:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: d33cf4cbf1a6874439019890ab08a952, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
@@ -178,8 +177,8 @@ Material:
     - _RampBandsSmoothing: 0.1
     - _RampOffset: 0
     - _RampScale: 1
-    - _RampSmoothing: 0.468
-    - _RampThreshold: 0.841
+    - _RampSmoothing: 0
+    - _RampThreshold: 0.01
     - _RampType: 0
     - _ReceiveShadows: 1
     - _ReceiveShadowsOff: 1
@@ -210,18 +209,18 @@ Material:
     - _UseMobileMode: 0
     - _UseNormalMap: 0
     - _UseOcclusion: 0
-    - _UseOutline: 1
+    - _UseOutline: 0
     - _UseReflections: 0
     - _UseRim: 0
     - _UseRimLightMask: 1
     - _UseShadowTexture: 0
-    - _UseSpecular: 1
+    - _UseSpecular: 0
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.40437877, g: 0.5610371, b: 0.6981132, a: 1}
+    - _BaseColor: {r: 0.5660378, g: 0.5660378, b: 0.5660378, a: 1}
     - _Color: {r: 0.5254902, g: 0.55294114, b: 0.7176471, a: 1}
-    - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
+    - _EmissionColor: {r: 0.3301887, g: 0.3301887, b: 0.3301887, a: 0}
     - _HColor: {r: 1, g: 1, b: 1, a: 1}
     - _Light_Direction: {r: 0.5, g: 0.5, b: 0, a: 1}
     - _MatCapColor: {r: 1, g: 1, b: 1, a: 1}
@@ -230,7 +229,7 @@ Material:
     - _RampMin: {r: 0, g: 0, b: 0, a: 1}
     - _ReflectionColor: {r: 0.13694374, g: 0.0009967763, b: 0.26415092, a: 1}
     - _RimColor: {r: 0.17481309, g: 0.1783934, b: 0.21698111, a: 0.5}
-    - _SColor: {r: 0.23511933, g: 0.1764706, b: 0.39607844, a: 1}
+    - _SColor: {r: 0, g: 0, b: 0, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _SpecularColor: {r: 0.9911916, g: 1, b: 0, a: 1}
     - _Tint: {r: 0.48006535, g: 0.5140523, b: 0.65, a: 1}

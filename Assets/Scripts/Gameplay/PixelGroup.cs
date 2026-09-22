@@ -681,7 +681,10 @@ namespace CrowdMatch
                     continue;                    // 未暴露（或本次点击才让它暴露）：这次不消耗
 
                 if (ice.ConsumeOne())
+                {
                     anyMelted = true;
+                    ice.PlayMeltEffect();        // 刚化开：生成融化特效 + 播音效（冰上自己配 tag）
+                }
                 else
                     ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
             }

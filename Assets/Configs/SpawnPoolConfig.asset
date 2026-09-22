@@ -25,3 +25,6 @@ MonoBehaviour:
   - tag: EmojiSleep
     item: {fileID: 4584203258148001875, guid: 2468bac21e0664c33a2daf15919bb8e6, type: 3}
     preloadCount: 0
+  - tag: IceBreak
+    item: {fileID: 6898527057234586512, guid: 760af748348fbb04e9e72a9bd22ae5ff, type: 3}
+    preloadCount: 0
