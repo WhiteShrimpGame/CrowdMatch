@@ -298,8 +298,8 @@ namespace CrowdMatch
                 _transitioning = true;
                 _lastFailCheckLog = null;   // 真判了失败：清掉去重记忆，复活后的诊断不被旧行压掉
                 //GameState.GameFail();
-                UIManager.Instance.showRevivePanel(true);
                 //Invoke(nameof(DoRevive), 1.5f);
+                UIManager.Instance.showRevivePanel(true);
                 return;
             }
             LogFailCheck(checkpoint, reason);
@@ -797,7 +797,6 @@ namespace CrowdMatch
                     (conveyorZone != null ? conveyorZone.TotalSlots : 0) +
                     " count=" + _overflowClickCount);
         }
-
 
         /// <summary>
         /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。

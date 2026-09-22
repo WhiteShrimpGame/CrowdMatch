@@ -116,11 +116,13 @@ public class WinPanel : MonoBehaviour
         int lastGold = GameData.Gold.Count - rewardData.gold;
         if (multiCount > 1)
         {
+            Debug.Log(222);
             rewardData.AddReward(multiple - 1, way: "Level", type: type);
             coinAniStartPosTran = coinAniStartPosTran2;
         }
         else
         {
+            Debug.Log(111);
             coinAniStartPosTran = coinAniStartPosTran1;
         }
         UIManager.Instance.gameInnerUI.RefreshGoldCount();
@@ -184,6 +186,7 @@ public class WinPanel : MonoBehaviour
         coinTween.ShowCoins(coinAniStartPosTran.position, end, 30, 1,
             () =>
             {
+                Debug.Log(coinAniStartPosTran.parent.name);
                 DOVirtual.Int(lastCount, newCount, 0.5f,
                         (val) =>
                         {
