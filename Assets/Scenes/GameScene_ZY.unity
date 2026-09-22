@@ -866,30 +866,13 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 848116821}
   m_CullTransparentMesh: 1
---- !u!1 &882082743
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 882082745}
-  - component: {fileID: 882082744}
-  m_Layer: 0
-  m_Name: PixelGroup
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
 --- !u!114 &882082744
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 882082743}
+  m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 665e44ba0cce07c46ac119d562a27f93, type: 3}
@@ -922,21 +905,6 @@ MonoBehaviour:
   crateEdgePrefab: {fileID: 0}
   crateCenterPrefab: {fileID: 0}
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
---- !u!4 &882082745
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 882082743}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.45, z: 10.1}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_RootOrder: 5
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &890000001
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1242,7 +1210,7 @@ MonoBehaviour:
   rows: 40
   xSpacing: 2
   zSpacing: 1.2
-  shuffleContainers: 1
+  shuffleContainers: 0
   pixelGroup: {fileID: 882082744}
   minCapacity: 3
   maxCapacity: 3
@@ -1790,7 +1758,7 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 81e6d6b747ebb0f43945851ff5c4022e, type: 3}
+  - {fileID: 4900000, guid: 7241c0b82ae8cd84ea7d34a7892eeab7, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
