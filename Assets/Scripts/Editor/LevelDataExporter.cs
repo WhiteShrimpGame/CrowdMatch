@@ -190,6 +190,7 @@ namespace CrowdMatch
                 pixelGroup.ClearBoxes();
                 pixelGroup.ClearElevators();
                 pixelGroup.ClearIces();
+                pixelGroup.ClearCrates();
                 pixelGroup.RebuildGrid();
                 EditorUtility.SetDirty(pixelGroup);
             }
@@ -368,6 +369,24 @@ namespace CrowdMatch
                 });
             }
             data.iceGroups = iceGroups.ToArray();
+
+            // 木箱：只存矩形区域 + 拆箱次数阈值。它盖住的像素在 pixel.cells 里本来就是普通颜色，
+            // 这里不需要（也不应该）额外记录 —— 与箱子相反，木箱不携带任何内容。
+            var crates = new List<LevelData.CrateData>();
+            foreach (var crate in pg.GetComponentsInChildren<CrateItem>())
+            {
+                if (crate == null)
+                    continue;
+                crates.Add(new LevelData.CrateData
+                {
+                    colMin = crate.colMin,
+                    rowMin = crate.rowMin,
+                    colMax = crate.colMax,
+                    rowMax = crate.rowMax,
+                    destroyAfterMoves = Mathf.Max(1, crate.destroyAfterMoves),
+                });
+            }
+            data.crates = crates.ToArray();
 
             return data;
         }

@@ -19,6 +19,7 @@ namespace CrowdMatch
         public ElevatorData[] elevators = new ElevatorData[0];
         public GateData[] gates = new GateData[0];
         public IceGroupData[] iceGroups = new IceGroupData[0];
+        public CrateData[] crates = new CrateData[0];
 
         /// <summary>PixelGroup 布局：尺寸 + 每格颜色（一维拍平，row-major，row 0 = 最前排）。</summary>
         [Serializable]
@@ -162,6 +163,22 @@ namespace CrowdMatch
 
             /// <summary>计数数字的放大倍数（1 = 预制体上的原尺寸）。旧 JSON 无此字段时为 1。</summary>
             public float fontScale = 1f;
+        }
+
+        /// <summary>
+        /// 一个木箱：**完整矩形**区域（左上 + 右下，长宽均 ≥ 2）。它**盖住**范围内的像素（不可见、不能操作），
+        /// 那些像素在 pixel.cells 里是**正常颜色** —— 与 <see cref="BoxData"/> 相反：木箱下面本来就有像素，
+        /// 既不生成、也不跳过，所以导入时**不把木箱格加进 skipCells**。
+        /// 每有一次相邻（上下左右 4 邻）像素被点击移出记 1 次（同组同时移出只算 1 次），
+        /// 计满 destroyAfterMoves 次即拆掉，底下像素恢复可见、可点。
+        /// </summary>
+        [Serializable]
+        public class CrateData
+        {
+            public int colMin, rowMin, colMax, rowMax;
+
+            /// <summary>拆箱所需的相邻移出次数。旧 JSON 无此字段时为 3。</summary>
+            public int destroyAfterMoves = 3;
         }
     }
 

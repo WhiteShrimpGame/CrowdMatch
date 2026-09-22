@@ -410,7 +410,10 @@ namespace CrowdMatch
             gatheredItems.Clear();
 
             if (conveyorZone != null)
+            {
                 conveyorZone.ClearBelt();
+                conveyorZone.ResetSpeed();   // 进新关：传送带回到常规速度
+            }
 
             if (crowdBuffer != null)
                 crowdBuffer.ResetAll();
@@ -646,6 +649,19 @@ namespace CrowdMatch
                 return;
             }
 
+            // 被木箱盖住的 Pixel：**无任何反馈**直接返回 —— 那里看起来本来就没有像素，点了就该像没点到。
+            // 碰撞体是保留的（见 PixelItem.SetCovered）：关掉的话射线会穿过去打中木箱更后面的像素，
+            // 那才是真的错。整块木箱矩形都算障碍，所以木箱格上的这种像素不会被别组带走。
+            //
+            // 这条守卫在冰冻之前：木箱是盖在最上面的，一个格子同时被冰和木箱占住时以木箱为准
+            // （否则会打出冰块那套「有反馈但不摆表情」的表现，而木箱的要求是完全没有反馈）。
+            if (item.IsCovered)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 命中 " + item.name + " 但被木箱盖住，忽略点击（无反馈）");
+                return;
+            }
+
             // 被冰组冻住的 Pixel 不可点击：冰冻计数归 0 前，组内像素「视为不暴露」。
             // HandleClick 不看 IsExposed（能否移出由 CanReachFront 判定），所以真正的门槛在这里。
             // 反馈走同一个 PlayBlockedFeedback：音效 / 震动 / 整组阻挡位移都有，
@@ -854,6 +870,17 @@ namespace CrowdMatch
             // 放在记录模式的提前返回之后：记录模式只记取出顺序、不玩冰的消耗。
             pixelGroup.NotifyClickMovedOut();
 
+            // 木箱：与本次移出像素上下左右（4 邻）相接的木箱各计一次（同组同时移出只算一次）；
+            // 计满的当场拆掉，底下像素恢复可见。返回 true = 有木箱被拆 → 整体描边要重画
+            // （上面的 RefreshFrame 在这之前，那时木箱还盖着）。
+            if (pixelGroup.NotifyPixelsMovedOut(matched))
+                RefreshFrame();
+
+            // 网格已被点空（本项目内的最后一颗都走了）：传送带逐渐加速，把带上的存量尽快送进容器。
+            // 本关内不再回退；复位只发生在进下一关 / 重载关卡的 CleanupLevel。
+            if (conveyorZone != null && pixelGroup.IsGridEmpty())
+                conveyorZone.NotifyGridEmptied();
+
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
             if (crowdBuffer != null)
@@ -892,6 +919,11 @@ namespace CrowdMatch
                     // 被冰冻住的 Pixel 同样断开连通：不参与移除、不扩散。
                     // 于是点冰旁边的同色像素时，冰里的像素不会被一起带走——必须等冰化开。
                     if (nb.IsFrozen)
+                        continue;
+                    // 被木箱盖住的 Pixel 也断开连通：不参与移除、不扩散。
+                    // 这条守卫是必须的 —— 木箱格虽然算障碍，但 FloodFill 根本不看 IsBlocked
+                    // （同色相邻就连上），漏了它就会点木箱旁边的同色像素时把木箱里的像素也一起移出去。
+                    if (nb.IsCovered)
                         continue;
                     if (visited.Add(nb))
                         queue.Enqueue(nb);
