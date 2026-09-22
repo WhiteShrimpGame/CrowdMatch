@@ -9,8 +9,11 @@ namespace CrowdMatch
     /// <summary>
     /// 箱子（Box）：网格内一块矩形区域（左上 + 右下），内含若干隐藏 Pixel 并标注容量。
     /// 开箱前区域是障碍；当可用格（本体 + 相邻 + 连通）≥ 容量时开箱，把隐藏 Pixel 整体规划
-    /// 释放到这些候选格（优先级：本体 > 相邻 > 连通距离），确保同色像素各自 4 方向连通，
-    /// 并分两段动画（本体外依次 Jump → 本体内原地站起 + 箱子放大缩小消失）。
+    /// 释放到这些候选格（优先级：本体 > 相邻 > 连通距离），确保同色像素各自 4 方向连通。
+    ///
+    /// 释放表现（两段同一套节奏）：数字**在开箱那一刻**先隐藏；本体外与本体内 Pixel 都按
+    /// 「从**箱子中心下方**出现 + Jump 跳到目标格」逐个冒出，**起跳点、Jump 参数、起跳间隔全部共用**
+    /// （只有目标格不同）；同时箱子视觉**匀速下沉**，沉完销毁。
     /// 相邻仅按上下左右 4 方向（不含四角）。
     /// </summary>
     public class BoxItem : MonoBehaviour
@@ -26,35 +29,36 @@ namespace CrowdMatch
         public int[] colorIds;
 
         [Header("行为")]
-        [Tooltip("本体外 Pixel 起跳间隔（秒）")]
+        [Tooltip("Pixel 起跳间隔（秒）—— 本体外与本体内**共用同一个节奏**，两段之间不额外等待")]
         public float jumpStartInterval = 0.1f;
 
-        [Tooltip("Pixel 出现位置：箱子中心 / 本体格下方（-Y）偏移量（外跳与本体上升共用）")]
+        [Tooltip("Pixel 出现位置：从**箱子中心**下方多远处冒出来（-Y 偏移量；本体外与本体共用同一个起跳点）")]
         public float jumpSpawnYOffset = 0.5f;
 
-        [Header("外跳表现")]
-        [Tooltip("外跳高度（DOLocalJump 的 jumpPower）")]
+        [Header("Jump 表现（外跳与本体共用同一套）")]
+        [Tooltip("Jump 高度（DOLocalJump 的 jumpPower）")]
         public float jumpPower = 0.6f;
 
-        [Tooltip("外跳弹跳次数（DOLocalJump 的 numJumps）")]
+        [Tooltip("Jump 弹跳次数（DOLocalJump 的 numJumps）")]
         public int jumpCount = 1;
 
-        [Tooltip("外跳时长（秒，DOLocalJump 的 duration）")]
+        [Tooltip("Jump 时长（秒，DOLocalJump 的 duration）")]
         public float jumpDuration = 0.35f;
 
-        [Tooltip("本体内 Pixel 从 y 向下偏移位置平滑升到初始位置的时长（秒）")]
-        public float bodyRiseDuration = 0.35f;
-
         [Header("消失表现")]
-        [Tooltip("开箱后箱子视觉上升的距离（本地 Y，匀速，与「弹一下再缩小」同时进行；0 = 不上升）")]
-        public float disappearRiseDistance = 0.5f;
+        [Tooltip("开箱后箱子视觉**匀速下沉**的距离（本地 Y，正数 = 向下沉）")]
+        public float disappearDropDistance = 1.5f;
 
-        /// <summary>
-        /// 消失动画两段的时长（秒）。同时喂给 <c>DisappearWithPop</c> 与上升补间，
-        /// 保证两者**同时结束** —— 不留两份各写一遍的常量。
-        /// </summary>
-        private const float DisappearPopDuration = 0.2f;
-        private const float DisappearShrinkDuration = 0.2f;
+        [Tooltip("箱子视觉下沉的时长（秒，匀速）；沉完即销毁")]
+        public float disappearDropDuration = 0.4f;
+
+        [Tooltip("下沉时**在世界坐标系下保持静止**的子物体（留空 = 无此表现）。" +
+                 "下沉开始后的 holdStaticDuration 秒内它不动 —— 为此脚本把它在自身坐标系里反向抬升、" +
+                 "正好补掉这一段的沉降量；这段时间过去后就跟着箱子一起沉下去")]
+        public Transform holdStaticChild;
+
+        [Tooltip("上面那个子物体保持**世界静止**的时长（秒，从下沉开始算）")]
+        public float holdStaticDuration = 0.3f;
 
         [Header("调试")]
         [Tooltip("开箱条件判定时输出详细日志（本体/相邻/可用/容量/结果）")]
@@ -280,7 +284,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 刷新「箱内 Pixel 总数」显示（= <see cref="capacity"/>，也就是开箱阈值）。
-        /// 开箱是一次性把内容全部释放，所以这个数在箱子存在期间是常量。
+        /// 开箱是一次性把内容全部释放，所以这个数在箱子存在期间是常量；**开箱那一刻由
+        /// <see cref="HideCountText"/> 隐藏**，之后再没有需要显示它的时候。
         /// </summary>
         public void UpdateCountText()
         {
@@ -290,6 +295,15 @@ namespace CrowdMatch
                 return;
 
             countText.text = capacity.ToString();
+        }
+
+        /// <summary>释放开始时让数字消失：盒子已经开了，容量这个数就没有意义了（同 <see cref="IceItem"/> 的融化隐藏口径）。</summary>
+        private void HideCountText()
+        {
+            if (countText == null)
+                countText = GetComponentInChildren<Text>(true);
+            if (countText != null)
+                countText.enabled = false;
         }
 
         /// <summary>该格用哪个视觉预制体（角/边/中心，按 §6 规则）。</summary>
@@ -331,6 +345,7 @@ namespace CrowdMatch
             if (hiddenPixels.Count == 0)
             {
                 opened = true;
+                HideCountText();             // 释放开始：数字（容量）就没有意义了
                 group.OnBoxOpened(this);
                 DisappearVisual();
                 group.OnBoxReleaseFinished(this);
@@ -367,6 +382,7 @@ namespace CrowdMatch
 
             // 2. 标记已开 + 清障碍（增量计数由 group 处理）
             opened = true;
+            HideCountText();     // 释放开始：数字（容量）就没有意义了，先它一步消失
             group.OnBoxOpened(this);
 
             // 3. 整体规划：把隐藏像素按颜色分组，每种颜色分配到一组 4 方向连通的候选格，
@@ -814,9 +830,13 @@ namespace CrowdMatch
 
         /// <summary>
         /// 两段开箱动画（动画期间 Pixel 不可交互、保持 root 初始位置）：
-        /// 阶段一：本体外 Pixel 按 (row, col) 顺序逐个在箱子下方出现并 Jump（起跳间隔 jumpStartInterval）；
-        /// 阶段二：最后一个外跳起跳后过一个间隔，本体内 Pixel 从 y 向下偏移位置出现、平滑升到初始位置，同时箱子放大缩小消失；
-        /// 阶段三：全部动画结束后统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。
+        /// 阶段一：本体外 Pixel 按 (row, col) 顺序逐个在**箱子中心下方**出现并 Jump（间隔 jumpStartInterval）；
+        /// 阶段二：箱子开始**匀速下沉**；本体内 Pixel 用**同一套出现方式与节奏**（同一个起跳点、
+        ///         同样的下方偏移 + Jump + 同一个间隔）接着冒出来；
+        /// 阶段三：最后一个 Jump 落地后统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。
+        ///
+        /// **两段共用同一个起跳间隔、中间不额外等待**，所以整体节奏是连续的 —— 本体内的像素不会再
+        /// 「一次性全冒出来 + 直线升位」，听起来、看起来都与本体外一致。
         /// </summary>
         private IEnumerator OpenRoutine(List<(PixelItem pixel, Vector2Int cell)> assignments)
         {
@@ -831,27 +851,30 @@ namespace CrowdMatch
                     external.Add(a);
             }
             external.Sort((a, b) => CompareByRowCol(a.cell, b.cell));
+            body.Sort((a, b) => CompareByRowCol(a.cell, b.cell));
 
             // 阶段一：本体外 Pixel 按 (row, col) 顺序逐个出现并 Jump（箱子保持可见）
             for (int i = 0; i < external.Count; i++)
             {
-                SpawnExternal(external[i].pixel, external[i].cell);
+                SpawnJump(external[i].pixel, external[i].cell);
                 yield return new WaitForSeconds(jumpStartInterval);
             }
 
-            // 阶段二：本体内 Pixel 从 y 向下偏移位置出现并平滑升到初始位置，同时箱子消失
-            for (int i = 0; i < body.Count; i++)
-                SpawnBody(body[i].pixel, body[i].cell);
+            // 阶段二：箱子开始下沉消失；本体内 Pixel 用同样的方式与节奏接着冒出来
             DisappearVisual();
+            for (int i = 0; i < body.Count; i++)
+            {
+                SpawnJump(body[i].pixel, body[i].cell);
+                yield return new WaitForSeconds(jumpStartInterval);
+            }
 
-            // 等本体内平滑升位与最后一个外跳落地都结束，再统一判定连通性 + 站起
-            float wait = 0f;
-            if (body.Count > 0)
-                wait = Mathf.Max(wait, bodyRiseDuration);
-            if (external.Count > 0)
-                wait = Mathf.Max(wait, Mathf.Max(0f, jumpDuration - jumpStartInterval));
-            if (wait > 0f)
-                yield return new WaitForSeconds(wait);
+            // 等最后一个 Jump 落地（最后一次起跳后还需 jumpDuration 减去已经等过的一个间隔）
+            if (external.Count + body.Count > 0)
+            {
+                float wait = Mathf.Max(0f, jumpDuration - jumpStartInterval);
+                if (wait > 0f)
+                    yield return new WaitForSeconds(wait);
+            }
 
             FinalizeRelease(assignments);
         }
@@ -878,37 +901,45 @@ namespace CrowdMatch
             }
         }
 
-        private void SpawnExternal(PixelItem pixel, Vector2Int cell)
+        /// <summary>
+        /// 一个 Pixel 的「出现并跳到位」：从**箱子中心**下方 <see cref="jumpSpawnYOffset"/> 处出现，
+        /// 用同一套 Jump 参数（<see cref="jumpPower"/> / <see cref="jumpCount"/> / <see cref="jumpDuration"/>）
+        /// 跳到目标格。本体外与本体内**起跳点也完全一致**（都在箱子中心下方），只有目标格不同。
+        /// </summary>
+        private void SpawnJump(PixelItem pixel, Vector2Int cell)
         {
             if (pixel == null || group == null)
                 return;
 
-            pixel.transform.localPosition = BoxCenterLocal() + new Vector3(0f, -jumpSpawnYOffset, 0f);
+            Vector3 target = group.GetLocalPosition(cell.x, cell.y);
+            Vector3 from = BoxCenterLocal() + new Vector3(0f, -jumpSpawnYOffset, 0f);
+
+            pixel.transform.localPosition = from;
             pixel.transform.localRotation = Quaternion.identity;
             pixel.gameObject.SetActive(true);
-            Vector3 target = group.GetLocalPosition(cell.x, cell.y);
             pixel.transform.DOLocalJump(target, jumpPower, jumpCount, jumpDuration);
         }
 
-        private void SpawnBody(PixelItem pixel, Vector2Int cell)
-        {
-            if (pixel == null || group == null)
-                return;
-
-            Vector3 target = group.GetLocalPosition(cell.x, cell.y);
-            pixel.transform.localPosition = target + new Vector3(0f, -jumpSpawnYOffset, 0f);
-            pixel.transform.localRotation = Quaternion.identity;
-            pixel.gameObject.SetActive(true);
-            pixel.transform.DOLocalMove(target, bodyRiseDuration);
-        }
-
         /// <summary>
-        /// 箱子视觉消失：先弹出再缩小（DisappearWithPop），**同时**匀速上升一段距离
-        /// （<see cref="disappearRiseDistance"/>）。两者时长相同，所以一起结束。
+        /// 箱子视觉消失：**匀速下沉** <see cref="disappearDropDistance"/>，沉完销毁。
+        /// （原来是「弹一下再缩小 + 同时上升」，已按需求换成下沉。）
+        ///
+        /// <see cref="holdStaticChild"/> 指定的子物体要在下沉开始后的 <see cref="holdStaticDuration"/> 秒里
+        /// **世界坐标不动**，所以脚本在同一时间给它一条**反向抬升**的补间把这一段的沉降量补掉
+        /// （下沉是匀速的，补偿量 = 下沉速度 × 静止时长）；这段时间过去后它不再反抗，就跟着箱子一起沉。
+        ///
+        /// 抬升方向取**它父坐标系里的「世界 up」**（不是它自己的 +Y），所以子物体自身带旋转也照样精确静止。
+        /// 万一它正好就是某个拼接块本身，则不能「既下沉又反向补」（同一 transform 上两条补间互相打断），
+        /// 改成让那一块**延后 holdStaticDuration 秒再开始沉** —— 世界静止的效果一样。
         /// </summary>
         private void DisappearVisual()
         {
-            float riseDuration = Mathf.Max(0.0001f, DisappearPopDuration + DisappearShrinkDuration);
+            float dropDuration = Mathf.Max(0.0001f, disappearDropDuration);
+            float hold = Mathf.Clamp(holdStaticDuration, 0f, dropDuration);
+            Vector3 down = Vector3.up * disappearDropDistance;
+
+            Transform held = holdStaticChild;
+            bool heldIsPiece = held != null && _visualPieces.Contains(held.gameObject);
 
             for (int i = 0; i < _visualPieces.Count; i++)
             {
@@ -916,23 +947,42 @@ namespace CrowdMatch
                 if (piece == null)
                     continue;
 
-                piece.transform.DisappearWithPop(() =>
-                {
-                    if (piece != null)
-                        Destroy(piece);
-                }, DisappearPopDuration, DisappearShrinkDuration, restoreScale: false);
+                var tr = piece.transform;
+                float delay = (heldIsPiece && tr == held) ? hold : 0f;   // 被引用的那块延后下沉
+                float moveDuration = dropDuration - delay;
 
-                // 上升补间必须**在 DisappearWithPop 之后**起：那个方法入口会 DOKill()，
-                // 反过来的话刚起的上升会被它杀掉（表现就是「不上升」）。
-                // 匀速 = Linear。
-                if (disappearRiseDistance != 0f)
+                if (moveDuration <= 0f)
                 {
-                    piece.transform
-                        .DOLocalMove(piece.transform.localPosition + Vector3.up * disappearRiseDistance,
-                                     riseDuration)
-                        .SetEase(Ease.Linear);
+                    // 整段下沉都要求静止（静止时长 ≥ 下沉时长）：这一块就不动了，到点直接销毁
+                    DOVirtual.DelayedCall(dropDuration, () =>
+                    {
+                        if (piece != null)
+                            Destroy(piece);
+                    });
+                    continue;
                 }
+
+                tr.DOLocalMove(tr.localPosition - down, moveDuration)
+                    .SetDelay(delay)
+                    .SetEase(Ease.Linear)
+                    .OnComplete(() =>
+                    {
+                        if (piece != null)
+                            Destroy(piece);
+                    });
             }
+
+            if (held != null && !heldIsPiece && hold > 0f)
+            {
+                float speed = disappearDropDistance / dropDuration;
+                Vector3 upInParent = held.parent != null
+                    ? held.parent.InverseTransformDirection(Vector3.up)
+                    : Vector3.up;
+
+                held.DOLocalMove(held.localPosition + upInParent * (speed * hold), hold)
+                    .SetEase(Ease.Linear);
+            }
+
             _visualPieces.Clear();
         }
     }
