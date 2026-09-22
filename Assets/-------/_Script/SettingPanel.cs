@@ -35,7 +35,6 @@ public class SettingData
 
 public class SettingPanel : MonoBehaviour
 {
-
 #if UNITY_EDITOR || NoAds
     public static bool isShowTestPanel = true;
 #else
@@ -78,12 +77,29 @@ public class SettingPanel : MonoBehaviour
     public Button paramsLast;
     public Button homeBtn;
     public Button retryBtn;
+    public Button GMBtn;
+
+    // ========== SO配置 & 动态实例化相关 ==========
+    [Header("GM按钮配置")]
+    public TestBtnConfigSO testBtnConfigSO;
+    [Tooltip("GM按钮预制体，放在TestPanel下，默认关闭")]
+    public Button gmBtnPrefab;
+    [Tooltip("GM按钮挂载父物体")]
+    public Transform gmBtnRoot;
+
+    private Dictionary<string, System.Action> _cmdDict;
+    // 保存动态生成的按钮列表，用于销毁
+    private List<Button> _spawnedGmBtns = new List<Button>();
+
     private void Start()
     {
     }
 
     public void InitSettingPanel()
     {
+        // 初始化指令字典，所有GM命令在这里注册
+        InitCommandDict();
+
         /*paramsNext.onClick.AddListener(ShowOnlineParamsNext);
         paramsLast.onClick.AddListener(ShowOnlineParamsLast);*/
         _musicBtn = transform.Find("BG/MusicPart/MusicBtn");
@@ -97,7 +113,6 @@ public class SettingPanel : MonoBehaviour
         transform.Find("BG/CloseBtn").GetComponent<Button>().onClick.AddListener(OnCloseBtnClk);
 
         var testBtn = transform.Find("BG/Title/Image").GetComponent<EventTrigger>();
-
         var testDownTrigger = new EventTrigger.Entry();
         testDownTrigger.eventID = EventTriggerType.PointerDown;
         testDownTrigger.callback.AddListener(_OnTestBtnDown);
@@ -108,18 +123,12 @@ public class SettingPanel : MonoBehaviour
         testBtn.triggers.Add(testUpTrigger);
 
         transform.Find("BG/InputField/OkBtn").GetComponent<Button>().onClick.AddListener(_OnCheckBtnClk);
-        transform.Find("BG/TestPanel/JumpToLevel/GoBtn").GetComponent<Button>().onClick.AddListener(_OnGoBtnClk);
+        transform.Find("TestPanel/JumpToLevel/GoBtn").GetComponent<Button>().onClick.AddListener(_OnGoBtnClk);
 
-        var testRoot = transform.Find("BG/TestPanel");
-
-        for (int i = 0; i < testPanel.transform.childCount - 1; i++)
-        {
-            var btn = testPanel.transform.GetChild(i + 1).GetComponent<Button>();
-            var index = i;
-
-            if (btn != null)
-                btn.onClick.AddListener(() => { _OnTestBtnClk(index); });
-        }
+        // ===================== 【新版】销毁旧GM按钮 + 根据SO动态生成 =====================
+        DestroyAllSpawnedGmButtons();
+        SpawnGmButtonsFromSO();
+        // ================================================================================
 
         _musicBtn.GetComponent<Button>().onClick.AddListener(OnMusicBtnClk);
         _soundBtn.GetComponent<Button>().onClick.AddListener(OnSoundBtnClk);
@@ -130,13 +139,21 @@ public class SettingPanel : MonoBehaviour
         _backBtn.GetComponent<Button>().onClick.AddListener(OnBackBtnClk);
         homeBtn.onClick.AddListener(OnBackBtnClk);
         _resumeBtn.GetComponent<Button>().onClick.AddListener(OnCloseBtnClk);
-        
-        ShowSettingState(); 
+
+        ShowSettingState();
 
         if (isShowTestPanel)
         {
+            GMBtn.gameObject.SetActive(true);
+            GMBtn.onClick.AddListener(() =>
+            {
+                Debug.Log("GMBtn 被点击");
+                testPanel.SetActive(!isForbidTestPanel);
+                isForbidTestPanel=!isForbidTestPanel;
+                GMBtn.transform.GetChild(0).GetComponent<Text>().text = "GM：" + (isForbidTestPanel ? "开" : "关");
+            });
             testInput.gameObject.SetActive(false);
-            testPanel.SetActive(!isForbidTestPanel);
+            //testPanel.SetActive(!isForbidTestPanel);
             //levelShowText.gameObject.SetActive(true);
             //ShowLevelText();
         }
@@ -161,6 +178,155 @@ public class SettingPanel : MonoBehaviour
 #endif*/
     }
 
+    /// <summary>
+    /// 从SO配置生成GM按钮
+    /// </summary>
+    private void SpawnGmButtonsFromSO()
+    {
+        if (testBtnConfigSO == null || testBtnConfigSO.items == null || gmBtnPrefab == null || gmBtnRoot == null)
+        {
+            Debug.LogWarning("GM按钮配置缺失，无法生成GM按钮！检查testBtnConfigSO、gmBtnPrefab、gmBtnRoot");
+            return;
+        }
+
+        var configList = testBtnConfigSO.items;
+        for (int i = 0; i < configList.Count; i++)
+        {
+            var btnItem = configList[i];
+            // 实例化按钮
+            Button btn = Instantiate(gmBtnPrefab, gmBtnRoot);
+            _spawnedGmBtns.Add(btn);
+            btn.gameObject.SetActive(true);
+
+            string cmd = btnItem.cmdKey;
+            if (_cmdDict.TryGetValue(cmd, out var action))
+            {
+                btn.onClick.RemoveAllListeners();
+                btn.onClick.AddListener(() =>
+                {
+                    GameManager.Instance.TriggerVibrate(1);
+                    action?.Invoke();
+                });
+                var uiText = btn.GetComponentInChildren<Text>();
+                if (uiText != null) 
+                { 
+                    if (btnItem.cmdKey=="AddDay")
+                    {
+                        addDay = uiText;
+                        //uiText.text = btnItem.btnName + "_"+GameData.AddDay;
+                    }
+                    else if (btnItem.cmdKey == "AddHour")
+                    {
+                        addHourText= uiText;
+                        //uiText.text = btnItem.btnName + "_"+GameData.AddHour;
+                    }
+                    uiText.text = btnItem.btnName;
+                    
+                }
+            }
+            else
+            {
+                Debug.LogError($"找不到测试指令 cmdKey={cmd}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 销毁之前动态生成的所有GM按钮
+    /// </summary>
+    private void DestroyAllSpawnedGmButtons()
+    {
+        foreach (var btn in _spawnedGmBtns)
+        {
+            if (btn != null)
+            {
+                Destroy(btn.gameObject);
+            }
+        }
+        _spawnedGmBtns.Clear();
+    }
+
+    // 初始化GM指令映射字典，所有GM功能注册在这里
+    private void InitCommandDict()
+    {
+        _cmdDict = new Dictionary<string, System.Action>()
+        {
+            {
+                "ClearAllData", ()=>
+                {
+                    PlayerPrefs.DeleteAll();
+                    GameData.ResetAll();
+                    StaminaSystemData.ResetData();
+                    GameManager.Instance.ReloadLevel();
+                }
+            },
+            {
+                "WinCurrent", ()=>
+                {
+                    GameData.ClearedPixelCount = GameData.TotalPixelCount;
+                    gameObject.SetActive(false);
+                    GameController.Instance.CheckWin();
+                }
+            },
+            {
+                "GameWinReload", ()=>
+                {
+                    GameManager.Instance.GameWin();
+                    GameManager.Instance.ReloadLevel();
+                }
+            },
+            {
+                "AddGold100", ()=>
+                {
+                    GameData.Gold.Add(100, "GM");
+                    var gp = UIManager.Instance.gameInnerUI;
+                    if (gp != null && gp.gameObject.activeSelf)
+                    {
+                        gp.RefreshGoldCount();
+                    }
+                }
+            },
+            {
+                "AddDay", ()=>
+                {
+                    GameData.AddDay++;
+                    addDay.text =  "+1天:"+ GameData.AddDay;
+                }
+            },
+            {
+                "ShowFailPanel", ()=>
+                {
+                    gameObject.SetActive(false);
+                    UIManager.Instance.showFailPanel(true);
+                }
+            },
+            {
+                "PreLevel", ()=>
+                {
+                    GameData.FailCount = 0;
+                    if (GameData.CurrentLevel > 1)
+                    {
+                        GameData.CurrentLevel--;
+                    }
+                    GameManager.Instance.ReloadLevel();
+                }
+            },
+            {
+                "AddHour", ()=>
+                {
+                    GameData.AddHour++;
+                    addHourText.text = "+1H:" + GameData.AddHour;
+                }
+            },
+            {
+                "InfiniteStamina", ()=>
+                {
+                    StaminaSystemData.AddInfiniteStamina(600,"GM");
+                }
+            }
+        };
+    }
+
     private void OnEnable()
     {
         //ShowSettingState();
@@ -176,15 +342,19 @@ public class SettingPanel : MonoBehaviour
         //     testInput.gameObject.SetActive(false);
         //     testPanel.SetActive(false);
         // }
-
     }
 
     private void OnDisable()
     {
+        // 销毁动态生成按钮，防止残留
+        DestroyAllSpawnedGmButtons();
+
         if (UIManager.Instance.isMainPanelActive)
         {
             UIManager.Instance.settingPanel = null;
         }
+
+        isForbidTestPanel = false;
         Destroy(gameObject);
     }
 
@@ -207,7 +377,6 @@ public class SettingPanel : MonoBehaviour
 
         if (!_backBtn)
             _backBtn = transform.Find("BG/BtnGroup/BackBtn");
-
 
         if (SettingData.MusicSet == 1)
         {
@@ -259,9 +428,16 @@ public class SettingPanel : MonoBehaviour
         }
         else
         {
-            addHourText.text = "+1H " + GameData.AddHour;
+            addHourText.text = "+1H:" + GameData.AddHour;
         }
-        addDay.text = GameData.AddDay.ToString();
+        if (GameData.AddDay == 0)
+        {
+            addDay.text = "+1天";
+        }
+        else
+        {
+            addDay.text = "+1天:" + GameData.AddDay;
+        }
         // if (UIManager.Instance.isMainPanelActive)
         // {
         //     _resumeBtn.gameObject.SetActive(false);
@@ -301,7 +477,6 @@ public class SettingPanel : MonoBehaviour
 
         levelGroupText.text = "关卡组 " + GameData.LevelGroup;
         levelDynText.text = "难度模型 " + GameData.LevelDyn;
-
         if (GameData.LevelDynId == -1)
         {
             levelDynIdText.text = "难度ID";
@@ -328,8 +503,6 @@ public class SettingPanel : MonoBehaviour
         {
             levelColorText.text = "颜色模型 " + GameData.LevelColorId;
         }
-
-        
 
         if (GameManager.Instance.isAutoPlay)
         {
@@ -366,7 +539,6 @@ public class SettingPanel : MonoBehaviour
     {
         if (!UIManager.Instance.isMainPanelActive)
         {
- 
             if (GameState.IsGamePause)
             {
                 GameState.GameStart();
@@ -402,7 +574,6 @@ public class SettingPanel : MonoBehaviour
         GameManager.Instance.ReloadLevel();
         //SceneManager.LoadScene("GameScene");
     }
-
 
     public void OnMusicBtnClk()
     {
@@ -473,7 +644,6 @@ public class SettingPanel : MonoBehaviour
             _vibrateBtn.GetComponent<Button>().targetGraphic = _vibrateBtn.Find("Open").GetComponent<Image>();
         }
     }
-    
 
     public void _OnTestBtnDown(BaseEventData eventData)
     {
@@ -488,7 +658,6 @@ public class SettingPanel : MonoBehaviour
     }
 
     float _timer = 0;
-
     private void Update()
     {
         if (_isDown)
@@ -510,7 +679,15 @@ public class SettingPanel : MonoBehaviour
         {
             testInput.gameObject.SetActive(false);
             isShowTestPanel = true;
-            testPanel.SetActive(!isForbidTestPanel);
+            GMBtn.gameObject.SetActive(true);
+            GMBtn.onClick.AddListener(() =>
+            {
+                Debug.Log("GMBtn 被点击");
+                testPanel.SetActive(!isForbidTestPanel);
+                isForbidTestPanel=!isForbidTestPanel;
+                GMBtn.transform.GetChild(0).GetComponent<Text>().text = "GM：" + (isForbidTestPanel ? "开" : "关");
+            });
+            //testPanel.SetActive(!isForbidTestPanel);
             levelShowText.gameObject.SetActive(true);
             //ShowLevelText();
         }
@@ -530,297 +707,7 @@ public class SettingPanel : MonoBehaviour
         }
     }
 
-    public void _OnTestBtnClk(int index)
-    {
-        ////AudioManager.Instance.playClip(1);
-        GameManager.Instance.TriggerVibrate(1);
-
-        switch (index)
-        {
-            case 0:
-                PlayerPrefs.DeleteAll();
-                GameData.ResetAll();
-                /*HandBookData.ClearData();
-                CollectionPanelData.ResetData();
-                RaceManager.ClearData();*/
-                StaminaSystemData.ResetData();
-                GameManager.Instance.ReloadLevel();
-                /*SkinData.ClearData();
-                BeadPixelData.ClearData();*/
-                break;
-            /*case 1:
-                if (GameData.IsNoAd == false)
-                {
-                    GameData.IsNoAd = true;
-                    noAdTip.text = "开启广告";
-                }
-                else
-                {
-                    GameData.IsNoAd = false;
-                    noAdTip.text = "关闭广告";
-                }
-                break;*/
-            case 2:
-                //Reporter.GameContinue();
-                //GameData.RemovedBoxCount = GameData.TotalBoxCount;
-                GameData.ClearedPixelCount = GameData.TotalPixelCount;
-                gameObject.SetActive(false);
-                GameController.Instance.CheckWin();
-                //GameController.Instance.curLevel.HideExceptGift();
-                /*GameManager.Instance.GameWin();
-                UIManager.Instance.showWinPanel(true);*/
-                break;
-            case 3:
-                //Reporter.GameContinue();
-                GameManager.Instance.GameWin();
-                GameManager.Instance.ReloadLevel();
-
-                //SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-                break;
-            case 4:
-                GameData.Gold.Add(100, "GM");
-                var gp = UIManager.Instance.gameInnerUI;
-                if (gp != null && gp.gameObject.activeSelf)
-                {
-                    gp.RefreshGoldCount();
-                }
-
-                /*var mp = UIManager.Instance.mainPanel;
-                if (mp != null && mp.gameObject.activeSelf)
-                {
-                    mp.GetComponent<MainPanel>().RefreshGoldCount();
-                }*/
-
-                break;
-            case 5:
-                GameData.AddDay++;
-                //OnlineRwardTimer.Instance.ReStartTimer();
-                addDay.text = GameData.AddDay.ToString();
-                break;
-            case 6:
-                gameObject.SetActive(false);
-                UIManager.Instance.showFailPanel(true);
-                break;
-            /*case 7:
-                ShowOnlineParams();
-                break;
-            case 8:
-                GameData.LevelGroup++;
-                if (GameData.LevelGroup >= GameManager.Instance.levelDatas.Length)
-                {
-                    GameData.LevelGroup = 0;
-                }
-
-                levelGroupText.text = "关卡组 " + GameData.LevelGroup;
-                break;
-            case 9:
-                GameData.MaterialAB++;
-                if (GameData.MaterialAB >= 2)
-                {
-                    GameData.MaterialAB = 0;
-                }
-
-                break;
-            case 10:
-                GameData.LevelDyn = 1 - GameData.LevelDyn;
-                levelDynText.text = "难度模型 " + GameData.LevelDyn;
-                break;
-            case 11:
-                if (GameInnerUI.hideUI)
-                {
-                    GameInnerUI.hideUI = false;
-                    hideUITip.text = "隐藏UI";
-                }
-                else
-                {
-                    GameInnerUI.hideUI = true;
-                    hideUITip.text = "显示UI";
-                }
-
-                break;
-            case 12:
-                if (GameData.TestTaskSystem)
-                {
-                    GameData.TestTaskSystem = false;
-                    testTaskSystemText.text = "开启任务测试";
-                }
-                else
-                {
-                    GameData.TestTaskSystem = true;
-                    testTaskSystemText.text = "关闭任务测试";
-                }
-
-                break;*/
-            case 13:
-                GameData.FailCount = 0;
-                //GameData.RetryCount = 0;
-                if (GameData.CurrentLevel > 1)
-                {
-                    GameData.CurrentLevel--;
-                }
-
-                GameManager.Instance.ReloadLevel();
-                break;
-            /*case 14:
-                GameData.IsAllSystemOpen = true;
-                break;
-            case 15:
-                if (GameData.LevelDynId == 3)
-                {
-                    GameData.LevelDynId = 9;
-                }
-                else if (GameData.LevelDynId == 13)
-                {
-                    GameData.LevelDynId = 20;
-                }
-                else if (GameData.LevelDynId == 23)
-                {
-                    GameData.LevelDynId = 30;
-                }
-                else if (GameData.LevelDynId == 32)
-                {
-                    GameData.LevelDynId = -1;
-                }
-                else
-                {
-                    GameData.LevelDynId++;
-                }
-
-                if (GameData.LevelDynId == -1)
-                {
-                    levelDynIdText.text = "难度ID";
-                }
-                else
-                {
-                    levelDynIdText.text = "难度ID " + GameData.LevelDynId;
-                }
-
-                break;
-            case 16:
-                if (GameData.MaxColorLow >= 4)
-                {
-                    GameData.MaxColorLow = 0;
-                }
-                else
-                {
-                    GameData.MaxColorLow++;
-                }
-
-                if (GameData.MaxColorLow == 0)
-                {
-                    maxColorText.text = "减颜色";
-                }
-                else
-                {
-                    maxColorText.text = "减颜色 " + GameData.MaxColorLow;
-                }
-
-                break;*/
-            case 17:
-                GameData.AddHour++;
-                //OnlineRwardTimer.Instance.ReStartTimer();
-                addHourText.text = "+1H " + GameData.AddHour;
-                break;
-            /*case 18:
-                GameManager.Instance.isAutoPlay = !GameManager.Instance.isAutoPlay;
-                if (GameManager.Instance.isAutoPlay)
-                {
-                    OnCloseBtnClk();
-                }
-                else
-                {
-                    autoTapeText.text = "自动撕";
-                }
-                break;
-            case 19:
-                GameManager.Instance.isDebugLevel = !GameManager.Instance.isDebugLevel;
-                if (GameManager.Instance.isDebugLevel)
-                {
-                    debugTapeText.text = "取消随意";
-                }
-                else
-                {
-                    debugTapeText.text = "随意撕";
-                }
-                break;*/
-            /*case 20:
-                GameData.itemPlayerData.AddCount(ItemType.Add, 100, way: "GM", needReport: false);
-                GameData.itemPlayerData.AddCount(ItemType.Remove, 100, way: "GM", needReport: false);
-                GameData.itemPlayerData.AddCount(ItemType.Clear, 100, way: "GM", needReport: false);
-                break;
-            case 21:
-                GameManager.Instance.isAutoGame = !GameManager.Instance.isAutoGame;
-                if (GameManager.Instance.isAutoGame)
-                {
-                    OnCloseBtnClk();
-                }
-                else
-                {
-                    autoGameText.text = "自动过关";
-                }
-
-                break;
-            case 22:
-                HandBookData.Test();
-                break;
-            case 23:
-                GameData.VibrateLevel++;
-                if (GameData.VibrateLevel >= 3)
-                {
-                    GameData.VibrateLevel = 0;
-                }
-
-                vibrateLevelText.text = "振动等级 " + GameData.VibrateLevel;
-                break;
-            case 24:
-                GameData.VibrateTick++;
-                if (GameData.VibrateTick >= 6)
-                {
-                    GameData.VibrateTick = 0;
-                }
-
-                vibrateTickText.text = "振动间隔 " + GameData.VibrateTick;
-                break;
-            case 25:
-                var item = BeadPixelData.IsBeadPixelTexAllCompleted();
-                if (item is { Item1: false, Item2: false })
-                {
-                    int addCount = BeadPixelData.AddBeadCount();
-                    Debug.LogError($"添加{addCount}个拼豆");
-                }
-                else
-                {
-                    Debug.LogError("所有拼豆图已完成");
-                }
-
-                break;*/
-            case 26:
-                StaminaSystemData.AddInfiniteStamina(600,"GM");
-                break;
-            /*case 27:
-                if (GameData.LevelColorId >= 4)
-                {
-                    GameData.LevelColorId = -1;
-                }
-                else
-                {
-                    GameData.LevelColorId++;
-                }
-
-                if (GameData.LevelColorId == -1)
-                {
-                    levelColorText.text = "颜色模型";
-                }
-                else
-                {
-                    levelColorText.text = "颜色模型 " + GameData.LevelColorId;
-                }
-
-                break;*/
-            default:
-                break;
-        }
-    }
+    /* ======== 已移除旧的 _OnTestBtnClk 方法 ======== */
 
     /*private void ShowOnlineParamsLast()
     {
