@@ -55,6 +55,20 @@ namespace CrowdMatch
         [Tooltip("倍数数字（UI Text，留空自动从子物体查找），显示为 x{倍数}")]
         public Text multiplierText;
 
+        [Tooltip("左柱（可选，留空则不动）：摆到门线段「格序小」的一端（colMin / rowMin 侧），" +
+                 "在基准位置基础上向外偏移 (格数-1)/2 × 该轴向的网格实际格距")]
+        public Transform leftPillar;
+
+        [Tooltip("右柱（可选，留空则不动）：摆到门线段「格序大」的一端（colMax / rowMax 侧），偏移同上")]
+        public Transform rightPillar;
+
+        [Tooltip("左右柱的**基准**局部位置（= 偏移量为 0 时柱子该在的位置），首次摆放时从柱子当前局部位置自动记录，" +
+                 "勿手改；实际位置 = 基准 + 延展轴偏移，所以预制体上美术手调的 X 不会被覆盖")]
+        [SerializeField, HideInInspector] private Vector3 _leftPillarBase;
+        [SerializeField, HideInInspector] private Vector3 _rightPillarBase;
+        [SerializeField, HideInInspector] private bool _leftPillarBaseRecorded;
+        [SerializeField, HideInInspector] private bool _rightPillarBaseRecorded;
+
         [Header("Gizmos")]
         [Tooltip("门格的颜色")]
         public Color gizmoColor = new Color(0.45f, 0.85f, 1f, 0.75f);
@@ -229,6 +243,11 @@ namespace CrowdMatch
             transform.localPosition = (a + b) * 0.5f;
             transform.localRotation = Quaternion.identity;
 
+            // 门线段的**世界**方向（格序小端 → 格序大端）；本体网格与左右柱都用它换算各自的轴向。
+            // 取 min → max 而不是 start → end，是为了让左右柱的「左 / 右」与点选顺序无关；
+            // 本体只取绝对值判轴向，所以这个改动对本体无影响。
+            Vector3 worldDir = pg.GetWorldPosition(colMax, rowMax) - pg.GetWorldPosition(colMin, rowMin);
+
             Transform body = bodyMesh != null ? bodyMesh : FindBodyMesh();
             if (body != null)
             {
@@ -236,7 +255,6 @@ namespace CrowdMatch
                 // 横门（沿列）× 本体本地 +X 本来就对上网格 X，保持预制体原朝向；
                 // 竖门（沿行）绕 Y 转 90°，让本地 +X 对上网格 Z。
                 // 方向先换算到 PixelGroup 局部空间，这样外层被整体旋转过也成立。
-                Vector3 worldDir = pg.GetWorldPosition(cb.x, cb.y) - pg.GetWorldPosition(ca.x, ca.y);
                 Vector3 dir = body.parent != null
                     ? body.parent.InverseTransformDirection(worldDir)
                     : worldDir;
@@ -252,7 +270,98 @@ namespace CrowdMatch
                 body.localScale = scale;
             }
 
+            ApplyPillars(pg, worldDir, cells.Count);
+
             UpdateDisplay();
+        }
+
+        /// <summary>
+        /// 摆放左右柱：<c>实际位置 = 基准位置 ± 延展轴偏移</c>，偏移量 = <c>(格数-1)/2 × 该轴向的网格实际格距</c>
+        /// —— 即从整段中心移到首格 / 尾格**格心**的距离。
+        ///
+        /// 口径（已与用户核对）：
+        /// · **单位是网格实际格距**（横门取 <see cref="PixelGroup.CellSizeX"/>、竖门取
+        ///   <see cref="PixelGroup.CellSizeZ"/>），不是 <see cref="bodyCellScale"/>、也不是 unitSize；
+        ///   于是 spacingX ≠ spacingZ 时横门与竖门的偏移量不同。
+        /// · **在基准位置基础上偏移，不覆盖基准**：柱子预制体上美术手调的 X 得以保留。
+        ///   基准只记录一次（见 <see cref="CapturePillarBase"/>），之后每次重建都是「基准 + 偏移」。
+        /// · **生效时机与本体一致**：在每次 <see cref="BuildVisual"/> 里重算（创建菜单 /「重建显示」/
+        ///   关卡初始化三条路都会走到）。
+        /// · 只写延展轴的那**一个**分量，另两个分量保留预制体原值（同木箱钉子的做法）。
+        /// · 「左柱」= 格序小的一端（colMin / rowMin），「右柱」= 格序大的一端；横竖两种走向都成立，
+        ///   与点选顺序无关。偏移本身对称，只有左右柱模型不对称时这个区分才有意义。
+        /// · **不改柱子旋转**：若柱子模型有朝向需求（例如柱头要朝门内），需要另行补一条旋转规则。
+        /// </summary>
+        private void ApplyPillars(PixelGroup pg, Vector3 worldDir, int cellCount)
+        {
+            if (leftPillar == null && rightPillar == null)
+                return;
+
+            // 横 / 竖以 **PixelGroup 局部空间**判定（worldDir 在世界空间，外层整体旋转过就不准了）
+            Vector3 dirInGroup = pg.transform.InverseTransformDirection(worldDir);
+            float pitch = Mathf.Abs(dirInGroup.x) >= Mathf.Abs(dirInGroup.z)
+                ? pg.CellSizeX
+                : pg.CellSizeZ;
+
+            float offset = (Mathf.Max(1, cellCount) - 1) * 0.5f * pitch;
+
+            if (leftPillar != null)
+            {
+                CapturePillarBase(leftPillar, ref _leftPillarBase, ref _leftPillarBaseRecorded);
+                PlacePillar(leftPillar, _leftPillarBase, worldDir, -offset);
+            }
+
+            if (rightPillar != null)
+            {
+                CapturePillarBase(rightPillar, ref _rightPillarBase, ref _rightPillarBaseRecorded);
+                PlacePillar(rightPillar, _rightPillarBase, worldDir, offset);
+            }
+        }
+
+        /// <summary>
+        /// 记录柱子的基准局部位置（= 偏移量为 0 时该在的位置），**只记一次**。
+        ///
+        /// 必须只记一次、且必须序列化：若每次都从「当前局部位置」重记，记到的会是上一次已经偏移过的位置，
+        /// 反复重建就会累积漂移（同 IceItem 的基准值被域重载反复捕获那类问题）。
+        /// 持久化由调用方负责 —— 编辑器两条路径（创建菜单、Inspector 的「重建显示」）之后都会
+        /// <c>SetDirty(gate)</c>；Play 模式下不写盘也无妨，下次实例化从预制体重新捕获即可。
+        /// </summary>
+        private static void CapturePillarBase(Transform pillar, ref Vector3 basePos, ref bool recorded)
+        {
+            if (recorded)
+                return;
+
+            basePos = pillar.localPosition;
+            recorded = true;
+        }
+
+        /// <summary>
+        /// 重新记录左右柱的基准位置：把两根柱子**当前**的局部位置当作基准（即「偏移量为 0 时该在的位置」）。
+        /// 所以用之前要先把柱子摆到「只有 1 格门」时的位置；下一次 <see cref="BuildVisual"/> 会按新基准重新偏移。
+        /// 供 Inspector 的「重新记录基准位置」按钮使用（基准字段是 HideInInspector，没有别的修正途径）。
+        /// </summary>
+        public void RecapturePillarBase()
+        {
+            _leftPillarBaseRecorded = false;
+            _rightPillarBaseRecorded = false;
+        }
+
+        /// <summary>
+        /// 把一根柱子放到「基准位置 ± offset」（沿延展轴）。延展轴在**柱子自己的父空间**里换算并取主轴，
+        /// 与本体网格换算轴向的写法一致；这样柱子挂在与本体不同的父物体下（甚至父级带旋转）也成立。
+        /// </summary>
+        private static void PlacePillar(Transform pillar, Vector3 basePos, Vector3 worldDir, float offset)
+        {
+            Vector3 dir = pillar.parent != null
+                ? pillar.parent.InverseTransformDirection(worldDir)
+                : worldDir;
+            bool horizontal = Mathf.Abs(dir.x) >= Mathf.Abs(dir.z);
+
+            // 基准只在延展轴那一个分量上参与计算；另两个分量取预制体当前值，保证美术后调的 y / z 也生效
+            Vector3 p = pillar.localPosition;
+            pillar.localPosition = horizontal
+                ? new Vector3(basePos.x + offset, p.y, p.z)
+                : new Vector3(p.x, p.y, basePos.z + offset);
         }
 
         private Transform FindBodyMesh()
@@ -260,6 +369,12 @@ namespace CrowdMatch
             foreach (var f in GetComponentsInChildren<MeshFilter>(true))
             {
                 if (f == null || f.transform == transform)
+                    continue;
+                // 左右柱一般也带 MeshFilter：本体自动查找必须跳过它们（含它们的子物体），
+                // 否则「bodyMesh 留空」时会把柱子认成门本体并给它套上门的长度缩放。
+                if (leftPillar != null && f.transform.IsChildOf(leftPillar))
+                    continue;
+                if (rightPillar != null && f.transform.IsChildOf(rightPillar))
                     continue;
                 return f.transform;
             }
