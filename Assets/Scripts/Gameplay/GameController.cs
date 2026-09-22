@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using DG.Tweening;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace CrowdMatch
@@ -158,7 +159,7 @@ namespace CrowdMatch
                 return;
 
             Debug.Log("[GameController] 加载关卡 " + level + "（JSON：" + json.name + "）");
-
+            UIManager.Instance.Init();
 #if UNITY_EDITOR
             LevelDataCache.LastInitData = null;   // 清空上次缓存，避免加载失败时残留旧数据
 #endif
@@ -169,11 +170,6 @@ namespace CrowdMatch
                 LevelLoader.ShuffleContainers(data.container);
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
-
-            // 建绳必须在 Apply 之后（依赖已重建的网格与车的列位置）；洗牌开启时不建绳、绳组不生效。
-            if (containerGroup != null)
-                containerGroup.BuildRopes(!data.container.lockContainer);
-
             pixelGroup.RefreshExposed();
             RefreshFrame();
 
@@ -183,22 +179,16 @@ namespace CrowdMatch
 #endif
 
             GameData.Init(true);
-            // 倍乘门：额外产生的像素是真实像素、会被真实消费，总数少算就永远无法通关（与容器规划同一份口径）
-            GameData.TotalPixelCount = CountPixels() + CountPipePixels() + CountGateExtraPixels();
+            GameData.TotalPixelCount = CountPixels() + CountPipePixels();
             GameData.ClearedPixelCount = 0;
 
             if (recordMode)
                 BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
         }
 
-        /// <summary>重建整体描边与冰冻状态；各自未使用时都是空操作。</summary>
+        /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
         private void RefreshFrame()
         {
-            // 冰组的冻结掩码必须跟暴露状态一起刷新：开箱 / 升降台推进会重建网格，
-            // 新生成的像素要立刻带上冻结标志（否则会被漏掉、冻不住）。
-            if (pixelGroup != null)
-                pixelGroup.RefreshIceState();
-
             if (frameItem == null)
                 return;
             frameItem.Build();
@@ -266,7 +256,7 @@ namespace CrowdMatch
         }
 
         /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
-        private void CheckWin()
+        public void CheckWin()
         {
             if (_transitioning)
                 return;
@@ -276,7 +266,8 @@ namespace CrowdMatch
             {
                 _transitioning = true;
                 GameState.GameWin();
-                Invoke(nameof(DoGameWin), 1.5f);
+                Invoke(nameof(DoGameWin), 2.5f);
+                UIManager.Instance.ShowWinPart();
             }
         }
 
@@ -306,8 +297,9 @@ namespace CrowdMatch
             {
                 _transitioning = true;
                 _lastFailCheckLog = null;   // 真判了失败：清掉去重记忆，复活后的诊断不被旧行压掉
-                GameState.GameFail();
-                Invoke(nameof(DoRevive), 1.5f);
+                //GameState.GameFail();
+                UIManager.Instance.showRevivePanel(true);
+                //Invoke(nameof(DoRevive), 1.5f);
                 return;
             }
             LogFailCheck(checkpoint, reason);
@@ -446,13 +438,17 @@ namespace CrowdMatch
 
         private void DoGameWin()
         {
+            Debug.Log("Game Win");
             var gm = GameManager.Instance;
             if (gm != null)
+            {
                 gm.GameWin();
+                UIManager.Instance.showWinPanel(true);
+            }
         }
 
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
-        private void DoRevive()
+        public void DoRevive()
         {
             Revive();
             GameState.GameStart();   // 复活后回到游玩态，继续本关
@@ -704,20 +700,19 @@ namespace CrowdMatch
 
         private void HandleClick()
         {
+            // =====新增：如果鼠标在UGUI上，直接跳过3D点击，射线不穿透UI=====
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 鼠标在UI上，跳过物理射线");
+                return;
+            }
             // 提取进行中仍允许点击：每次匹配作为独立批次，各自独立寻路（组间可穿模），无需等待上一批离场。
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 忽略点击：引用缺失 pixelGroup=" + (pixelGroup != null) +
                         " gatherPoint=" + (gatherPoint != null) + " Camera.main=" + (Camera.main != null));
-                return;
-            }
-
-            // 堆积限制：传送带 + 已点未进带 达容量且已累计两次点击时，忽略本次点击
-            if (!PassOverflowClickGate())
-            {
-                if (debugClickLog)
-                    Debug.Log("[Click] 堆积限制：已达容量且累计两次点击，忽略本次点击");
                 return;
             }
 
@@ -751,6 +746,18 @@ namespace CrowdMatch
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 命中 " + item.name + " 但为未揭晓问号 Pixel，忽略点击");
+                return;
+            }
+
+            // ==========【堆积限制移到这里：拿到有效像素item之后才判断】==========
+            if (!PassOverflowClickGate())
+            {
+                if (debugClickLog)
+                {
+                    Debug.Log("[Click] 堆积限制：已达容量且累计两次点击，忽略本次点击");
+                }
+                // 只有点到有效像素才弹提示
+                UIManager.Instance.ShowTip("排队人数过多，请稍后");
                 return;
             }
 
@@ -790,6 +797,7 @@ namespace CrowdMatch
                     (conveyorZone != null ? conveyorZone.TotalSlots : 0) +
                     " count=" + _overflowClickCount);
         }
+
 
         /// <summary>
         /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。

@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 5441232491614512729}
   - component: {fileID: 6398285997500483622}
   - component: {fileID: 5093066979289341452}
-  m_Layer: 5
+  m_Layer: 0
   m_Name: Canvas Emoji with glasses Stroke
   m_TagString: Untagged
   m_Icon: {fileID: 0}
