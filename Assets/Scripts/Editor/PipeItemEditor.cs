@@ -29,6 +29,16 @@ namespace CrowdMatch
                 colorId => GridFillUtility.RemoveAndFillPixels(
                     pipeGo, group, cells, colorId, "移除管道并填充 Pixel"));
 
+            // 剩余波次数字的偏移是「以原始位置为基准」应用的，原位是记在序列化字段里的；
+            // 想把数字整体挪个地方（或把已偏移的位置误当成了原位）时按这个按钮重置基准。
+            if (GUILayout.Button("重新记录剩余波次数字的基准位置"))
+            {
+                Undo.RecordObject(pipe, "重新记录数字基准位置");
+                pipe.RecaptureTextBase();
+                EditorUtility.SetDirty(pipe);
+                SceneView.RepaintAll();
+            }
+
             if (pipe.points == null || pipe.points.Count < 2)
             {
                 EditorGUILayout.HelpBox("至少需要 2 个端点：points[0] = 管道格，其余为轨道格（每波像素的目标格）。", MessageType.Info);
