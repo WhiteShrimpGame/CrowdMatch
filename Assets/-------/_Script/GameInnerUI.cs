@@ -35,7 +35,9 @@ public class GameInnerUI : MonoBehaviour
     Vector3 levelScale;
     float levelScaleMulti = 1;
 
-    [Header("HardLevel")] [SerializeField] Image hardTipBgImg;
+    [Header("HardLevel")] 
+    [SerializeField] Image hardTipBgImg;
+    [SerializeField] Image superHardTipBgImg;
     [SerializeField] Sprite hardTipBgHard;
     [SerializeField] Sprite hardTipBgSuperHard;
 
@@ -94,6 +96,8 @@ public class GameInnerUI : MonoBehaviour
         //UpdateCurrentButtonInfo();
 
         //StartCoroutine("Start");
+        levelText.text = "第 " + GameData.CurrentLevel + " 关";
+        ShowHardTip();
         Init();
     }
 
@@ -742,34 +746,46 @@ public class GameInnerUI : MonoBehaviour
         
         Transform img = null, endImg = null;
 
-        /*if (GameData.LevelDiff == 1)
+        if (GameData.LevelDiff == 1)
         {
+            SetOutlineHex(levelText,"#6406c2");
             hardTipBgImg.sprite = hardTipBgHard;
+            //hardTipBgImg.gameObject.SetActive(true);
             endImg = levelBgHardImg;
             img = hardTipHardImg;
             img.position = hardImgPos;
             img.localScale = hardImgScale;
             hardTipHardText.gameObject.SetActive(true);
+            //SetOutlineHex("#6406c2");
+            endImg.parent.gameObject.SetActive(true);
 
+            levelBgSuperHardImg.parent.gameObject.SetActive(false);
             levelBgSuperHardImg.gameObject.SetActive(false);
             hardTipSuperHardText.gameObject.SetActive(false);
             hardTipSuperHardImg.gameObject.SetActive(false);
         }
         else if (GameData.LevelDiff == 2)
         {
+            SetOutlineHex(levelText,"#7f0a08");
             hardTipBgImg.sprite = hardTipBgSuperHard;
+            //superHardTipBgImg.gameObject.SetActive(true);
             endImg = levelBgSuperHardImg;
             img = hardTipSuperHardImg;
             img.position = superHardImgPos;
             img.localScale = superHardImgScale;
             hardTipSuperHardText.gameObject.SetActive(true);
+            endImg.parent.gameObject.SetActive(true);
 
+            levelBgHardImg.parent.gameObject.SetActive(false);
             levelBgHardImg.gameObject.SetActive(false);
             hardTipHardText.gameObject.SetActive(false);
             hardTipHardImg.gameObject.SetActive(false);
         }
-        else*/
+        else
         {
+            SetOutlineHex(levelText,"#ffffff");
+            levelBgSuperHardImg.parent.gameObject.SetActive(false);
+            levelBgHardImg.parent.gameObject.SetActive(false);
             levelBgHardImg.gameObject.SetActive(false);
             levelBgSuperHardImg.gameObject.SetActive(false);
             hardTip.gameObject.SetActive(false);
@@ -857,6 +873,14 @@ public class GameInnerUI : MonoBehaviour
                     gp.transform.Find("HardLevel").gameObject.SetActive(true);
                 }
             }*/
+        }
+    }
+    //动态改描边颜色
+    public void SetOutlineHex(Text text, string hexColor)
+    {
+        if (text.GetComponent<Outline>()!=null)
+        {
+            text.GetComponent<Outline>().effectColor = WSGameTools.HexToColor(hexColor);
         }
     }
 }

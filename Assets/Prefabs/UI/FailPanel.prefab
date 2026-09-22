@@ -1764,6 +1764,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: GoldFrame
       objectReference: {fileID: 0}
+    - target: {fileID: 6499546695462579638, guid: 87e1c847a5122ff41924324cce0aaf64, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 8572028269621925647, guid: 87e1c847a5122ff41924324cce0aaf64, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5

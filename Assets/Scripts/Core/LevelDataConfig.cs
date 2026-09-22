@@ -16,7 +16,8 @@ namespace CrowdMatch
 
         [Tooltip("循环关卡：顺序关用尽后循环取用。留空表示有限关卡集（越界返回 null）")]
         public List<TextAsset> loopLevels = new List<TextAsset>();
-
+        public List<int> levelDiff;
+        public List<int> levelDiffLoop;
         /// <summary>
         /// 解析 1 起始关卡编号对应的 JSON。解析顺序：
         ///   1. 落在 levels 内 → 返回之

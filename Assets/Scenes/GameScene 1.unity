@@ -963,6 +963,65 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 60, y: -30, z: 0}
+--- !u!1 &767222467
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 767222469}
+  - component: {fileID: 767222468}
+  m_Layer: 0
+  m_Name: EmojiManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &767222468
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 767222467}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b942e5ef6b950f6458c8671dd472e821, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  emojiDuration: 3
+  emojiScale: 0.6
+  speeds:
+  - tag: EmojiHappy
+    speed: 2
+  happyChance: 0.6
+  happyTag: EmojiHappy
+  sleepTag: EmojiSleep
+  angryChance: 0.7
+  angryCooldown: 3
+  angryTag: EmojiAngry
+  angryJumpChancePerPixel: 0.1
+  angryJumpCooldown: 3
+  queueAngryChancePerPixel: 0.1
+  queueAngryWaitSeconds: 5
+--- !u!4 &767222469
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 767222467}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 20
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &782126356
 GameObject:
   m_ObjectHideFlags: 0
@@ -2359,7 +2418,7 @@ MonoBehaviour:
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
-  emojiManager: {fileID: 0}
+  emojiManager: {fileID: 767222468}
   staminaConfig: {fileID: 11400000, guid: 67e6055727302cc4296f0ce4981add9c, type: 2}
 --- !u!4 &1940794605
 Transform:
@@ -2389,6 +2448,7 @@ GameObject:
   - component: {fileID: 2009994645}
   - component: {fileID: 2009994644}
   - component: {fileID: 2009994643}
+  - component: {fileID: 2009994647}
   m_Layer: 5
   m_Name: NextLvl (1)
   m_TagString: Untagged
@@ -2512,6 +2572,18 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2009994641}
   m_CullTransparentMesh: 1
+--- !u!114 &2009994647
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2009994641}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d6467164b9ba041489284b37f1cb17a7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &2031714337
 GameObject:
   m_ObjectHideFlags: 0

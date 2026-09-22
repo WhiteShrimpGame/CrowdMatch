@@ -131,5 +131,36 @@ namespace CrowdMatch
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
         }
+        /// <summary>关卡难度 (0=普通, 1=困难, 2=超难) / Level difficulty</summary>
+        //public static int LevelDiff = 0;
+        public static int LevelDiff
+        {
+            get
+            {
+                //var levelIndex = CurrentLevelIndex;
+                int count = GameManager.Instance.levelDataConfig.levels.Count;
+                int countLoop = GameManager.Instance.levelDataConfig.loopLevels.Count;
+                Debug.Log(count);
+                Debug.Log(countLoop);
+                if (CurrentLevel <= count)
+                {
+                    Debug.Log(CurrentLevel-1);
+                    return GameManager.Instance.levelDataConfig.levelDiff[CurrentLevel-1];
+                }
+                else if (countLoop > 0)
+                {
+                    int level = (CurrentLevel - count) % (countLoop)-1;
+                    if (level == -1)
+                    {
+                        level = countLoop - 1;
+                    }
+                    if (level < countLoop)
+                    {
+                        return GameManager.Instance.levelDataConfig.levelDiffLoop[level];
+                    }
+                }
+                return 0;
+            }
+        }
     }
 }

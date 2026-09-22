@@ -201,4 +201,14 @@ public static class WSGameTools
 
         return worldPos;
     }
+    // 十六进制颜色转Color工具函数
+    public static Color HexToColor(string hex)
+    {
+        hex = hex.Replace("#", "");
+        float r = byte.Parse(hex.Substring(0,2), System.Globalization.NumberStyles.HexNumber) / 255f;
+        float g = byte.Parse(hex.Substring(2,2), System.Globalization.NumberStyles.HexNumber) / 255f;
+        float b = byte.Parse(hex.Substring(4,2), System.Globalization.NumberStyles.HexNumber) / 255f;
+        float a = hex.Length >= 8 ? byte.Parse(hex.Substring(6,2), System.Globalization.NumberStyles.HexNumber) / 255f : 1f;
+        return new Color(r,g,b,a);
+    }
 }

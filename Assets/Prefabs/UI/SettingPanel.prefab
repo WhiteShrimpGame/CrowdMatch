@@ -13823,6 +13823,8 @@ MonoBehaviour:
   levelShowText: {fileID: 0}
   paramsNext: {fileID: 0}
   paramsLast: {fileID: 0}
+  homeBtn: {fileID: 4084121119573648662}
+  retryBtn: {fileID: 2219626913363875014}
 --- !u!1 &8783159860195889691
 GameObject:
   m_ObjectHideFlags: 0

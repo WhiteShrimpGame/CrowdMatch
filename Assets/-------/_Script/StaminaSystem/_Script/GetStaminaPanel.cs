@@ -44,8 +44,8 @@ public class GetStaminaPanel : MonoBehaviour
     /// </summary>
     private void GetPropPanelMethod()
     {
-        StaminaSystemData.AddStamina(1,"coin",false);
-        /*AudioManager.Instance.PlayButtonAudioAndVibrate();
+        //StaminaSystemData.AddStamina(1,"coin",false);
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
         int count = StaminaSystemData.MaxStamina - StaminaSystemData.GetCurrentStamina();
         if (price > 0 && GameData.Gold.CheckEnough(price*count))
         {
@@ -54,13 +54,13 @@ public class GetStaminaPanel : MonoBehaviour
             StaminaSystemData.AddStamina(count,"coin",false);
             //Reporter.StaminaGet(count,"coin");
             RefreshUI();
-            UIManager.Instance.mainPanel.GetComponent<MainPanel>().RefreshGoldCount();
+            //UIManager.Instance.mainPanel.GetComponent<MainPanel>().RefreshGoldCount();
             ClosePanelMethod();
         }
         else
         {
             UIManager.Instance.ShowTip("金币不够");
-        }*/
+        }
     }
     void OnFreeButtOnClick()
     {
@@ -127,6 +127,7 @@ public class GetStaminaPanel : MonoBehaviour
         price = staminaConfig.GoldBuyPrice;
         allPrice.text = (price*(StaminaSystemData.MaxStamina-StaminaSystemData.GetCurrentStamina())).ToString();
         goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
+        UIManager.Instance.gameInnerUI.RefreshGoldCount();
     }
 
     private void ClosePanelMethod()

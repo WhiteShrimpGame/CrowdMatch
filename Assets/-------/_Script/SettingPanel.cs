@@ -76,6 +76,8 @@ public class SettingPanel : MonoBehaviour
     private bool _isDown = false;
     public Button paramsNext;
     public Button paramsLast;
+    public Button homeBtn;
+    public Button retryBtn;
     private void Start()
     {
     }
@@ -124,7 +126,9 @@ public class SettingPanel : MonoBehaviour
         _vibrateBtn.GetComponent<Button>().onClick.AddListener(OnVibrateBtnClk);
 
         _retryBtn.GetComponent<Button>().onClick.AddListener(OnRetryBtnClk);
+        retryBtn.onClick.AddListener(OnRetryBtnClk);
         _backBtn.GetComponent<Button>().onClick.AddListener(OnBackBtnClk);
+        homeBtn.onClick.AddListener(OnBackBtnClk);
         _resumeBtn.GetComponent<Button>().onClick.AddListener(OnCloseBtnClk);
         
         ShowSettingState(); 
@@ -380,7 +384,11 @@ public class SettingPanel : MonoBehaviour
     {
         ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
-        gameObject.SetActive(false);
+        {
+            GameState.GameStart();
+            UIManager.Instance.ShowSettingPanel(false);
+        }
+        //gameObject.SetActive(false);
 
         //GameManager.Instance.ReloadScene(false);
         //SceneManager.LoadScene("GameScene");
