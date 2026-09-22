@@ -93,6 +93,31 @@ namespace CrowdMatch
         [Tooltip("木箱中心格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
         public GameObject crateCenterPrefab;
 
+        [Tooltip("木箱封条预制体：**长度轴为局部 +X**（做在 +Z 就把 crateSealYawOffset 填 90），" +
+                 "长度按 **1 世界单位**制作。脚本**只动 x 缩放**（乘上「钉子间距 + crateSealExtend」的世界长度），" +
+                 "y / z 缩放与局部 y 位置都保留预制体原值")]
+        public GameObject crateSealPrefab;
+
+        [Tooltip("木箱钉子预制体：每条封条两端各钉一颗；不缩放、朝向不动，" +
+                 "局部 y 位置保留预制体原值（只由脚本定 x / z）")]
+        public GameObject crateNailPrefab;
+
+        [Tooltip("封条内偏移（xz，**Pixel 单位** = unitSize 的倍数）：以木箱矩形的四角为参考向箱内偏移，" +
+                 "偏移到的位置就是钉子位置")]
+        public Vector2 crateSealInset = new Vector2(0.5f, 0.5f);
+
+        [Tooltip("封条固定延长值（Pixel 单位）：封条长度 = 钉子间距 + 此值，于是两端各露出一截")]
+        public float crateSealExtend = 0.25f;
+
+        [Tooltip("封条与钉子整体离地高度（Pixel 单位）；预制体自己已经把高度做进去了就留 0")]
+        public float crateSealHeight = 0f;
+
+        [Tooltip("**先摘掉**的那条封条额外抬高的 Y（Pixel 单位），避免两条在交叉点重叠打架")]
+        public float crateSealFirstLift = 0.05f;
+
+        [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
+        public float crateSealYawOffset = 0f;
+
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
 
@@ -656,7 +681,10 @@ namespace CrowdMatch
                     continue;                    // 未暴露（或本次点击才让它暴露）：这次不消耗
 
                 if (ice.ConsumeOne())
+                {
                     anyMelted = true;
+                    ice.PlayMeltEffect();        // 刚化开：生成融化特效 + 播音效（冰上自己配 tag）
+                }
                 else
                     ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
             }

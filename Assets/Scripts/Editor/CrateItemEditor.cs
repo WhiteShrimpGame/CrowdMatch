@@ -73,6 +73,23 @@ namespace CrowdMatch
                 crate.movedOutCount + " / " + Mathf.Max(1, crate.destroyAfterMoves) +
                 "（还需 " + crate.RemainingMoves + " 次相邻移出）");
 
+            // 计数表现：封条条数 = 次数 − 1（上限 2）。次数超出时要说清楚，否则「点了没反应」找不到原因。
+            int moves = Mathf.Max(1, crate.destroyAfterMoves);
+            int sealCount = crate.SealCount;
+            EditorGUILayout.LabelField("封条数", sealCount + "（次数 " + moves + " − 1，上限 2）");
+
+            if (!crate.destroyed && sealCount > 0 &&
+                (pg.crateSealPrefab == null || pg.crateNailPrefab == null))
+            {
+                EditorGUILayout.HelpBox("PixelGroup 上未配 crateSealPrefab / crateNailPrefab，" +
+                    "木箱不会拼封条与钉子（拆箱逻辑不受影响）。", MessageType.Warning);
+            }
+            else if (!crate.destroyed && moves - 1 > sealCount)
+            {
+                EditorGUILayout.HelpBox("次数 " + moves + " > 3：封条最多 2 条，前 " + (moves - 1 - sealCount) +
+                    " 次点击只减次数、不摘封条（点上去视觉上没有反应）。", MessageType.Warning);
+            }
+
             if (crate.destroyed)
                 EditorGUILayout.HelpBox("已拆掉：不再占格、不再盖像素。", MessageType.Info);
 

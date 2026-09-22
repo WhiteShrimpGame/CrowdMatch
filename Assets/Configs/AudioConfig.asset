@@ -49,6 +49,10 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
     volume: 0.25
     isBGM: 0
+  - tag: IceBreak
+    clip: {fileID: 8300000, guid: 96d27ae09b20035478b8e0df9b90dc35, type: 3}
+    volume: 0.7
+    isBGM: 0
   - tag: Win
     clip: {fileID: 8300000, guid: 398f9ce167d42b64a9ea8eaf5b72fde7, type: 3}
     volume: 1
