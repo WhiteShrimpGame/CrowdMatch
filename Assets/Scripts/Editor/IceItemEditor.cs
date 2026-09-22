@@ -17,8 +17,21 @@ namespace CrowdMatch
             var group = ice.GetComponentInParent<PixelGroup>();
 
             serializedObject.Update();
+            EditorGUI.BeginChangeCheck();
             DrawDefaultInspector();
+            bool changed = EditorGUI.EndChangeCheck();
             serializedObject.ApplyModifiedProperties();
+
+            // Mesh 模式：改任意参数就立刻重算，拖数值时能实时看形状。
+            // 用 BeginChangeCheck 而不是 OnValidate —— 只在 Inspector 真被改过时跑，
+            // 不会在序列化 / 导入期间建物体。预制体资产里不做（免得把子物体写进资产），
+            // 那种情况仍走下面的「重建显示」按钮。
+            if (changed && ice.displayMode == IceDisplayMode.GeneratedMesh &&
+                !PrefabUtility.IsPartOfPrefabAsset(ice.gameObject))
+            {
+                ice.BuildMeshVisual();
+                SceneView.RepaintAll();
+            }
 
             EditorGUILayout.Space();
 
@@ -47,7 +60,8 @@ namespace CrowdMatch
             EditorGUILayout.EndHorizontal();
 
             DrawIceInfo(group, ice);
-            DrawFillClassReference();
+            if (ice.displayMode != IceDisplayMode.GeneratedMesh)
+                DrawFillClassReference();
         }
 
         /// <summary>体检信息：格数 / 连通性 / 组内像素 / 计数 / 缺素材 / 死锁。</summary>
@@ -64,12 +78,19 @@ namespace CrowdMatch
             var list = new List<Vector2Int>(ice.CellSet);
             IceRegion.IsConnected(list, out string connErr);
 
-            // 本模式（填充 · 单色）只需要 5 个单元号（0/1/3/4/8），逐个查素材配没配
-            var required = CornerTileTable.RequiredTiles(CornerTileStyle.Fill, CornerTileStates.Single);
+            // Sprite 模式（填充 · 单色）只需要 5 个单元号（0/1/3/4/8），逐个查素材配没配；
+            // Mesh 模式不用素材，改成报顶点 / 三角数与几何提示。
+            bool meshMode = ice.displayMode == IceDisplayMode.GeneratedMesh;
+            var required = meshMode
+                ? new List<int>()
+                : CornerTileTable.RequiredTiles(CornerTileStyle.Fill, CornerTileStates.Single);
             var missing = new List<int>();
-            foreach (var id in required)
-                if (ice.sprites == null || id >= ice.sprites.Length || ice.sprites[id] == null)
-                    missing.Add(id);
+            if (!meshMode)
+            {
+                foreach (var id in required)
+                    if (ice.sprites == null || id >= ice.sprites.Length || ice.sprites[id] == null)
+                        missing.Add(id);
+            }
 
             int pixels = group.CountPixelsInIce(ice);
             int unfrozen = group.CountUnfrozenPixels();
@@ -101,6 +122,27 @@ namespace CrowdMatch
                   .Append("）。本模式需要 ").Append(string.Join(", ", required.ConvertAll(x => x.ToString()).ToArray()))
                   .Append("。");
                 type = MessageType.Warning;
+            }
+
+            if (meshMode)
+            {
+                sb.Append("\n实时 Mesh：").Append(ice.MeshVertexCount).Append(" 顶点 / ")
+                  .Append(ice.MeshTriangleCount).Append(" 三角。");
+                if (ice.MeshVertexCount == 0)
+                    sb.Append("（还没生成 —— 点上面的「重建显示」）");
+
+                if (ice.meshMaterial == null)
+                {
+                    sb.Append("\n未配 meshMaterial：会用渲染器默认材质（白模）。新建材质用 Shader" +
+                              "「CrowdMatch/Unlit/Color (Transparent)」（纯色 + alpha）或" +
+                              "「CrowdMatch/Unlit/Color (Transparent + Rim)」（再加边缘高光）。");
+                    type = MessageType.Warning;
+                }
+                if (!string.IsNullOrEmpty(ice.MeshWarning))
+                {
+                    sb.Append("\n").Append(ice.MeshWarning);
+                    type = MessageType.Warning;
+                }
             }
 
             if (Application.isPlaying && ice.remaining == 0)
