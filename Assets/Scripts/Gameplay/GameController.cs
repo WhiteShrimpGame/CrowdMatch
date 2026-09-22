@@ -860,8 +860,19 @@ namespace CrowdMatch
             {
                 for (int i = 0; i < matched.Count; i++)
                 {
-                    RecordBall(matched[i].colorId);
-                    Destroy(matched[i].gameObject);
+                    var item = matched[i];
+
+                    // 倍乘门：这条路径**不经过缓冲区**，裂变（CrowdBufferZone.SpawnGateClone）永远不触发，
+                    // 所以按「所在格倍率」补记 N 份——否则记录条数比 TotalPixelCount 少
+                    // （后者含 CountGateExtraPixels），文件名里的 total 与 rec 就对不上了。
+                    // 口径与 PixelGroup.CollectPlanningSources 一致：查的是**像素所在格**，
+                    // 区域内的格按所属各门连乘（嵌套门），区域外为 1。
+                    // 顺序上把 N 份紧挨着写：真实裂变也是本体先出门格、分身随后一个个离开。
+                    int mult = pixelGroup.GateMultiplierAt(item.gridX, item.gridZ);
+                    for (int k = 0; k < mult; k++)
+                        RecordBall(item.colorId);
+
+                    Destroy(item.gameObject);
                 }
                 return;
             }
