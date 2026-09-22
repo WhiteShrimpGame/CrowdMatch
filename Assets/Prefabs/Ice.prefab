@@ -246,6 +246,7 @@ MonoBehaviour:
   cells: []
   freezeCount: 5
   meltOnlyWhenExposed: 0
+  displayMode: 1
   sprites:
   - {fileID: 21300000, guid: b33ceb4904afeea4c881a4e88c9c7af8, type: 3}
   - {fileID: 21300000, guid: 6cb35c104ffb92f4f8c3b98bafa001cb, type: 3}
@@ -262,6 +263,16 @@ MonoBehaviour:
   - {fileID: 21300000, guid: a8ef4cfadb898d3468bb654f33ca6fd8, type: 3}
   atomicObject: {fileID: 6633973217198920157}
   atomicSprite: {fileID: 1789750444256127776}
+  meshExpand: 0.07
+  meshBaseY: 0.54
+  meshCorner90Inset: 0.3
+  meshCorner270Outset: 0.3
+  meshHeight: 1.6
+  meshTopInset: 0.15
+  meshTopCorner90Inset: 0.3
+  meshTopCorner270Outset: 0.3
+  meshTopYOffset: 0.2
+  meshMaterial: {fileID: 2100000, guid: ccd5236c974585944abd8b8224ea9027, type: 2}
   countText: {fileID: 2108021574307227816}
   countOffset: {x: 0, y: 0.5, z: 0}
   countFontScale: 1
