@@ -609,6 +609,8 @@ MonoBehaviour:
   path: {fileID: 1785929099}
   cycleTime: 6
   speed: 1.5
+  clearedSpeedMultiplier: 2
+  clearedAccelDuration: 2
   slotCount: 30
   cellPrefab: {fileID: 2575043199601490989, guid: 32373529656aa3345b2cc74fbe01d607, type: 3}
   cellYOffset: 0.12
@@ -913,7 +915,19 @@ MonoBehaviour:
   boxCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
   boxCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  boxWholePrefab: {fileID: 6898552183250439212, guid: b5f5dc90e80d5794bacd2ae72e13020a, type: 3}
   elevatorPrefab: {fileID: 2551135059901201391, guid: 9f53810ad24b66c4581e815e9e9ef7ac, type: 3}
+  icePrefab: {fileID: 4587829874173678951, guid: fed2247fa3deff24c809041741cac32f, type: 3}
+  crateCornerPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  crateEdgePrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  crateCenterPrefab: {fileID: 4974077334147149108, guid: 85acd57096ed7e8479367f5c84c0571a, type: 3}
+  crateSealPrefab: {fileID: 6609499673052173810, guid: a240a7d387941de418733934c8514e5f, type: 3}
+  crateNailPrefab: {fileID: 3341524908737008507, guid: d656daae28cf81642844a8196fd7a284, type: 3}
+  crateSealInset: {x: 0.3, y: 0.3}
+  crateSealExtend: 0.4
+  crateSealHeight: 0
+  crateSealFirstLift: 0.05
+  crateSealYawOffset: 0
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
 --- !u!4 &882082745
 Transform:
@@ -1245,11 +1259,11 @@ MonoBehaviour:
   refillSpeed: 10
   ropeMaterial: {fileID: 2100000, guid: 9f884cd5b7afe874fa04f41242a8c7d9, type: 2}
   ropeLinkCount: 8
-  ropeDiameter: 0.15
+  ropeDiameter: 0.1
   ropeSwayAmplitude: 0.01
   ropeSwayFrequency: 0.5
   ropeSwayWaves: 0
-  ropeSwayVerticalRatio: 5
+  ropeSwayVerticalRatio: 1
   ropeLayerName: Rope
   ropeEnabled: 1
   ropeExitHeadGap: 0.2

@@ -128,9 +128,25 @@ namespace CrowdMatch
         {
             if (points == null || points.Count < 2)
                 return 0;
-            var seen = new HashSet<Vector2Int>();
-            int count = 0;
+            var cells = new List<Vector2Int>();
+            CollectTrackCells(points, columns, totalRows, cells);
+            return cells.Count;
+        }
 
+        /// <summary>
+        /// 轨道格 = 折线经过的所有格（去首点、去重、仅限网格范围内），按路径顺序（近管道 → 远）。
+        /// **唯一定义的走法**：实例版 <see cref="TrackCells"/> 与 <see cref="CountTrackCells"/> 都走这里，
+        /// 编辑器只拿关卡 JSON（没有 PixelGroup）时也能算，用于查每格的倍乘门倍率。
+        /// </summary>
+        public static void CollectTrackCells(IReadOnlyList<Vector2> points, int columns, int totalRows, List<Vector2Int> outCells)
+        {
+            if (outCells == null)
+                return;
+            outCells.Clear();
+            if (points == null || points.Count < 2)
+                return;
+
+            var seen = new HashSet<Vector2Int>();
             Vector2Int prev = ToCell(points[0]);
             for (int i = 1; i < points.Count; i++)
             {
@@ -144,11 +160,10 @@ namespace CrowdMatch
                     if (c.x < 0 || c.x >= columns || c.y < 0 || c.y >= totalRows)
                         continue;
                     if (seen.Add(c))
-                        count++;
+                        outCells.Add(c);
                 }
                 prev = cur;
             }
-            return count;
         }
 
         /// <summary>轨道格 = 折线经过的所有格（去首点、去重、仅限网格范围内），按路径顺序（近管道 → 远）。</summary>
@@ -158,25 +173,7 @@ namespace CrowdMatch
             var g = Group;
             if (points == null || points.Count < 2 || g == null)
                 return result;
-            var seen = new HashSet<Vector2Int>();
-
-            Vector2Int prev = ToCell(points[0]);
-            for (int i = 1; i < points.Count; i++)
-            {
-                Vector2Int cur = ToCell(points[i]);
-                int steps = Mathf.Max(Mathf.Abs(cur.x - prev.x), Mathf.Abs(cur.y - prev.y));
-                int dx = System.Math.Sign(cur.x - prev.x);
-                int dy = System.Math.Sign(cur.y - prev.y);
-                for (int s = 1; s <= steps; s++)   // s=0 即 prev（段起点，已计入或为管道格）
-                {
-                    var c = new Vector2Int(prev.x + dx * s, prev.y + dy * s);
-                    if (!g.IsInRange(c.x, c.y))
-                        continue;
-                    if (seen.Add(c))
-                        result.Add(c);
-                }
-                prev = cur;
-            }
+            CollectTrackCells(points, g.columns, g.TotalRows, result);
             return result;
         }
 

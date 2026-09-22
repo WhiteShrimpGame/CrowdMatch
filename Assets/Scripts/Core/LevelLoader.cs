@@ -59,6 +59,8 @@ namespace CrowdMatch
                 ApplyGates(pixelGroup, data.gates);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
                 ApplyElevators(pixelGroup, data.elevators, colorConfig);
+                ApplyIces(pixelGroup, data.iceGroups);   // 放最后：箱子 / 升降台的像素也要在，冰才冻得住它们
+                ApplyCrates(pixelGroup, data.crates);    // 木箱同理：它盖的像素必须是已经存在的
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
@@ -220,6 +222,64 @@ namespace CrowdMatch
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 道倍乘门。");
+        }
+
+        /// <summary>
+        /// 清空并重建 PixelGroup 下的冰组（没有成员格的冰组被跳过）。
+        /// **不往 ApplyPixel 的 skipCells 里加冰格** —— 冰下面本来就要有像素。
+        /// </summary>
+        private static void ApplyIces(PixelGroup pg, LevelData.IceGroupData[] iceGroups)
+        {
+            pg.ClearIces();
+
+            if (iceGroups == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var g in iceGroups)
+            {
+                if (g == null || g.cells == null || g.cells.Length == 0)
+                    continue;
+                if (pg.SpawnIce(g) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个冰组。");
+        }
+
+        /// <summary>
+        /// 清空并重建 PixelGroup 下的木箱（区域越界或长宽不足 2 的会被警告）。
+        /// **不往 ApplyPixel 的 skipCells 里加木箱格** —— 与冰同理：木箱盖住的像素本来就要在。
+        /// </summary>
+        private static void ApplyCrates(PixelGroup pg, LevelData.CrateData[] crates)
+        {
+            pg.ClearCrates();
+
+            if (crates == null)
+            {
+                pg.RebuildGrid();
+                return;
+            }
+
+            int spawned = 0;
+            foreach (var c in crates)
+            {
+                if (c == null)
+                    continue;
+                if (pg.SpawnCrate(c) != null)
+                    spawned++;
+            }
+
+            pg.RebuildGrid();   // 末尾会 RefreshCrateState → 关掉被盖像素的渲染器
+
+            if (spawned > 0)
+                Debug.Log("[LevelLoader] 已加载 " + spawned + " 个木箱。");
         }
 
         /// <summary>清空并重建 PixelGroup 下的箱子（区域越界或无内容的箱子被跳过）。</summary>

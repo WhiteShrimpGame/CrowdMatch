@@ -34,15 +34,15 @@ MonoBehaviour:
     volume: 1
     isBGM: 0
   - tag: CarLeave
-    clip: {fileID: 8300000, guid: 9c202f5b28c3c2a488e1c34e7d851d18, type: 3}
+    clip: {fileID: 8300000, guid: a9d5f98ba3438cf4ab6769ea99c1d132, type: 3}
     volume: 0.6
     isBGM: 0
   - tag: CarLeave2
-    clip: {fileID: 8300000, guid: 7f5c3013ffeefe14b90af902401b0cb9, type: 3}
+    clip: {fileID: 8300000, guid: a9d5f98ba3438cf4ab6769ea99c1d132, type: 3}
     volume: 0.6
     isBGM: 0
   - tag: CarLeave3
-    clip: {fileID: 8300000, guid: 1ea27698c02862442b6693b53e464bbc, type: 3}
+    clip: {fileID: 8300000, guid: a9d5f98ba3438cf4ab6769ea99c1d132, type: 3}
     volume: 0.6
     isBGM: 0
   - tag: OnBelt
