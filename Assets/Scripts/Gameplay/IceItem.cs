@@ -56,6 +56,22 @@ namespace CrowdMatch
                  "判定用的是**点击前**的暴露状态 —— 所以「使之暴露的那一次点击」本身不计数")]
         public bool meltOnlyWhenExposed;
 
+        [Header("融化表现（两个 tag 分别对应 SpawnPoolConfig 与 AudioConfig）")]
+        [Tooltip("冰化开时从 SpawnPool 生成的特效 tag（留空 = 不生成）。摆在冰组**包围矩形中心**，" +
+                 "且**不挂在冰下面** —— 冰在关卡重建时会被清掉，挂在池根下才不会连累它")]
+        public string meltEffectTag = "IceBreak";
+
+        [Tooltip("冰化开时播放的音效 tag（AudioManager；留空 = 不播）")]
+        public string meltSoundTag = "IceBreak";
+
+        [Tooltip("融化特效在对象池里的存活时长（秒），到点自动回池")]
+        [Min(0.1f)]
+        public float meltEffectDuration = 3f;
+
+        [Tooltip("融化特效播放位置的 **y 偏移（世界单位）**：在「冰组包围矩形中心」的 y 之上再加这么多，" +
+                 "正数抬高（中心的 y 就是 PixelGroup 所在平面的 y）")]
+        public float meltEffectYOffset = 0f;
+
         [Header("显示模式")]
         [Tooltip("四角拼接 Sprite（现状，用下面那组 sprites）/ 实时生成 Mesh（用下面那组 Mesh 参数）")]
         public IceDisplayMode displayMode = IceDisplayMode.CornerSprite;
@@ -443,13 +459,11 @@ namespace CrowdMatch
             if (countText == null)
                 return;
 
-            if (group != null && _cellSet.Count > 0)
+            if (TryGetCentreWorld(out Vector3 centre))
             {
-                // 锚点 = 包围矩形中心（两端格中心的中点）+ countOffset。
-                // 用「中心」而不是「左上角」：冰组形状是任意的，中心更好调；而且这样 countOffset 是与
-                // 冰组形状无关的常量，关卡 JSON 导入回来的冰组也能落在同样的相对位置。
-                Vector3 centre = (group.GetWorldPosition(_colMin, _rowMin) +
-                                  group.GetWorldPosition(_colMax, _rowMax)) * 0.5f;
+                // 锚点 = 包围矩形中心 + countOffset。用「中心」而不是「左上角」：冰组形状是任意的，
+                // 中心更好调；而且这样 countOffset 是与冰组形状无关的常量，关卡 JSON 导入回来的冰组
+                // 也能落在同样的相对位置。
                 Vector3 world = centre + countOffset;
 
                 Transform anchor = countText.transform.parent;
@@ -468,6 +482,46 @@ namespace CrowdMatch
             countText.enabled = show;
             if (show)
                 countText.text = (remaining < 0 ? Mathf.Max(1, freezeCount) : remaining).ToString();
+        }
+
+        /// <summary>冰组**包围矩形中心**的世界坐标（计数数字与融化特效共用这个锚点）。没登记 group / 没有成员格时返回 false。</summary>
+        private bool TryGetCentreWorld(out Vector3 centre)
+        {
+            centre = Vector3.zero;
+            if (group == null || _cellSet.Count == 0)
+                return false;
+
+            centre = (group.GetWorldPosition(_colMin, _rowMin) +
+                      group.GetWorldPosition(_colMax, _rowMax)) * 0.5f;
+            return true;
+        }
+
+        /// <summary>
+        /// 冰化开时的表现：在包围矩形中心（再按 <see cref="meltEffectYOffset"/> 抬高）从 SpawnPool 生成
+        /// <see cref="meltEffectTag"/>（<see cref="meltEffectDuration"/> 秒后自动回池），
+        /// 并按 <see cref="meltSoundTag"/> 播一次音效。由 <see cref="PixelGroup.NotifyClickMovedOut"/> 在
+        /// <see cref="ConsumeOne"/> 归零的那一刻调用。
+        ///
+        /// 没配对象池 / tag / 音频管理器时**静默跳过** —— 表现缺料不该影响冰冻逻辑本身（与出车 Confetti、表情系统同一口径）。
+        /// 特效不挂到冰下面、也不挂任何会被销毁的物体：冰在关卡重建时会被清掉，而
+        /// <c>SpawnPool.SpawnDuration</c> 的延时回收没有空守卫，挂在池根下才不会被连累。
+        /// </summary>
+        public void PlayMeltEffect()
+        {
+            if (!string.IsNullOrEmpty(meltEffectTag) && TryGetCentreWorld(out Vector3 centre))
+            {
+                var gm = GameManager.Instance;
+                var pool = gm != null ? gm.spawnPool : null;
+                if (pool != null)
+                {
+                    var fx = pool.SpawnDuration(meltEffectTag, meltEffectDuration);
+                    if (fx != null)
+                        fx.transform.position = centre + Vector3.up * meltEffectYOffset;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(meltSoundTag) && AudioManager.Instance != null)
+                AudioManager.Instance.Play(meltSoundTag);
         }
 
         /// <summary>
