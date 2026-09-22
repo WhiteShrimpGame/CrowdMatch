@@ -302,7 +302,7 @@ namespace CrowdMatch
             // 关键事件点：有小人进入传送带 → 尝试失败判定
             var gc = GameController.Instance;
             if (gc != null)
-                gc.TryCheckFail();
+                gc.TryCheckFail(GameController.FailCheckpoint.SlotEntered);
         }
 
         /// <summary>
