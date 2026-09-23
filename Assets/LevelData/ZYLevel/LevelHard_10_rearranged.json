@@ -462,7 +462,7 @@
     },
     "container": {
         "columns": 3,
-        "rows": 40,
+        "rows": 46,
         "lockContainer": true,
         "items": []
     },
