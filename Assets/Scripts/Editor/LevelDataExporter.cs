@@ -20,17 +20,17 @@ namespace CrowdMatch
         /// <summary>导入关卡 JSON 共用的「上次路径」EditorPrefs 键。</summary>
         private const string ImportPathKey = "CrowdMatch.LevelDataExporter.LastImportPath";
 
-        [MenuItem("CrowdMatch/导出关卡 JSON")]
+        [MenuItem("CrowdMatch/导出关卡 JSON", false, MenuPriority.Level)]
         public static void ExportCurrentLevel() => ExportCurrentLevel(locked: false);
 
-        [MenuItem("CrowdMatch/导出关卡 JSON", true)]
+        [MenuItem("CrowdMatch/导出关卡 JSON", true, MenuPriority.Level)]
         private static bool ValidateExportCurrentLevel() => !EditorApplication.isPlaying;
 
         /// <summary>Play 模式下的锁定导出：导出关卡初始化时的状态，并把 lockContainer 置为 true。</summary>
-        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）")]
+        [MenuItem("CrowdMatch/关卡工具/导出关卡 JSON（锁定）", false, MenuPriority.LevelTools + MenuPriority.Seg1)]
         public static void ExportCurrentLevelLocked() => ExportCurrentLevel(locked: true);
 
-        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）", true)]
+        [MenuItem("CrowdMatch/关卡工具/导出关卡 JSON（锁定）", true, MenuPriority.LevelTools + MenuPriority.Seg1)]
         private static bool ValidateExportCurrentLevelLocked() => EditorApplication.isPlaying;
 
         private static void ExportCurrentLevel(bool locked)
@@ -93,7 +93,7 @@ namespace CrowdMatch
         }
 
         /// <summary>从 JSON 文件导入关卡配置到当前场景的 PixelGroup + ContainerGroup。</summary>
-        [MenuItem("CrowdMatch/从 JSON 导入配置到当前场景")]
+        [MenuItem("CrowdMatch/从 JSON 导入配置到当前场景", false, MenuPriority.Level + 1)]
         public static void ImportLevelFromJson()
         {
             var pixelGroup = Object.FindObjectOfType<PixelGroup>();
@@ -161,7 +161,7 @@ namespace CrowdMatch
         }
 
         /// <summary>清空当前场景中 PixelGroup 与 ContainerGroup 的全部子物体（不改变布局字段）。</summary>
-        [MenuItem("CrowdMatch/清空当前场景两个 Group 的子物体")]
+        [MenuItem("CrowdMatch/清空当前场景两个 Group 的子物体", false, MenuPriority.Level + 2)]
         public static void ClearBothGroups()
         {
             var pixelGroup = Object.FindObjectOfType<PixelGroup>();

@@ -184,7 +184,7 @@ namespace CrowdMatch
         private int oldIndex = 1;
         private int newIndex = 2;
 
-        [MenuItem("CrowdMatch/替换关卡颜色")]
+        [MenuItem("CrowdMatch/关卡工具/替换关卡颜色", false, MenuPriority.LevelTools + MenuPriority.Seg1)]
         public static void Open() => GetWindow<LevelColorReplacerWindow>("替换关卡颜色");
 
         private void OnGUI()

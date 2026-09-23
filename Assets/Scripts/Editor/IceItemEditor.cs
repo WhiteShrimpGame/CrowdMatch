@@ -194,13 +194,13 @@ namespace CrowdMatch
 
         // ===== 方式一：包围线 =====
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过包围线创建冰组", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过包围线", true, MenuPriority.Create + MenuPriority.Seg3)]
         private static bool ValidateCreateIceByLoop()
         {
             return CollectSelectedPixels().Count >= 3;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过包围线创建冰组")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过包围线", false, MenuPriority.Create + MenuPriority.Seg3)]
         private static void CreateIceByLoop()
         {
             var pixels = CollectSelectedPixels();
@@ -239,13 +239,13 @@ namespace CrowdMatch
 
         // ===== 方式二：多选 =====
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过多选创建冰组", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过多选", true, MenuPriority.Create + MenuPriority.Seg3 + 1)]
         private static bool ValidateCreateIceBySelection()
         {
             return CollectSelectedPixels().Count >= 1;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过多选创建冰组")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过多选", false, MenuPriority.Create + MenuPriority.Seg3 + 1)]
         private static void CreateIceBySelection()
         {
             var pixels = CollectSelectedPixels();
@@ -280,13 +280,13 @@ namespace CrowdMatch
 
         // ===== 方式三：矩形（左上、右下）=====
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过矩形创建冰组（左上、右下）", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过矩形（左上、右下）", true, MenuPriority.Create + MenuPriority.Seg3 + 2)]
         private static bool ValidateCreateIceByRect()
         {
             return CollectSelectedPixels().Count == 2;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 通过矩形创建冰组（左上、右下）")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/冰/通过矩形（左上、右下）", false, MenuPriority.Create + MenuPriority.Seg3 + 2)]
         private static void CreateIceByRect()
         {
             var pixels = CollectSelectedPixels();

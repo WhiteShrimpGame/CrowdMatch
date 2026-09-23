@@ -31,7 +31,7 @@ namespace CrowdMatch
             }
         }
 
-        [MenuItem("CrowdMatch/Create Color Config (24 种颜色)")]
+        [MenuItem("CrowdMatch/更多工具/Create Color Config (24 种颜色)", false, MenuPriority.More + MenuPriority.Seg1)]
         public static void CreateColorConfig()
         {
             const string dir = "Assets/CrowdMatch";
@@ -99,7 +99,7 @@ namespace CrowdMatch
         /// 从 materials 的主色生成字色与描边色：字色 = 材质主色；
         /// 按 RGB 权重（感知亮度）判断亮暗，亮色描边取原色 1/3，暗色描边取 255-(255-c)/5。
         /// </summary>
-        [MenuItem("CrowdMatch/从材质主色生成字色与描边色")]
+        [MenuItem("CrowdMatch/更多工具/从材质主色生成字色与描边色", false, MenuPriority.More + MenuPriority.Seg1 + 1)]
         public static void GenerateTextColorsFromMaterials()
         {
             var config = Selection.activeObject as ColorConfig;

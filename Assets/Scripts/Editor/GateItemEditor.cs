@@ -198,13 +198,13 @@ namespace CrowdMatch
     {
         private const string Tag = "[GateCreator]";
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建倍乘门", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/倍乘门", true, MenuPriority.Create + MenuPriority.Seg1 + 2)]
         private static bool ValidateCreateGateFromSelection()
         {
             return CollectSelectedPixels().Count >= 2;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建倍乘门")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/倍乘门", false, MenuPriority.Create + MenuPriority.Seg1 + 2)]
         private static void CreateGateFromSelection()
         {
             var pixels = CollectSelectedPixels();
