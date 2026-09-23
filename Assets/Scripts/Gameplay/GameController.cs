@@ -1027,9 +1027,12 @@ namespace CrowdMatch
             if (pixelGroup.NotifyPixelsMovedOut(matched))
                 RefreshFrame();
 
-            // 网格已被点空（本项目内的最后一颗都走了）：传送带逐渐加速，把带上的存量尽快送进容器。
-            // 本关内不再回退；复位只发生在进下一关 / 重载关卡的 CleanupLevel。
-            if (conveyorZone != null && pixelGroup.IsGridEmpty())
+            // 网格已空**且场上没有待产出的像素**（管道还有波次 / 木箱还有未释放像素 / 升降台还有未升起的组）：
+            // 传送带逐渐加速，把带上的存量尽快送进容器。
+            // 缺了后半句就会在「刚点掉封路像素、生产者还没补位」的那一帧误开加速（管道等的正是这一下点击，
+            // 它要到下一次 Update 才把整波 pixel 写回 grid），而加速是本关内不回退的闩锁。
+            // 复位只发生在进下一关 / 重载关卡的 CleanupLevel。
+            if (conveyorZone != null && pixelGroup.IsGridEmpty() && !pixelGroup.HasPendingProducers())
                 conveyorZone.NotifyGridEmptied();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
