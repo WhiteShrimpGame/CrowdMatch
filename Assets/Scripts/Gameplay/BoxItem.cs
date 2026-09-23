@@ -348,7 +348,6 @@ namespace CrowdMatch
                 HideCountText();             // 释放开始：数字（容量）就没有意义了
                 group.OnBoxOpened(this);
                 DisappearVisual();
-                group.OnBoxReleaseFinished(this);
                 return true;
             }
 
@@ -879,7 +878,7 @@ namespace CrowdMatch
             FinalizeRelease(assignments);
         }
 
-        /// <summary>全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起），并解除箱体释放计数。</summary>
+        /// <summary>全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。</summary>
         private void FinalizeRelease(List<(PixelItem pixel, Vector2Int cell)> assignments)
         {
             for (int i = 0; i < assignments.Count; i++)
@@ -895,10 +894,7 @@ namespace CrowdMatch
             }
 
             if (group != null)
-            {
                 group.RefreshExposed();
-                group.OnBoxReleaseFinished(this);
-            }
         }
 
         /// <summary>

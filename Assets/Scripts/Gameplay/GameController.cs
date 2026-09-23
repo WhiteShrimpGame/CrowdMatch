@@ -93,6 +93,9 @@ namespace CrowdMatch
         private int _recordedCount;       // 当前记录文件已写入的像素数
         private bool _transitioning;
 
+        /// <summary>本关是否已经宣告过胜利。胜利是事件驱动的，用它防重入；进关时复位（见 <see cref="InitLevel"/>）。</summary>
+        private bool _winDeclared;
+
         /// <summary>上一条失败判定诊断行：内容完全相同时不重复打印（复活期间会有几十次上车回调，行内容一模一样）。</summary>
         private string _lastFailCheckLog;
 
@@ -145,6 +148,7 @@ namespace CrowdMatch
         {
             CloseRecord();   // 切关：先把上一关的记录文件落盘改名，本关的文件在下面另开
             CleanupLevel();
+            _winDeclared = false;   // 新一关：复位胜利宣告标志
 
             var gm = GameManager.Instance;
             TextAsset json = gm != null ? gm.GetLevelJson(level) : null;
@@ -255,20 +259,32 @@ namespace CrowdMatch
             return pixelGroup != null ? pixelGroup.CountGateExtraPixels() : 0;
         }
 
-        /// <summary>胜利检测：所有像素都被容器消费。触发后等待 1.5s 进入下一关。</summary>
-        public void CheckWin()
+        /// <summary>
+        /// 胜利检测（**事件驱动**）：只在容器侧的两个时点被调用——某辆车「完成匹配」（最后一颗像素开始上车）、
+        /// 某辆车离开盘面（开始倒车出库）。调用方是 <see cref="ContainerGroup.TryCheckWin"/>，它带一层 O(1) 过滤
+        /// 与一次全盘复核。
+        ///
+        /// 口径：**板上不存在「未完成匹配」的车**。触发后等待 2.5s 进入下一关。
+        /// 与旧口径（像素侧计数 <c>ClearedPixelCount &gt;= TotalPixelCount</c>）的关键差别：载体侧与容器规划同源
+        /// （倍乘门按倍率重复计的像素也在容器容量里），所以带倍乘门的关卡不会再提前判胜。
+        /// </summary>
+        /// <param name="checkpoint">调用方检查点名（见 <see cref="WinCheckpoint"/>），只用于日志。</param>
+        public void CheckWin(string checkpoint = WinCheckpoint.Unspecified)
         {
-            if (_transitioning)
+            if (_winDeclared || _transitioning)
                 return;
-            if (GameData.TotalPixelCount <= 0)
-                return;
-            if (GameData.ClearedPixelCount >= GameData.TotalPixelCount)
-            {
-                _transitioning = true;
-                GameState.GameWin();
-                Invoke(nameof(DoGameWin), 2.5f);
-                UIManager.Instance.ShowWinPart();
-            }
+            _winDeclared = true;
+            Debug.Log("[胜利判定] 检查点=" + checkpoint + " ｜ 板上所有车均已完成匹配 → 判胜");
+            GameState.GameWin();
+            Invoke(nameof(DoGameWin), 2.5f);
+            UIManager.Instance.ShowWinPart();
+        }
+
+        /// <summary>调试用：跳过判胜条件直接宣告胜利（SettingPanel 的「WinCurrent」）。</summary>
+        public void ForceWin()
+        {
+            _winDeclared = false;
+            CheckWin(WinCheckpoint.Forced);
         }
 
         /// <summary>
@@ -359,20 +375,6 @@ namespace CrowdMatch
                 return false;
             }
 
-            // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
-            if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
-            {
-                reason = "门禁8 有 " + pixelGroup.releasingBoxesCount + " 个木箱正在释放";
-                return false;
-            }
-
-            // 静止门槛：有升降台正在推进（开门/升起未完成）→ 还有进度，不判失败
-            if (pixelGroup != null && pixelGroup.advancingElevatorsCount > 0)
-            {
-                reason = "门禁9 有 " + pixelGroup.advancingElevatorsCount + " 个升降台正在推进";
-                return false;
-            }
-
             var belt = conveyorZone.belt;
             for (int i = 0; i < belt.slotCount; i++)
             {
@@ -381,7 +383,7 @@ namespace CrowdMatch
                     continue;
                 if (containerGroup.HasMatchableContainerOfColor(pixel.colorId))
                 {
-                    reason = "门禁10 带上槽位 " + i + " 的像素（colorId=" + pixel.colorId + "）有同色可匹配容器";
+                    reason = "门禁8 带上槽位 " + i + " 的像素（colorId=" + pixel.colorId + "）有同色可匹配容器";
                     return false;   // 至少一个可匹配 → 未失败
                 }
             }
@@ -430,6 +432,25 @@ namespace CrowdMatch
             public const string Unspecified = "未标注";
         }
 
+        /// <summary>胜利判定检查点名常量：只在事件驱动的那两个时点被调用，仅用于日志。</summary>
+        public static class WinCheckpoint
+        {
+            /// <summary>某辆车完成匹配（最后一颗像素开始上车）：<c>ContainerGroup.ConsumeCar</c>。</summary>
+            public const string CarMatched = "完成匹配";
+
+            /// <summary>某辆车离开盘面（开始倒车出库）：<c>ContainerGroup.StartContainerExit</c>。复查用。</summary>
+            public const string CarLeft = "车离开";
+
+            /// <summary>复活落定：<c>DoRevive</c> 末尾的补查（复活期间判胜会被 <c>_transitioning</c> 挡下）。</summary>
+            public const string ReviveSettled = "复活落定";
+
+            /// <summary>调试：SettingPanel 的「WinCurrent」强制胜利。</summary>
+            public const string Forced = "强制";
+
+            /// <summary>调用方未标注检查点名。</summary>
+            public const string Unspecified = "未标注";
+        }
+
         /// <summary>检查点 4 的处理器：订阅 / 退订用同一个具名方法，保证 <c>-=</c> 能解绑。</summary>
         private void OnGridPathfindingFinished()
         {
@@ -453,6 +474,10 @@ namespace CrowdMatch
             Revive();
             GameState.GameStart();   // 复活后回到游玩态，继续本关
             _transitioning = false;
+            // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
+            // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
+            if (containerGroup != null)
+                containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
         }
 
         /// <summary>
@@ -630,11 +655,7 @@ namespace CrowdMatch
         {
             UpdateCountText();
 
-            if (GameState.IsGameStart)
-            {
-                CheckWin();   // 失败判定已改为事件驱动（TryCheckFail），不再每帧检测
-            }
-
+            // 胜负判定都已改为事件驱动（失败见 TryCheckFail，胜利见 ContainerGroup.TryCheckWin），不再每帧检测。
             if (Input.GetMouseButtonDown(0) && GameState.IsGameStart)
                 HandleClick();
         }
@@ -1006,9 +1027,12 @@ namespace CrowdMatch
             if (pixelGroup.NotifyPixelsMovedOut(matched))
                 RefreshFrame();
 
-            // 网格已被点空（本项目内的最后一颗都走了）：传送带逐渐加速，把带上的存量尽快送进容器。
-            // 本关内不再回退；复位只发生在进下一关 / 重载关卡的 CleanupLevel。
-            if (conveyorZone != null && pixelGroup.IsGridEmpty())
+            // 网格已空**且场上没有待产出的像素**（管道还有波次 / 木箱还有未释放像素 / 升降台还有未升起的组）：
+            // 传送带逐渐加速，把带上的存量尽快送进容器。
+            // 缺了后半句就会在「刚点掉封路像素、生产者还没补位」的那一帧误开加速（管道等的正是这一下点击，
+            // 它要到下一次 Update 才把整波 pixel 写回 grid），而加速是本关内不回退的闩锁。
+            // 复位只发生在进下一关 / 重载关卡的 CleanupLevel。
+            if (conveyorZone != null && pixelGroup.IsGridEmpty() && !pixelGroup.HasPendingProducers())
                 conveyorZone.NotifyGridEmptied();
 
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位

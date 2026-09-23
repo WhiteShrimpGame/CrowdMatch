@@ -355,6 +355,12 @@ namespace CrowdMatch
             }
 
             cg.RebuildGrid();
+
+            // 列内必须压紧（不能留洞）：胜利判定的兜底依赖「深排车消失 ⇒ 同列还有浅排车」这个前提，
+            // 见 ContainerGroup.DescribeColumnHoles。只报错、不拦加载——关卡还能跑，只是可能漏判胜利。
+            string holes = cg.DescribeColumnHoles();
+            if (holes != null)
+                Debug.LogError("[LevelLoader] 容器列内有洞：" + holes + "。每列的车必须从第 0 排起压紧连续。");
         }
 
         /// <summary>

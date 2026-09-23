@@ -182,12 +182,6 @@ namespace CrowdMatch
         /// <summary>运行时收集到的所有木箱（重建 grid 时刷新；含已拆掉的，用 destroyed 区分）。</summary>
         [System.NonSerialized] public List<CrateItem> crates = new List<CrateItem>();
 
-        /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int releasingBoxesCount;
-
-        /// <summary>正在推进中的升降台数量（开门/升起动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int advancingElevatorsCount;
-
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
 
@@ -629,7 +623,8 @@ namespace CrowdMatch
             return n;
         }
 
-        /// <summary>网格上是否已经没有任何像素（箱子隐藏像素 / 升降台地下像素不算：它们还没落到格子上）。</summary>
+        /// <summary>网格上是否已经没有任何像素（箱子隐藏像素 / 升降台地下像素不算：它们还没落到格子上）。
+        /// 想判断「场上是否还有像素**要来了**」请配 <see cref="HasPendingProducers"/> —— 传送带的空场加速就是两者一起判。</summary>
         public bool IsGridEmpty()
         {
             if (grid == null)
@@ -640,6 +635,34 @@ namespace CrowdMatch
                     if (grid[c, r] != null)
                         return false;
             return true;
+        }
+
+        /// <summary>
+        /// 场上是否还有**待产出**的像素：管道还有波次、木箱还有未释放的隐藏像素、升降台还有未升起的组。
+        ///
+        /// 与 <see cref="IsGridEmpty"/> 的区别：这三类像素在产出之前都不在 <c>grid</c> 里（管道在生成时才写 grid，
+        /// 木箱隐藏像素 active=false，升降台地下像素是哨兵坐标 (-1,-1)），所以「grid 空了」并不等于「场上没有像素要来了」。
+        /// 传送带空场加速用它兜住「刚点掉封路像素、生产者还没补位」的那一帧——否则会在关卡中段提前进入加速，
+        /// 而加速是本关内不回退的闩锁。倍乘门不算：分身不写 grid，且其本体离开网格后玩家已无后续操作。
+        /// </summary>
+        public bool HasPendingProducers()
+        {
+            if (pipes != null)
+                for (int i = 0; i < pipes.Count; i++)
+                    if (pipes[i] != null && pipes[i].HasRemainingWaves)
+                        return true;
+
+            if (boxes != null)
+                for (int i = 0; i < boxes.Count; i++)
+                    if (boxes[i] != null && boxes[i].hiddenPixels != null && boxes[i].hiddenPixels.Count > 0)
+                        return true;
+
+            if (elevators != null)
+                for (int i = 0; i < elevators.Count; i++)
+                    if (elevators[i] != null && !elevators[i].IsDone)
+                        return true;
+
+            return false;
         }
 
         // ===== 冰冻组 =====
@@ -1285,7 +1308,6 @@ namespace CrowdMatch
             }
             boxGrid = new bool[columns, TotalRows];
             boxes = new List<BoxItem>();
-            releasingBoxesCount = 0;
         }
 
         /// <summary>
@@ -1307,7 +1329,6 @@ namespace CrowdMatch
                     DestroyImmediate(e.gameObject);
             }
             elevators = new List<ElevatorItem>();
-            advancingElevatorsCount = 0;
         }
 
         /// <summary>
@@ -1713,7 +1734,7 @@ namespace CrowdMatch
             return elev;
         }
 
-        /// <summary>箱子开箱：清除其本体格占用，并登记「释放中」计数（由 BoxItem.TryOpen 调用）。</summary>
+        /// <summary>箱子开箱：清除其本体格占用（由 BoxItem.TryOpen 调用）。</summary>
         public void OnBoxOpened(BoxItem box)
         {
             if (box == null)
@@ -1722,25 +1743,6 @@ namespace CrowdMatch
                 for (int c = box.colMin; c <= box.colMax; c++)
                     if (IsInRange(c, r))
                         boxGrid[c, r] = false;
-            releasingBoxesCount++;
-        }
-
-        /// <summary>箱子释放完成（动画结束）：解除「释放中」计数（由 BoxItem 开箱动画收尾调用）。</summary>
-        public void OnBoxReleaseFinished(BoxItem box)
-        {
-            releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);
-        }
-
-        /// <summary>升降台开始推进（开门/升起动画）：登记「推进中」计数（由 ElevatorItem.TryAdvance 调用）。</summary>
-        public void OnElevatorAdvanceStarted(ElevatorItem elev)
-        {
-            advancingElevatorsCount++;
-        }
-
-        /// <summary>升降台推进完成（动画结束）：解除「推进中」计数（由 ElevatorItem 收尾调用）。</summary>
-        public void OnElevatorAdvanceFinished(ElevatorItem elev)
-        {
-            advancingElevatorsCount = Mathf.Max(0, advancingElevatorsCount - 1);
         }
 
         /// <summary>
