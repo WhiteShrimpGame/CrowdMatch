@@ -48,6 +48,35 @@ namespace CrowdMatch
     /// 整体拉回旧的对齐位置。现在基准随绘制就地更新，开窗 / 刷新（<see cref="ResetPads"/> + 滚到最下方
     /// <see cref="ScrollToFront"/>）之后对齐的就是**刷新后的那个画面**。
     ///
+    /// ## 绳组（显示 / 连绳 / 断绳）
+    /// 绳组的既有口径不变：<see cref="ContainerItem.ropeGroupId"/>（0 = 未连），同 id 的车按列升序串成链，
+    /// 相邻两车之间一条绳。画布只是多了第三种编辑入口，规则与 Inspector 上的「标记选中车为连接」一致
+    /// （≥2 辆、每列恰好 1 辆、列号连续、未连、端点已配、与已有绳组不交叉），并且同样顺手关掉洗牌。
+    ///
+    /// 工具行（<see cref="CanvasTool"/>）三选一，与拖动互斥：
+    ///
+    /// | 工具 | 手势 |
+    /// |---|---|
+    /// | 拖动 | 按住有车的格拖到别处松手（原有行为）；**带绳组的车跨列**会先问一次「换列必须断绳」 |
+    /// | 连绳 | 逐格点击切换选中（再点取消；**同列只留 1 辆**，点该列第二辆就把原来那辆换掉），点「连成绳组」提交；不满足规则时按钮禁用并在提示行写明原因 |
+    /// | 断绳 | **两步**：点一下把**整个绳组**高亮（不是只亮被点的那一格），点第二下**同一辆**才断（整组取消，与 Inspector 的「取消选中车的连接」同口径）；点空格 / 没连的车取消待确认 |
+    ///
+    /// 拖动那条的口径：绳组按列（gridX）升序成链，**换列必然改变整条绳连**，所以只有「跨列」才弹窗，
+    /// 同列内换行不弹（链不看行）。确认后**取消整个绳组**（同组的其它车一并断开）再挪车，并进**同一步 Undo**；
+    /// 取消则这次拖放作废，什么都不改。
+    ///
+    /// **外部改动自动刷新**：订阅 <c>EditorApplication.hierarchyChanged</c> 只记一个脏标记
+    /// （一次「生成 / 导入 Containers」会连发很多条事件），到下一次 <see cref="SyncWithSceneIfDirty"/> 统一
+    /// 重绑 + 重建占用表 + 按锚点把最前排钉住。拖动中与 Play 中不刷。
+    /// 注意它只认**层级变化**：在 Inspector 里改 ropeGroupId / 颜色不会触发，那种情况仍按「刷新快照」按钮。
+    ///
+    /// **显示**与工具无关、始终画：每个成员格 2px 组色描边，相邻两列的车心之间一条同色 2px 直线
+    /// （穿过格体，所以两组交叉一眼可见）。组色按 id 用黄金比取 hue（<see cref="RopeColor"/>），
+    /// 相邻 id 的色相拉得开。直线用 <c>EditorGUI.DrawRect</c> 逐段拼（不用 Handles：那个在 GUI 空间里
+    /// 跨事件是否可靠没有把握，而 DrawRect 是这里已经在用的原语）。
+    ///
+    /// 注意**挪列会改变绳连**（车被拖走后，它的绳组仍按新的列位置串链）：这是原有行为，不阻止。
+    ///
     /// ## 手感约定（照搬「像素颜色画布」，都是踩过的坑）
     /// 格子一律 <c>Rect.Contains</c> 命中，不用 <c>GUILayout.Button</c>；画只发生在 Repaint；
     /// **收尾放在滚动视图之外**（拖到画布外松手时格子上收不到 MouseUp）；Play 中整块禁用；
@@ -144,6 +173,51 @@ namespace CrowdMatch
         /// <summary>本帧解析出来的插入下标（最终落库用的就是它）= 落点行夹进该列的车数范围。</summary>
         private int _dropIndex = -1;
 
+        // ===== 工具与绳组 =====
+
+        /// <summary>画布当前工具；三者互斥，见类文档「绳组」一节。（不叫 Tool：那会遮蔽 <c>UnityEditor.Tool</c>）</summary>
+        private enum CanvasTool { Move, Rope, Unrope }
+
+        private CanvasTool _tool = CanvasTool.Move;
+
+        private static readonly GUIContent[] ToolContents =
+        {
+            new GUIContent("拖动", "按住有车的格拖到别处松手 → 车挪过去（原有行为）"),
+            new GUIContent("连绳", "逐格点击切换选中（再点取消），点「连成绳组」提交"),
+            new GUIContent("断绳", "点一下把整个绳组高亮，再点同一辆才断 → 整组取消"),
+        };
+
+        /// <summary>连绳模式下已点选的格（点选顺序；校验与提交时按列排序）。</summary>
+        private readonly List<Vector2Int> _ropePick = new List<Vector2Int>();
+
+        /// <summary>本帧校验出来的待连车辆（顺序同 <see cref="_ropePick"/>，提交前再按列排序）。</summary>
+        private readonly List<ContainerItem> _ropeCars = new List<ContainerItem>();
+
+        /// <summary>本帧的连绳校验结论：null = 可提交，否则是人话的原因（提示行与按钮禁用共用）。</summary>
+        private string _ropeReason;
+
+        /// <summary>本帧画出来的格子矩形（格坐标 → Rect），供绳组连线定位；每帧在 <see cref="DrawCanvas"/> 里重填。</summary>
+        private readonly Dictionary<Vector2Int, Rect> _cellRects = new Dictionary<Vector2Int, Rect>();
+
+        /// <summary>本帧的绳组：ropeGroupId → 组内车（按列升序），只由 <see cref="CollectRopeChains"/> 填。</summary>
+        private readonly Dictionary<int, List<ContainerItem>> _ropeChains =
+            new Dictionary<int, List<ContainerItem>>();
+
+        /// <summary>断绳模式下「第一下点了谁」的格（-1 = 没有）；第二下点同一格才真断。</summary>
+        private Vector2Int _unropeTarget = new Vector2Int(-1, -1);
+
+        /// <summary>
+        /// 断绳待确认的绳组 id（0 = 没有）。高亮的**范围**看它 —— 整组一起亮，
+        /// 而不是只亮被点的那一格；确认仍然要求点回原来那一格（<see cref="_unropeTarget"/>）。
+        /// </summary>
+        private int _unropeTargetId;
+
+        /// <summary>场景层级被外部改过（生成 / 导入 Containers、清空、删车…），等下一次 OnGUI 统一刷新。</summary>
+        private bool _sceneDirty;
+
+        /// <summary>绳组描边与连线的线宽（像素）。</summary>
+        private const float RopeThickness = 2f;
+
         /// <summary>格内文字样式（缓存；太大 / 太小就不画字了）。</summary>
         private GUIStyle _numStyle;
         private int _numStyleSize = -1;
@@ -184,6 +258,7 @@ namespace CrowdMatch
         {
             Selection.selectionChanged += BindFromSelection;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            EditorApplication.hierarchyChanged += OnHierarchyChanged;
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
             ResetPads();               // 开窗（含编辑器重启后恢复窗口）：不留白
             _scrollToFrontFrames = 3;  // 开窗先把最前排露出来
@@ -194,8 +269,43 @@ namespace CrowdMatch
         {
             Selection.selectionChanged -= BindFromSelection;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.undoRedoPerformed -= OnUndoRedoPerformed;
             CancelDrag();   // 关窗时别把手势留在拖动态
+        }
+
+        /// <summary>
+        /// 场景层级被外部改过（生成 / 导入 Containers、清空 Group、删车…）。这里**只记脏标记**：
+        /// 一次操作会连发很多条事件，逐条刷新纯属浪费；统一推迟到下一次 OnGUI（见 <see cref="SyncWithSceneIfDirty"/>）。
+        /// </summary>
+        private void OnHierarchyChanged()
+        {
+            _sceneDirty = true;
+            Repaint();
+        }
+
+        /// <summary>
+        /// 把外部改动落到画布上：重绑 + 重取调色板 + 重建占用表，再按锚点把最前排钉在原地
+        /// （<see cref="KeepFrontRow"/>，与撤销同一套）——所以重建 / 导入之后立刻看到新布局，但视线不跳。
+        /// 列数变了（导入 Containers 会改 columns）时格子尺寸也跟着变，<see cref="KeepFrontRow"/> 会清留白重锚，
+        /// 那种情况回落成「刷新快照」按钮的行为。
+        /// 拖动中不刷（那会把手势打断），Play 中不刷（那时改不了场景）。
+        /// </summary>
+        private void SyncWithSceneIfDirty()
+        {
+            if (!_sceneDirty)
+                return;
+
+            _sceneDirty = false;
+
+            if (Application.isPlaying || _dragging)
+                return;
+
+            float aboveBefore = _aboveHeight;   // 上一帧画出来的「row 0 上方」高 = 对齐锚点
+            BindFromSelection();                // 选中可能换了 ContainerGroup（重建后引用也可能已失效）
+            RefreshSnapshot();
+            KeepFrontRow(aboveBefore);
+            SceneView.RepaintAll();
         }
 
         /// <summary>
@@ -217,6 +327,7 @@ namespace CrowdMatch
         {
             // 进 / 出 Play 都会重排容器：取消手势 + 重绑 + 重画，别让画布停在旧快照上
             CancelDrag();
+            ClearRopeInteraction();
             BindFromSelection();
             Repaint();
         }
@@ -245,6 +356,9 @@ namespace CrowdMatch
 
             if (_group != null)
                 _group.RebuildGrid();
+
+            // 快照变了，之前的连绳点选可能已经指向别处（甚至不存在的车），一律作废
+            ClearRopeInteraction();
         }
 
         /// <summary>从 ColorConfig 构建调色板（下标 = colorId，与车身上色同一份）。</summary>
@@ -282,7 +396,11 @@ namespace CrowdMatch
                 return;
             }
 
+            SyncWithSceneIfDirty();   // 生成 / 导入 / 清空等外部改动：自动重绑刷新
+
             _hover = new Vector2Int(-1, -1);
+
+            ValidateRopePicks();   // 提示行与「连成绳组」按钮共用这一份结论（每帧只算一次）
 
             DrawToolbar();
             DrawColumnHint();
@@ -305,6 +423,38 @@ namespace CrowdMatch
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("工具", GUILayout.Width(90f));
+            using (new EditorGUI.DisabledScope(playing))
+            {
+                int picked = GUILayout.Toolbar((int)_tool, ToolContents, GUILayout.Width(228f));
+                if (picked != (int)_tool)
+                    SwitchTool((CanvasTool)picked);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("绳组", GUILayout.Width(90f));
+            // 按钮一律画出来（只禁用不改结构），所以提示行变长变短都不会把下面的控件顶走
+            using (new EditorGUI.DisabledScope(playing || _tool != CanvasTool.Rope || _ropeReason != null))
+            {
+                if (GUILayout.Button(
+                        "连成绳组" + (_ropePick.Count > 0 ? "（" + _ropePick.Count + " 辆）" : ""),
+                        GUILayout.Width(150f)))
+                    CommitRopeGroup();
+            }
+            using (new EditorGUI.DisabledScope(playing || _ropePick.Count == 0))
+            {
+                if (GUILayout.Button("清空选择", GUILayout.Width(76f)))
+                {
+                    _ropePick.Clear();
+                    Repaint();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            DrawRopeHint();
+
+            EditorGUILayout.BeginHorizontal();
             GUILayout.Label("操作", GUILayout.Width(90f));
             using (new EditorGUI.DisabledScope(playing))
             {
@@ -320,10 +470,15 @@ namespace CrowdMatch
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.HelpBox(
-                "按住有车的格子拖到别处松手 → 车挪过去（可跨列）。松手时落点格及其上方的车各后移 1 格、\n" +
-                "原位以上的车各前移 1 格（画面上下端 = 最前排）。高亮跟着光标落在目标格上。\n" +
-                "每列都压紧（列里不留洞），所以原有空格可能让某辆车移动不止 1 格；目标列放不下时自动加行（改 rows）。\n" +
-                "画布只画到最后一个有车的排 + 1 排。车身颜色 / 容量 / 问号 / ropeGroupId 都跟着车走；挪列会改变绳连（Gizmo 可见）。",
+                "【拖动】按住有车的格子拖到别处松手 → 车挪过去（可跨列）。松手时落点格及其上方的车各后移 1 格、\n" +
+                "原位以上的车各前移 1 格（画面上下端 = 最前排）。每列都压紧（列里不留洞），所以原有空格可能让某辆车\n" +
+                "移动不止 1 格；目标列放不下时自动加行（改 rows）。画布只画到最后一个有车的排 + 1 排。\n" +
+                "车身颜色 / 容量 / 问号 / ropeGroupId 都跟着车走；带绳组的车「跨列」会先弹窗问「换列必须断绳」，\n" +
+                "确认后整个绳组断开再挪车（同一步 Undo）；同列内换行不影响绳连，不弹窗。\n" +
+                "【连绳】逐格点击切换选中（再点取消；同一列只留 1 辆，点第二辆会把原来那辆换掉），点「连成绳组」提交：\n" +
+                "≥2 辆、每列恰好 1 辆、列号连续、均未连接、端点已配、与已有绳组不交叉，并且会顺手关掉洗牌。\n" +
+                "【断绳】点一下把整个绳组高亮，再点回同一辆才断（整组取消）；点空格 / 没连的车取消待确认。\n" +
+                "绳组始终画成「成员格组色描边 + 相邻两列车心连线」。生成 / 导入 Containers 等外部改动会自动刷新画布。",
                 MessageType.Info);
 
             if (playing)
@@ -377,17 +532,22 @@ namespace CrowdMatch
 
             // 行**从后往前**画：先画 row = rows-1（最上），最后画 row 0（最下）——
             // 于是「下端 = 最前排」，与场景里 +Z 朝屏幕上方一致（row 0 的 z 最小）。
+            _cellRects.Clear();   // 绳组连线要按本帧实际画出来的矩形定位
             for (int row = rows - 1; row >= 0; row--)
             {
                 EditorGUILayout.BeginHorizontal();
                 for (int col = 0; col < columns; col++)
                 {
                     Rect rect = GUILayoutUtility.GetRect(cellW, cellH, GUILayout.Width(cellW), GUILayout.Height(cellH));
+                    _cellRects[new Vector2Int(col, row)] = rect;
                     DrawCell(rect, col, row, cellW, cellH);
                     HandleCell(rect, col, row);
                 }
                 EditorGUILayout.EndHorizontal();
             }
+
+            // 绳组画在格子之上（成员格描边 + 相邻两列的车心连线），必须在滚动视图内画才跟着滚 / 才被裁切。
+            DrawRopeOverlay();
 
             // 下方留白：只用来腾出滚动范围（见 _padBelow）。它落在最前排之下，不影响最前排的位置。
             if (_padBelow > 0.5f)
@@ -522,6 +682,17 @@ namespace CrowdMatch
             return Mathf.Max(4, CellW() / HeightRatio);
         }
 
+        /// <summary>选中 / 待执行格的高亮（半透明黄底 + 2px 亮黄边框）：拖动落点、连绳点选、断绳待确认共用一套。</summary>
+        private static void DrawSelectionHighlight(Rect rect)
+        {
+            var hi = new Color(1f, 0.85f, 0.2f);
+            EditorGUI.DrawRect(rect, new Color(1f, 0.9f, 0.3f, 0.3f));
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 2f), hi);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 2f, rect.width, 2f), hi);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, 2f, rect.height), hi);
+            EditorGUI.DrawRect(new Rect(rect.xMax - 2f, rect.y, 2f, rect.height), hi);
+        }
+
         private void DrawCell(Rect rect, int col, int row, int cellW, int cellH)
         {
             var item = _group.GetItem(col, row);
@@ -562,15 +733,18 @@ namespace CrowdMatch
                     }
                     else if (col == _dropCell.x && row == _dropCell.y)
                     {
-                        // 落点格高亮：半透明黄底 + 2px 亮黄边框。
-                        // 含义 = 这一格及其上方的车整体上移一格让位，被拖的车落到这一格。
-                        var hi = new Color(1f, 0.85f, 0.2f);
-                        EditorGUI.DrawRect(rect, new Color(1f, 0.9f, 0.3f, 0.3f));
-                        EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 2f), hi);
-                        EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 2f, rect.width, 2f), hi);
-                        EditorGUI.DrawRect(new Rect(rect.x, rect.y, 2f, rect.height), hi);
-                        EditorGUI.DrawRect(new Rect(rect.xMax - 2f, rect.y, 2f, rect.height), hi);
+                        // 落点格：这一格及其上方的车整体上移一格让位，被拖的车落到这一格
+                        DrawSelectionHighlight(rect);
                     }
+                }
+                else if (_tool == CanvasTool.Rope && _ropePick.Contains(new Vector2Int(col, row)))
+                {
+                    DrawSelectionHighlight(rect);   // 连绳点选态
+                }
+                else if (_tool == CanvasTool.Unrope && _unropeTargetId != 0 &&
+                         item != null && item.ropeGroupId == _unropeTargetId)
+                {
+                    DrawSelectionHighlight(rect);   // 断绳待确认：整个绳组一起亮
                 }
             }
 
@@ -651,7 +825,11 @@ namespace CrowdMatch
             }
             else if (_hover.x < 0)
             {
-                text = "按住有车的格子拖到别处松手即可移动；松手在画布外 = 取消";
+                text = _tool == CanvasTool.Move
+                    ? "按住有车的格子拖到别处松手即可移动；松手在画布外 = 取消"
+                    : _tool == CanvasTool.Rope
+                        ? "连绳：点选相邻若干列各 1 辆车（再点取消，同列只留 1 辆），然后点「连成绳组」"
+                        : "断绳：点一下把整个绳组高亮，再点同一辆才断（整组取消）";
             }
             else
             {
@@ -669,6 +847,279 @@ namespace CrowdMatch
         }
 
         // ============================================================
+        // 绳组
+        // ============================================================
+
+        /// <summary>
+        /// 校验当前点选能不能连成一个绳组：结论写进 <see cref="_ropeReason"/>（null = 可提交），
+        /// 车辆写进 <see cref="_ropeCars"/>（**已按列升序**，正好就是链条顺序）。
+        ///
+        /// 规则与 Inspector 的 <c>ContainerItemEditor.ValidateRopeSelection</c> 完全一致，只是「选中的车」
+        /// 来自画布点选：≥2 辆、每列恰好 1 辆、列号连续、均未连接、端点已配、与已有绳组不交叉。
+        /// 每帧调一次（按钮启用状态与提示行共用），所以失败原因必须写成人话。
+        /// </summary>
+        private void ValidateRopePicks()
+        {
+            _ropeCars.Clear();
+            _ropeReason = null;
+
+            if (_ropePick.Count == 0)
+            {
+                _ropeReason = "还没有选车（点选相邻若干列各 1 辆车）";
+                return;
+            }
+            if (_ropePick.Count < 2)
+            {
+                _ropeReason = "至少需要 2 辆车（相邻的 2 列起）";
+                return;
+            }
+
+            // 每列恰好 1 辆是 ToggleRopePick 保证的（点同列第二辆是「换掉」而不是「再选一个」），这里只做归并
+            var byCol = new Dictionary<int, Vector2Int>();
+            foreach (var cell in _ropePick)
+                byCol[cell.x] = cell;
+
+            // 列号连续（与 Inspector 的「必须处在相邻的 N 列」同口径）
+            int minCol = int.MaxValue, maxCol = int.MinValue;
+            foreach (var col in byCol.Keys)
+            {
+                if (col < minCol) minCol = col;
+                if (col > maxCol) maxCol = col;
+            }
+            if (maxCol - minCol != byCol.Count - 1)
+            {
+                for (int col = minCol; col <= maxCol; col++)
+                {
+                    if (byCol.ContainsKey(col))
+                        continue;
+                    _ropeReason = "选中的车必须处在相邻的 " + byCol.Count + " 列：缺少第 " + col + " 列";
+                    return;
+                }
+            }
+
+            var cols = new List<int>(byCol.Keys);
+            cols.Sort();
+
+            var cars = new List<ContainerItem>(cols.Count);
+            var newRows = new Dictionary<int, int>();
+            foreach (var col in cols)
+            {
+                var cell = byCol[col];
+                var item = _group.GetItem(cell.x, cell.y);
+                if (item == null)
+                {
+                    _ropeReason = "格 (" + cell.x + ", " + cell.y + ") 是空格，不能连绳";
+                    return;
+                }
+                if (item.ropeGroupId != 0)
+                {
+                    _ropeReason = item.name + " 已属于绳组 " + item.ropeGroupId + "，请先取消它的连接";
+                    return;
+                }
+                if (item.ropeAnchorLeft == null || item.ropeAnchorRight == null)
+                {
+                    _ropeReason = item.name + " 未配置 ropeAnchorLeft / ropeAnchorRight，无法建绳";
+                    return;
+                }
+
+                newRows[col] = cell.y;
+                cars.Add(item);
+            }
+
+            _ropeReason = ContainerItemEditor.ValidateNoRopeCrossing(newRows, _group);
+            if (_ropeReason == null)
+                _ropeCars.AddRange(cars);
+        }
+
+        /// <summary>
+        /// 把点选的车连成一个新绳组：整次一个 Undo 组，并顺手关掉 ContainerGroup 的洗牌
+        /// （洗牌会打乱列位置、绳组关系随即失效）——与 Inspector 的「标记选中车为连接」一致。
+        /// </summary>
+        private void CommitRopeGroup()
+        {
+            ValidateRopePicks();   // 按钮本来就是按这一帧的结论启用 / 禁用的，这里再取一次当兜底
+
+            if (_tool != CanvasTool.Rope || _ropeReason != null || _ropeCars.Count < 2)
+            {
+                Debug.LogWarning("[容器拖移画布] 无法连绳：" + (_ropeReason ?? "车辆不足"));
+                return;
+            }
+
+            int id = ContainerItemEditor.NextRopeGroupId(_group);
+            int count = _ropeCars.Count;
+
+            const string undoName = "标记绳子连接";
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+
+            for (int i = 0; i < count; i++)
+            {
+                var car = _ropeCars[i];
+                Undo.RecordObject(car, undoName);
+                car.ropeGroupId = id;
+                EditorUtility.SetDirty(car);
+            }
+
+            bool marked = ContainerItemEditor.MarkShuffleOff(_ropeCars[0]);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _ropePick.Clear();
+            _ropeCars.Clear();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[容器拖移画布] 已把 " + count + " 辆车标记为绳组 " + id + "（相邻 " + count +                      " 列，共 " + (count - 1) + " 条绳）；" +
+                      (marked ? "并把所属 ContainerGroup 标记为不洗牌。" : "但未找到所属 ContainerGroup，洗牌开关未改动。"));
+        }
+
+        // ===== 绳组的画布显示 =====
+
+        /// <summary>按 ropeGroupId 归组：只认网格里确实有位置的车（跳过预制体模板 / 残留对象），组内按列升序。</summary>
+        private void CollectRopeChains()
+        {
+            _ropeChains.Clear();
+
+            var all = _group.GetComponentsInChildren<ContainerItem>();
+            for (int i = 0; i < all.Length; i++)
+            {
+                var item = all[i];
+                if (item == null || item.ropeGroupId == 0)
+                    continue;
+                if (_group.GetItem(item.gridX, item.gridZ) != item)
+                    continue;
+
+                List<ContainerItem> list;
+                if (!_ropeChains.TryGetValue(item.ropeGroupId, out list))
+                {
+                    list = new List<ContainerItem>();
+                    _ropeChains[item.ropeGroupId] = list;
+                }
+                list.Add(item);
+            }
+
+            foreach (var list in _ropeChains.Values)
+                list.Sort((a, b) => a.gridX.CompareTo(b.gridX));
+        }
+
+        /// <summary>画组色描边 + 车心连线（只在 Repaint 画，且必须在滚动视图内才跟着滚、才被裁切）。</summary>
+        private void DrawRopeOverlay()
+        {
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            CollectRopeChains();
+
+            foreach (var pair in _ropeChains)
+            {
+                var chain = pair.Value;
+                if (chain.Count == 0)
+                    continue;
+
+                Color color = RopeColor(pair.Key);
+
+                for (int i = 0; i < chain.Count; i++)
+                {
+                    Rect rect;
+                    if (!_cellRects.TryGetValue(new Vector2Int(chain[i].gridX, chain[i].gridZ), out rect))
+                        continue;   // 落在可见排之外（理论上不会有：可见排盖住了所有有车的排）
+                    DrawFrame(rect, color, RopeThickness);
+                }
+
+                // 相邻两车之间一条线：画的是两格**车心**之间的直线，所以跨行时是斜线，两组交叉一眼可见
+                for (int i = 0; i + 1 < chain.Count; i++)
+                {
+                    Rect a, b;
+                    if (!_cellRects.TryGetValue(new Vector2Int(chain[i].gridX, chain[i].gridZ), out a))
+                        continue;
+                    if (!_cellRects.TryGetValue(new Vector2Int(chain[i + 1].gridX, chain[i + 1].gridZ), out b))
+                        continue;
+                    DrawSegment(a.center, b.center, color, RopeThickness);
+                }
+            }
+        }
+
+        /// <summary>贴格子四边画一个方框（绳组成员格的组色描边）。</summary>
+        private static void DrawFrame(Rect rect, Color color, float thickness)
+        {
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, thickness), color);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), color);
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, thickness, rect.height), color);
+            EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), color);
+        }
+
+        /// <summary>
+        /// 用 <c>EditorGUI.DrawRect</c> 逐段拼一条线（每 2px 一个小方块，够直也够便宜）。
+        /// 没用 <c>Handles.DrawAAPolyLine</c>：它在 GUI 空间里的表现我没把握一次写对，而 DrawRect 是这里
+        /// 已经在用、行为确定的原语；绳组数量很少，代价可以忽略。
+        /// </summary>
+        private static void DrawSegment(Vector2 from, Vector2 to, Color color, float thickness)
+        {
+            float half = thickness * 0.5f;
+            int steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(from, to) / 2f));
+            for (int i = 0; i <= steps; i++)
+            {
+                Vector2 p = Vector2.Lerp(from, to, i / (float)steps);
+                EditorGUI.DrawRect(new Rect(p.x - half, p.y - half, thickness, thickness), color);
+            }
+        }
+
+        /// <summary>
+        /// 绳组颜色：按 id 用黄金比拉开色相（相邻 id 也不会撞色），固定饱和度 / 明度，保证在深底格子上都显眼。
+        /// </summary>
+        private static Color RopeColor(int id)
+        {
+            float hue = Mathf.Repeat(id * 0.618034f, 1f);
+            return Color.HSVToRGB(hue, 0.85f, 1f);
+        }
+
+        /// <summary>
+        /// 固定占一条等高矩形（画不画都占位），把连绳状态写成一行字 —— 按钮为什么点不了，这里直说。
+        /// </summary>
+        private void DrawRopeHint()
+        {
+            var rect = GUILayoutUtility.GetRect(0f, 16f, GUILayout.ExpandWidth(true));
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            string text;
+            if (_ropePick.Count == 0)
+            {
+                if (_tool == CanvasTool.Rope)
+                    text = "绳组：" + _ropeReason;
+                else if (_tool == CanvasTool.Unrope)
+                    text = _unropeTargetId == 0
+                        ? "断绳：点一下把整个绳组高亮，再点同一辆才断"
+                        : "断绳：已高亮绳组 " + _unropeTargetId + "（整组 " +
+                          CountRopeGroupMembers(_unropeTargetId) + " 辆）—— 再点 (" +
+                          _unropeTarget.x + ", " + _unropeTarget.y + ") 执行，点别处换目标";
+                else
+                    text = "绳组：切到「连绳」点选成组，或切到「断绳」点车取消；成员格有组色描边与连线。";
+            }
+            else
+                text = "已选 " + _ropePick.Count + " 辆：" + DescribePicks() +
+                       (_ropeReason == null ? "　→　可提交" : "　→　" + _ropeReason);
+
+            EditorGUI.LabelField(rect, text, EditorStyles.miniLabel);
+        }
+
+        /// <summary>把点选按列升序写成「列/行 → 列/行」，与提交时的链条顺序一致。</summary>
+        private string DescribePicks()
+        {
+            var cells = new List<Vector2Int>(_ropePick);
+            cells.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < cells.Count; i++)
+            {
+                if (i > 0)
+                    sb.Append(" → ");
+                sb.Append(cells[i].x).Append('/').Append(cells[i].y);
+            }
+            return sb.ToString();
+        }
+
+        // ============================================================
         // 手势
         // ============================================================
 
@@ -681,7 +1132,14 @@ namespace CrowdMatch
 
             if (ev.type == EventType.MouseDown && rect.Contains(ev.mousePosition))
             {
-                BeginDrag(col, row);
+                // 三个工具的动作都在按下时发生（连绳 / 断绳没有拖动手势）
+                if (_tool == CanvasTool.Move)
+                    BeginDrag(col, row);
+                else if (_tool == CanvasTool.Rope)
+                    ToggleRopePick(col, row);
+                else
+                    HandleUnropeClick(col, row);
+
                 ev.Use();
                 Repaint();
             }
@@ -691,6 +1149,134 @@ namespace CrowdMatch
                 ev.Use();
                 Repaint();
             }
+        }
+
+        /// <summary>切换工具：取消进行中的手势与连绳选择，并在进入绳组工具时重建一次 grid（读写都基于它）。</summary>
+        private void SwitchTool(CanvasTool tool)
+        {
+            _tool = tool;
+            CancelDrag();
+            ClearRopeInteraction();
+            if (_tool != CanvasTool.Move && _group != null)
+                _group.RebuildGrid();   // 场景可能在窗口开着时被改过
+            Repaint();
+        }
+
+        /// <summary>连绳模式：切换某一格的选中态（空格没有车可连，直接忽略）。</summary>
+        private void ToggleRopePick(int col, int row)
+        {
+            var cell = new Vector2Int(col, row);
+
+            int idx = _ropePick.IndexOf(cell);
+            if (idx >= 0)
+            {
+                _ropePick.RemoveAt(idx);   // 再点一下 = 取消这一格
+                return;
+            }
+
+            if (_group.GetItem(col, row) == null)
+                return;   // 空格：不入选，免得提示里冒出一堆「空格不能连绳」
+
+            // 同一列只留 1 辆：点该列的第二辆就把原来那辆**换掉**，而不是攒出一个必然报错的选法
+            int sameCol = _ropePick.FindIndex(p => p.x == col);
+            if (sameCol >= 0)
+            {
+                _ropePick[sameCol] = cell;
+                return;
+            }
+
+            _ropePick.Add(cell);
+        }
+
+        /// <summary>
+        /// 断绳模式：第一下点只把**整个绳组**高亮（黄框），第二下点回同一辆才真断；
+        /// 点空格 / 没连的车取消待确认。两步既与「点一下高亮」的约定一致，也免得点错就掉一根绳。
+        /// </summary>
+        private void HandleUnropeClick(int col, int row)
+        {
+            var item = _group.GetItem(col, row);
+            if (item == null || item.ropeGroupId == 0)
+            {
+                ClearUnropeTarget();
+                return;
+            }
+
+            var cell = new Vector2Int(col, row);
+            if (_unropeTarget != cell)
+            {
+                _unropeTarget = cell;                      // 第一下：只高亮（整组）
+                _unropeTargetId = item.ropeGroupId;
+                return;
+            }
+
+            int id = item.ropeGroupId;
+            ClearUnropeTarget();                           // 第二下：真断
+            RemoveRopeGroup(id);
+        }
+
+        /// <summary>取消「断绳待确认」状态。</summary>
+        private void ClearUnropeTarget()
+        {
+            _unropeTarget = new Vector2Int(-1, -1);
+            _unropeTargetId = 0;
+        }
+
+        /// <summary>某个绳组有几辆车（提示行显示「整组 N 辆」用）。</summary>
+        private int CountRopeGroupMembers(int id)
+        {
+            int n = 0;
+            foreach (var car in _group.GetComponentsInChildren<ContainerItem>())
+            {
+                if (car != null && car.ropeGroupId == id)
+                    n++;
+            }
+            return n;
+        }
+
+        /// <summary>整个绳组取消（与 Inspector 的「取消选中车的连接」同口径），自己一步 Undo。</summary>
+        private void RemoveRopeGroup(int id)
+        {
+            const string undoName = "取消绳子连接";
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+
+            int cleared = ClearRopeGroup(id, undoName);
+
+            Undo.CollapseUndoOperations(undoGroup);
+
+            ClearRopeInteraction();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[容器拖移画布] 已取消绳组 " + id + "，共清除 " + cleared + " 辆车的连接。");
+        }
+
+        /// <summary>
+        /// 把某个绳组的车全部清 0，返回清掉的车数，**不自己开 Undo 组** —— 由调用方决定它属于哪一步
+        /// （断绳是独立一步；拖放换列时并进那次拖放的 Undo 组里）。
+        /// 整组一起清：同 id 的车可能不在可见范围内，所以按层级遍历而不是按格子。
+        /// </summary>
+        private int ClearRopeGroup(int id, string undoName)
+        {
+            int cleared = 0;
+            foreach (var car in _group.GetComponentsInChildren<ContainerItem>())
+            {
+                if (car == null || car.ropeGroupId != id)
+                    continue;
+                Undo.RecordObject(car, undoName);
+                car.ropeGroupId = 0;
+                EditorUtility.SetDirty(car);
+                cleared++;
+            }
+            return cleared;
+        }
+
+        /// <summary>清掉连绳点选与断绳待确认（换工具 / 刷新快照 / 撤销 / 进出 Play 时都作废）。</summary>
+        private void ClearRopeInteraction()
+        {
+            _ropePick.Clear();
+            ClearUnropeTarget();
         }
 
         /// <summary>落点 = 光标所在的那一格（不细分格的上下半）。高亮与状态行共用这一份。</summary>
@@ -820,6 +1406,24 @@ namespace CrowdMatch
                 return;
             }
 
+            // 带绳组的车换列 → 必须断绳：绳组按列升序成链，车一换列整条绳连就变了。
+            // 同列内换行不改变链条（链只看 gridX），所以只有跨列才问。
+            int ropeId = _dragItem.ropeGroupId;
+            bool breakRope = toCol != _dragFrom.x && ropeId != 0;
+            if (breakRope)
+            {
+                bool ok = EditorUtility.DisplayDialog(
+                    "换列必须断绳",
+                    _dragItem.name + " 属于绳组 " + ropeId + "，换列会改变整条绳连。\n\n" +
+                    "「断绳并移动」= 取消整个绳组（同组的其它车也一并断开），再把这辆车挪过去。",
+                    "断绳并移动", "取消");
+                if (!ok)
+                {
+                    Debug.Log("[容器拖移画布] " + _dragItem.name + " 需要断绳才能换列，本次拖放作废。");
+                    return;
+                }
+            }
+
             targetList.Insert(index, _dragItem);
             int newCount = targetList.Count;
 
@@ -840,6 +1444,8 @@ namespace CrowdMatch
             if (toCol != _dragFrom.x)
                 RewriteColumn(toCol, targetList, moved);
 
+            int ropeCleared = breakRope ? ClearRopeGroup(ropeId, UndoName) : 0;   // 并进同一步 Undo
+
             _group.RebuildGrid();
             for (int i = 0; i < moved.Count; i++)
                 SyncLid(moved[i]);
@@ -851,7 +1457,8 @@ namespace CrowdMatch
 
             Debug.Log("[容器拖移画布] " + _dragItem.name + "：(" + _dragFrom.x + "," + _dragFrom.y + ") → (" +
                       toCol + "," + index + ")，两列共移动 " + moved.Count + " 辆车" +
-                      (grewRows ? "，rows 自动加到 " + _group.rows : "") + "。");
+                      (grewRows ? "，rows 自动加到 " + _group.rows : "") +
+                      (ropeCleared > 0 ? "，并已断开绳组 " + ropeId + "（" + ropeCleared + " 辆）" : "") + "。");
         }
 
         /// <summary>把一列的车按 <paramref name="list"/> 的顺序重铺到 row 0..n-1（压紧，不留洞）。</summary>
