@@ -35,8 +35,10 @@ TryCheckFail()                        GameController.cs:281
 **注意：`GameManager.GameFail()`（`GameManager.cs:127`，重置当前关 + 连败 +1）目前是死代码** ——
 全工程没有任何调用方，失败的实际表现就是上面这条「原地复活、继续本关」。
 
-胜利是另一条独立路径：`GameController.Update()` 里 `if (GameState.IsGameStart) CheckWin();`，
-失败判定已完全事件驱动，**不再每帧检测**（`GameController.cs:534` 的注释即此意）。
+胜负判定**都已事件驱动、不再每帧轮询**：失败见 `TryCheckFail`（本文主题），
+胜利见 `ContainerGroup.TryCheckWin`——只在「某辆车完成匹配（最后一颗像素开始上车）」与「某辆车离开盘面（开始倒车）」
+两个时点调用，口径已从**像素侧计数**（`ClearedPixelCount >= TotalPixelCount`）改为**载体侧**的
+「板上不存在『未完成匹配』的车」（顺带修掉了倍乘门额外像素漏加总数导致的提前判胜）。
 
 ---
 

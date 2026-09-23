@@ -268,6 +268,15 @@ namespace CrowdMatch
             }
             data.container.items = items.ToArray();
 
+            // 列内留洞：胜利判定的兜底依赖「每列从第 0 排起压紧」，留洞的关卡会漏判胜利（见 ContainerGroup.DescribeColumnHoles），
+            // 导出时先提示一次（只提示，不拦——是否先修由你定）。
+            string holes = cg.DescribeColumnHoles();
+            if (holes != null)
+                EditorUtility.DisplayDialog("导出关卡 JSON",
+                    "容器列内有洞：" + holes +
+                    "\n\n每列的车必须从第 0 排起压紧连续，否则运行时可能漏判胜利（关卡加载时也会报错）。",
+                    "继续导出");
+
             // 墙体：扫描 PixelGroup 下的 WallItem，每个墙存一组端点
             var walls = new List<LevelData.WallData>();
             foreach (var wall in pg.GetComponentsInChildren<WallItem>())
