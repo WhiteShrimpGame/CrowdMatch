@@ -359,20 +359,6 @@ namespace CrowdMatch
                 return false;
             }
 
-            // 静止门槛：有箱子正在释放（外跳/本体内站起未完成）→ 还有进度，不判失败
-            if (pixelGroup != null && pixelGroup.releasingBoxesCount > 0)
-            {
-                reason = "门禁8 有 " + pixelGroup.releasingBoxesCount + " 个木箱正在释放";
-                return false;
-            }
-
-            // 静止门槛：有升降台正在推进（开门/升起未完成）→ 还有进度，不判失败
-            if (pixelGroup != null && pixelGroup.advancingElevatorsCount > 0)
-            {
-                reason = "门禁9 有 " + pixelGroup.advancingElevatorsCount + " 个升降台正在推进";
-                return false;
-            }
-
             var belt = conveyorZone.belt;
             for (int i = 0; i < belt.slotCount; i++)
             {
@@ -381,7 +367,7 @@ namespace CrowdMatch
                     continue;
                 if (containerGroup.HasMatchableContainerOfColor(pixel.colorId))
                 {
-                    reason = "门禁10 带上槽位 " + i + " 的像素（colorId=" + pixel.colorId + "）有同色可匹配容器";
+                    reason = "门禁8 带上槽位 " + i + " 的像素（colorId=" + pixel.colorId + "）有同色可匹配容器";
                     return false;   // 至少一个可匹配 → 未失败
                 }
             }

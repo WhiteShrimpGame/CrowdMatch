@@ -182,12 +182,6 @@ namespace CrowdMatch
         /// <summary>运行时收集到的所有木箱（重建 grid 时刷新；含已拆掉的，用 destroyed 区分）。</summary>
         [System.NonSerialized] public List<CrateItem> crates = new List<CrateItem>();
 
-        /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int releasingBoxesCount;
-
-        /// <summary>正在推进中的升降台数量（开门/升起动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int advancingElevatorsCount;
-
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
 
@@ -1285,7 +1279,6 @@ namespace CrowdMatch
             }
             boxGrid = new bool[columns, TotalRows];
             boxes = new List<BoxItem>();
-            releasingBoxesCount = 0;
         }
 
         /// <summary>
@@ -1307,7 +1300,6 @@ namespace CrowdMatch
                     DestroyImmediate(e.gameObject);
             }
             elevators = new List<ElevatorItem>();
-            advancingElevatorsCount = 0;
         }
 
         /// <summary>
@@ -1713,7 +1705,7 @@ namespace CrowdMatch
             return elev;
         }
 
-        /// <summary>箱子开箱：清除其本体格占用，并登记「释放中」计数（由 BoxItem.TryOpen 调用）。</summary>
+        /// <summary>箱子开箱：清除其本体格占用（由 BoxItem.TryOpen 调用）。</summary>
         public void OnBoxOpened(BoxItem box)
         {
             if (box == null)
@@ -1722,25 +1714,6 @@ namespace CrowdMatch
                 for (int c = box.colMin; c <= box.colMax; c++)
                     if (IsInRange(c, r))
                         boxGrid[c, r] = false;
-            releasingBoxesCount++;
-        }
-
-        /// <summary>箱子释放完成（动画结束）：解除「释放中」计数（由 BoxItem 开箱动画收尾调用）。</summary>
-        public void OnBoxReleaseFinished(BoxItem box)
-        {
-            releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);
-        }
-
-        /// <summary>升降台开始推进（开门/升起动画）：登记「推进中」计数（由 ElevatorItem.TryAdvance 调用）。</summary>
-        public void OnElevatorAdvanceStarted(ElevatorItem elev)
-        {
-            advancingElevatorsCount++;
-        }
-
-        /// <summary>升降台推进完成（动画结束）：解除「推进中」计数（由 ElevatorItem 收尾调用）。</summary>
-        public void OnElevatorAdvanceFinished(ElevatorItem elev)
-        {
-            advancingElevatorsCount = Mathf.Max(0, advancingElevatorsCount - 1);
         }
 
         /// <summary>
