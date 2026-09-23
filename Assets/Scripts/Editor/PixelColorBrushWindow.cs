@@ -12,12 +12,15 @@ namespace CrowdMatch
     /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂与矩形填/抹。整览（自适应宽度）与细编（手动格子像素）
     /// 两档共用同一个双向滚动视图。
     ///
-    /// ## 三条口径（都与既有工具对齐）
+    /// ## 四条口径（都与既有工具对齐）
     /// · **画布顶行 = gridZ 0 = 最前排**，与「导出颜色 (PNG)」一致（那边图片顶行就是 gridZ 0）。
     /// · **障碍格不可涂**，只以底色 + 单字标记显示并写明类别：墙 / 管 / 箱 / 木 / 门 / 冰 / 升。
     ///   像素不存在于障碍格上，唯一例外是冰 —— 冰不是障碍、冰底下的像素仍在，所以冰格照常画出颜色、
     ///   悬停时另报底下像素的 colorId。
     /// · **colorId 与 ColorConfig.materials 下标一一对应**，调色板直接取自 ColorConfig，不另立一份选项表。
+    /// · **问号不是颜色**：它是 <c>PixelItem.isQuestion</c> 上的 flag，colorId 照旧保留（所以问号像素仍画得出本色）。
+    ///   所以「问号标注」模式**不看调色板**（切模式时笔刷原位不动）：按下那格原本不是问号 → **标记**、
+    ///   原本是问号 → **取消**。整笔只作用于「按下位置**同色四向连通**的那一组」，划出组外一律不动（防越界误标）。
     ///
     /// ## 笔刷值的表示
     /// <c>_brush = -1</c> = 橡皮、<c>&gt;= 0</c> = colorId。**不能**照搬「0 = 橡皮」那种表示：
@@ -42,12 +45,13 @@ namespace CrowdMatch
             Rect,
         }
 
-        /// <summary>窗口的三种模式：涂颜色 / 添加墙体 / 删除墙体。三种互斥，切换时清掉各自的待定状态。</summary>
+        /// <summary>窗口的四种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注。四种互斥，切换时清掉各自的待定状态。</summary>
         private enum Mode
         {
             Color,
             AddWall,
             DeleteWall,
+            Question,
         }
 
         private const float SwatchSize = 24f;
@@ -65,8 +69,16 @@ namespace CrowdMatch
         private Tool _tool = Tool.Free;
         private Mode _mode = Mode.Color;
 
-        /// <summary>笔刷值：-1 = 橡皮（删除该格像素），&gt;= 0 = 要涂的 colorId。</summary>
+        /// <summary>笔刷值：-1 = 橡皮（删除该格像素），&gt;= 0 = 要涂的 colorId。
+        /// 问号模式**不看笔刷**：标 / 取消由「按下的那一格当前是不是问号」决定，切模式时笔刷原位不动。</summary>
         private int _brush = -1;
+
+        /// <summary>问号模式一笔的过滤集 = 按下那一格所属的「同色四向连通组」。拖动只在这一组内生效，
+        /// 划到组外一律不动（避免越界误标）。笔画结束 / 取消时置空。</summary>
+        private HashSet<Vector2Int> _questionGroup;
+
+        /// <summary>问号模式这一笔的目标状态：按下那格原本不是问号 → true（标记）；原本是问号 → false（取消）。</summary>
+        private bool _questionTarget;
 
         // ===== 墙体状态 =====
 
@@ -303,7 +315,7 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 工具栏三段：模式（三选一）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作。
+        /// 工具栏三段：模式（四选一）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作。
         /// **每一段都常驻**，不按模式隐藏 —— 隐藏会让下面控件的命中矩形当场换人（见 skill 的说明）。
         /// 不适用的控件只禁用，不改布局高度。
         /// </summary>
@@ -320,6 +332,7 @@ namespace CrowdMatch
             DrawModeButton(Mode.Color, "涂颜色");
             DrawModeButton(Mode.AddWall, "添加墙体");
             DrawModeButton(Mode.DeleteWall, "删除墙体");
+            DrawModeButton(Mode.Question, "问号标注");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -329,7 +342,7 @@ namespace CrowdMatch
             _cellPx = Mathf.RoundToInt(EditorGUILayout.Slider("格子像素", _cellPx, 12f, 64f));
             EditorGUI.EndDisabledGroup();
 
-            using (new EditorGUI.DisabledScope(!colorMode))   // 工具只影响颜色笔刷的手势
+            using (new EditorGUI.DisabledScope(!colorMode))   // 工具只影响「涂颜色」模式的手势（问号模式固定自由拖动）
                 _tool = (Tool)EditorGUILayout.EnumPopup("工具", _tool, GUILayout.Width(130f));
             EditorGUILayout.EndHorizontal();
 
@@ -366,7 +379,7 @@ namespace CrowdMatch
                     MessageType.Info);
         }
 
-        /// <summary>模式按钮：用 Toggle 的选中态做互斥选择。切换时把两种待定状态都清掉，避免跨模式残留。</summary>
+        /// <summary>模式按钮：用 Toggle 的选中态做互斥选择。切换时把待定状态都清掉，避免跨模式残留。</summary>
         private void DrawModeButton(Mode mode, string label)
         {
             bool on = GUILayout.Toggle(_mode == mode, label, EditorStyles.miniButton, GUILayout.Width(80f));
@@ -376,6 +389,7 @@ namespace CrowdMatch
             _mode = mode;
             _wallStroke.Clear();
             _deletePendingWall = null;
+            // 笔刷不动：问号模式不看笔刷，切回来时原来选的是哪个色块 / 橡皮都还在原位
             Repaint();
         }
 
@@ -402,7 +416,8 @@ namespace CrowdMatch
             bool playing = Application.isPlaying;
             bool colorMode = _mode == Mode.Color;
 
-            // 墙体模式下保留这一块（高度稳定，不让下面控件跳位），但压暗且不响应点击
+            // 非涂色模式（添加/删除墙体、问号标注）下保留这一块（高度稳定，不让下面控件跳位），
+            // 但压暗且不响应点击 —— 问号模式不看笔刷，标 / 取消由「按下的那一格是不是问号」决定。
             if (!colorMode && Event.current.type == EventType.Repaint)
                 EditorGUI.DrawRect(area, new Color(0.1f, 0.1f, 0.12f, 0.55f));
 
@@ -530,9 +545,21 @@ namespace CrowdMatch
                 // 底色
                 if (kind == CellKind.Color)
                 {
-                    EditorGUI.DrawRect(rect, _palette.Length > 0
+                    var baseColor = _palette.Length > 0
                         ? _palette[Mathf.Clamp(colorId, 0, _palette.Length - 1)]
-                        : Color.gray);
+                        : Color.gray;
+
+                    if (item != null && item.isQuestion)
+                    {
+                        // 问号像素：左半本色、右半黑 —— 既一眼看出被标了问号，又保住它的颜色信息
+                        float half = Mathf.Floor(rect.width * 0.5f);
+                        EditorGUI.DrawRect(new Rect(rect.x, rect.y, half, rect.height), baseColor);
+                        EditorGUI.DrawRect(new Rect(rect.x + half, rect.y, rect.width - half, rect.height), Color.black);
+                    }
+                    else
+                    {
+                        EditorGUI.DrawRect(rect, baseColor);
+                    }
                 }
                 else if (kind == CellKind.Ice && item != null && item.colorId >= 0 && item.colorId < _palette.Length)
                 {
@@ -552,7 +579,9 @@ namespace CrowdMatch
                 }
                 else if (kind == CellKind.Color && px >= 14)
                 {
-                    EditorGUI.LabelField(rect, colorId.ToString(),
+                    // 问号像素的数字带「?」后缀（如 14?），与右半黑搭配一眼可辨
+                    bool question = item != null && item.isQuestion;
+                    EditorGUI.LabelField(rect, question ? colorId + "?" : colorId.ToString(),
                         NumStyle(Mathf.Clamp(px / 3, 9, 24)));
                 }
 
@@ -693,7 +722,7 @@ namespace CrowdMatch
                 if (_wallCells.TryGetValue(_hover, out var hoveredWall) && hoveredWall != null)
                     text += "【" + hoveredWall.name + "】";
                 if (item != null)
-                    text += "，底下像素颜色 " + item.colorId;
+                    text += "，底下像素颜色 " + item.colorId + (item.isQuestion ? "（问号）" : "");
             }
 
             text += "　｜　网格 " + _group.columns + " 列 × " + _group.TotalRows + " 行";
@@ -701,6 +730,11 @@ namespace CrowdMatch
             if (_mode == Mode.Color)
                 text += "　｜　笔刷 " + (_brush < 0 ? "橡皮" : "颜色 " + _brush) +
                         "　｜　工具 " + (_tool == Tool.Free ? "自由涂" : "矩形");
+            else if (_mode == Mode.Question)
+                text += "　｜　" + (_questionGroup == null
+                    ? "按下有像素的格子：不是问号 → 标记，已是问号 → 取消（只作用于按下位置同色相连的那一组）"
+                    : "本笔：" + (_questionTarget ? "标记问号" : "取消问号") +
+                      "（过滤组 " + _questionGroup.Count + " 格，仅按下位置同色相连）");
 
             EditorGUI.LabelField(rect, text, EditorStyles.miniLabel);
         }
@@ -750,6 +784,10 @@ namespace CrowdMatch
                         _rectCurrent = _rectAnchor;
                     }
                 }
+                else if (_mode == Mode.Question)
+                {
+                    BeginQuestionStroke(col, gridZ);   // 先定这一笔的方向 + 过滤集，再处理按下这一格
+                }
                 else if (_mode == Mode.AddWall)
                 {
                     // 一次拖动 = 一条新墙线：按下时清掉上一条待创建的
@@ -774,6 +812,10 @@ namespace CrowdMatch
                         PaintCell(col, gridZ);
                     else if (_rectActive)
                         _rectCurrent = new Vector2Int(col, gridZ);
+                }
+                else if (_mode == Mode.Question)
+                {
+                    PaintQuestionCell(col, gridZ);
                 }
                 else if (_mode == Mode.AddWall)
                 {
@@ -811,13 +853,14 @@ namespace CrowdMatch
 
             _dragging = false;
 
-            if (_mode == Mode.Color)
+            if (_mode == Mode.Color || _mode == Mode.Question)
             {
                 if (_tool == Tool.Rect && _rectActive && !Application.isPlaying)
                     PaintRect();
 
                 _rectActive = false;
                 _strokePainted.Clear();
+                _questionGroup = null;   // 问号模式的过滤集只在一笔内有效
 
                 if (_dirty)
                 {
@@ -840,6 +883,7 @@ namespace CrowdMatch
             _dragging = false;
             _rectActive = false;
             _strokePainted.Clear();
+            _questionGroup = null;
         }
 
         /// <summary>把矩形两角归一化并夹进网格范围。</summary>
@@ -942,6 +986,118 @@ namespace CrowdMatch
             item.ApplyMaterial(_config);
             EditorUtility.SetDirty(item);
             _dirty = true;
+        }
+
+        /// <summary>
+        /// 问号模式：按下时定下这一笔的**方向**与**过滤集**，然后处理按下这一格。
+        ///
+        /// · 方向：按下那格**原本是问号 → 取消**、**原本不是 → 标记**。所以同一笔不会又标又取，
+        ///   也不需要调色板里再放一个「问号色」（那样会跟「问号是一个 flag 而不是颜色」相矛盾）。
+        /// · 过滤集：按下那格所属的**同色四向连通组**（只看颜色与连通，与调色板无关）。
+        ///   拖动只在这一组内生效，划出组外一律不动 —— 避免扫过边界时误标到别的颜色 / 别的组。
+        ///
+        /// 按下处没得可标（空格 / 障碍格 / 没有像素）时**不开笔**，连空 Undo 组都不记。
+        /// </summary>
+        private void BeginQuestionStroke(int col, int row)
+        {
+            _questionGroup = null;
+            if (Application.isPlaying || !_group.IsInRange(col, row))
+                return;
+
+            var item = _group.GetItem(col, row);
+            if (item == null)
+                return;                                 // 空格：没有像素可标
+            if (!IsPaintable(Classify(col, row, out _)))
+                return;                                 // 障碍格（含冰）不动
+
+            _questionGroup = CollectSameColorGroup(col, row, item.colorId);
+            _questionTarget = !item.isQuestion;
+
+            StartStroke();                              // 与涂色同一套手势：整笔一个 Undo 组
+            PaintQuestionCell(col, row);
+        }
+
+        /// <summary>
+        /// 问号模式：涂过一格。只处理落在 <see cref="_questionGroup"/> 里的格（= 按下位置同色相连的那一组），
+        /// 组外一律不动；已经是目标状态的格不重复写，也不记空 Undo。
+        ///
+        /// 开关问号要连 Renderer 与 questionObject 一起记 Undo：问号的视觉来自 questionMaterial
+        /// （<c>renderer.sharedMaterial</c>）与 questionObject 的显隐，只记 PixelItem 会变成
+        /// 「flag 撤销回来了、场景样子没变」（与 <c>PixelItemEditor.SetQuestionAll</c> 同口径）。
+        /// </summary>
+        private void PaintQuestionCell(int col, int row)
+        {
+            if (Application.isPlaying || _questionGroup == null)
+                return;
+            if (!_questionGroup.Contains(new Vector2Int(col, row)))
+                return;   // 组外：越界不处理
+
+            if (!_strokePainted.Add(new Vector2Int(col, row)))
+                return;   // 本笔已经处理过这一格
+
+            if (!IsPaintable(Classify(col, row, out _)))
+                return;   // 障碍格（含冰）不动
+
+            var item = _group.GetItem(col, row);
+            if (item == null || item.isQuestion == _questionTarget)
+                return;   // 空格 / 已是目标状态：不记一条空 Undo
+
+            string op = _questionTarget ? "标记问号" : "取消问号";
+            Undo.RecordObject(item, op);
+            for (int i = 0; i < item.renderers.Count; i++)
+            {
+                var renderer = item.renderers[i];
+                if (renderer != null)
+                    Undo.RecordObject(renderer, op);
+            }
+            if (item.questionObject != null)
+                Undo.RecordObject(item.questionObject, op);
+
+            item.isQuestion = _questionTarget;
+            item.ApplyMaterial(_config);
+            item.RefreshQuestionObject();
+            EditorUtility.SetDirty(item);
+            _dirty = true;
+        }
+
+        /// <summary>
+        /// 取「同色四向连通组」：从 (col, row) 出发，只往**有像素且 colorId 相同**的四向邻居扩散。
+        /// 只看颜色与连通、不看覆盖物 —— 冰 / 木箱盖住的像素仍是网格像素，组不该被它们截断；
+        /// 而墙 / 管 / 门格上根本没有像素（<c>GetItem</c> 为 null），天然就是断点。
+        /// </summary>
+        private HashSet<Vector2Int> CollectSameColorGroup(int col, int row, int colorId)
+        {
+            var group = new HashSet<Vector2Int>();
+            var stack = new Stack<Vector2Int>();
+
+            var start = new Vector2Int(col, row);
+            group.Add(start);
+            stack.Push(start);
+
+            while (stack.Count > 0)
+            {
+                var cell = stack.Pop();
+                Push(cell.x + 1, cell.y);
+                Push(cell.x - 1, cell.y);
+                Push(cell.x, cell.y + 1);
+                Push(cell.x, cell.y - 1);
+            }
+
+            return group;
+
+            void Push(int c, int r)
+            {
+                var cell = new Vector2Int(c, r);
+                if (!_group.IsInRange(c, r) || group.Contains(cell))
+                    return;
+
+                var it = _group.GetItem(c, r);
+                if (it == null || it.colorId != colorId)
+                    return;
+
+                group.Add(cell);
+                stack.Push(cell);
+            }
         }
 
         // ============================================================
