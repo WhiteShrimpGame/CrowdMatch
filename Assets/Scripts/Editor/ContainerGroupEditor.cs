@@ -47,6 +47,18 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
+                "「容器拖移画布」把容器布局铺成格子画布（下端 = 最前排，与场景一致），按住有车的格子拖到别处松手即可移动，\n" +
+                "支持跨列。落点行后的车各后移 1 格、原位以后的车各前移 1 格；每列都压紧（列里不留洞），\n" +
+                "目标列放不下时自动加行。整次拖放可一步 Undo，车身上的颜色 / 容量 / 问号都跟着走。",
+                MessageType.Info);
+
+            if (GUILayout.Button("打开容器拖移画布"))
+            {
+                ContainerDragWindow.OpenFor(group);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
                 "「导出 Containers」把当前容器布局存为文本：每行一列、从最前排到后排，\n" +
                 "每个容器记作 颜色ID/容量，同行（同列前后）用空格分隔，不记录空格。\n" +
                 "「导入 Containers」从文本重建容器布局（按文本调整 columns / rows 并重建子物体）。",
