@@ -46,6 +46,13 @@ namespace CrowdMatch
         [Tooltip("中心格（非边缘）用的木箱预制体")]
         public GameObject centerPrefab;
 
+        [Header("音效")]
+        [Tooltip("拆箱计数**扣减但还没拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
+        public string hitSoundTag = "BoxHit";
+
+        [Tooltip("拆箱计数扣减到 0、木箱**被拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
+        public string breakSoundTag = "BoxBreak";
+
         /// <summary>消失动画两段的时长（秒），与 BoxItem 保持一致。</summary>
         private const float PopDuration = 0.2f;
         private const float ShrinkDuration = 0.2f;
@@ -407,6 +414,11 @@ namespace CrowdMatch
         /// 没计满就按计数表现摘掉一条封条（从先摘的那条开始）；
         /// 计满则本箱转为已拆：立刻不再占格 / 不再盖像素（掩码由 PixelGroup.RefreshCrateState 重建），
         /// 并播放「弹一下再缩小」的消失动画（还剩着的封条跟着本体一起消失）。返回**本次是否刚拆掉**。
+        ///
+        /// 音效：**扣减后不为 0 → <see cref="hitSoundTag"/>；扣减后为 0（拆掉）→ <see cref="breakSoundTag"/>**。
+        /// 两者互斥 —— 拆掉那一次只播破碎音，不会再叠一声命中音。
+        /// 封条已经摘光但次数还没减完的情形（见 <see cref="SealCount"/>）照旧走「命中」这一支：
+        /// 计数的确被扣减了，与「摘了几条封条」无关。
         /// </summary>
         public bool RegisterAdjacentMoveOut()
         {
@@ -416,13 +428,28 @@ namespace CrowdMatch
             movedOutCount++;
             if (movedOutCount < Mathf.Max(1, destroyAfterMoves))
             {
+                PlayTag(hitSoundTag);   // 只减数、未拆掉
                 RemoveOneSeal();
                 return false;
             }
 
+            PlayTag(breakSoundTag);     // 扣减到 0：拆掉本体
             destroyed = true;
             DisappearVisual();
             return true;
+        }
+
+        /// <summary>
+        /// 按 AudioConfig 的 tag 播一次音效（tag 留空则静默跳过）。写法与 <see cref="IceItem"/> 的融化音效一致。
+        /// 同一 tag 只有一个 AudioSource，所以同一次点击碰到多个木箱时会互相打断（听起来仍是一次音）——
+        /// 要「每次都完整播」得换 <c>AudioManager.PlayNoInterrupt</c>。
+        /// </summary>
+        private static void PlayTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag))
+                return;
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play(tag);
         }
 
         /// <summary>
