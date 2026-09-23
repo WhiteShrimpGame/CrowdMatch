@@ -67,6 +67,32 @@ namespace CrowdMatch
                 }
             }
             EditorGUILayout.EndHorizontal();
+
+            DrawPillarRecapture(group, gate);
+        }
+
+        /// <summary>
+        /// 左右柱基准位置的重记入口。基准字段是 HideInInspector，没有别的修正途径，
+        /// 所以给一个按钮（同 PipeItem 的「重新记录剩余波次数字的基准位置」）。
+        /// </summary>
+        private static void DrawPillarRecapture(PixelGroup group, GateItem gate)
+        {
+            if (gate.leftPillar == null && gate.rightPillar == null)
+                return;
+
+            EditorGUILayout.Space();
+
+            if (GUILayout.Button("重新记录左右柱基准位置"))
+            {
+                gate.RecapturePillarBase();
+                Rebuild(group, gate);
+            }
+
+            EditorGUILayout.HelpBox(
+                "把两根柱子**当前**的局部位置记为「基准」（= 偏移量为 0 时该在的位置），" +
+                "之后按「基准 + 延展轴偏移」摆放，偏移量 = (格数-1)/2 × 该轴向的实际格距。\n" +
+                "柱子看起来偏了想校正时：先把它摆到「只有 1 格门」时的位置，再点这里。",
+                MessageType.Info);
         }
 
         /// <summary>闭合状态 / 区域内像素 / 倍乘额外像素的体检信息。</summary>

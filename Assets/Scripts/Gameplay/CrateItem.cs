@@ -16,7 +16,8 @@ namespace CrowdMatch
     ///
     /// 拆箱靠**外部点击**：每成功点击移出一次，与本次移出的像素上下左右（4 邻）相接的木箱各计 1 次；
     /// 同一次点击移出的是同一组，组内有多颗挨着木箱也只算 1 次。计满
-    /// <see cref="destroyAfterMoves"/> 次即销毁，底下像素随之恢复可见、按正常规则重新判定暴露、恢复可点。
+    /// <see cref="destroyAfterMoves"/> 次即销毁（**视觉立即消失**），底下像素随之恢复可见、按正常规则
+    /// 重新判定暴露、恢复可点 —— 恢复时带一段「从左下至右上」的斜向波浪浮现（见 <see cref="StartRestoreWave"/>）。
     ///
     /// 计数表现：箱体上钉两条**交叉封条**，每条封条两端各一颗钉子，钉子位置 = 木箱矩形的四角
     /// 各向箱内偏移 <c>crateSealInset</c>。每减一次数摘掉一条封条，**最后一次减次数连箱体一起拆掉** ——
@@ -45,6 +46,13 @@ namespace CrowdMatch
 
         [Tooltip("中心格（非边缘）用的木箱预制体")]
         public GameObject centerPrefab;
+
+        [Header("音效")]
+        [Tooltip("拆箱计数**扣减但还没拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
+        public string hitSoundTag = "BoxHit";
+
+        [Tooltip("拆箱计数扣减到 0、木箱**被拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
+        public string breakSoundTag = "BoxBreak";
 
         /// <summary>消失动画两段的时长（秒），与 BoxItem 保持一致。</summary>
         private const float PopDuration = 0.2f;
@@ -134,7 +142,14 @@ namespace CrowdMatch
 
         /// <summary>
         /// 拼接木箱视觉（角/边/中心 3 类预制体按格子，与 BoxItem 同构），最后再拼**计数表现**的封条与钉子。
-        /// 根摆在整块中心、不旋转不缩放；每块摆到自己格子的世界位置（用世界坐标，不假设根的层级深度）。
+        /// 根摆在整块中心、不旋转；每块摆到自己格子的世界位置（用世界坐标，不假设根的层级深度）。
+        ///
+        /// **尺寸与朝向（已与用户核对）**：
+        /// · 三个预制体**已按实际尺寸（一格）制作**，所以**不改缩放** —— 与 BoxItem 整体预制体同一口径，
+        ///   改 unitSize 的关卡需要美术重做素材，而不是代码乘倍率。
+        /// · 素材基准姿态：**角块 = 右下角、边块 = 下边缘**，其余方向靠 <see cref="PieceYaw"/> 绕网格朝上轴旋转。
+        ///   旋转是「yaw × 预制体自身朝向」（与 <see cref="FrameItem"/> 同写法），
+        ///   这样预制体上让贴图铺平的原始旋转不会被覆盖。
         ///
         /// 可重复调用：每次都先清掉上一批拼接块与封条组，所以编辑器的「重建显示」按钮可以反复点。
         /// </summary>
@@ -168,13 +183,58 @@ namespace CrowdMatch
 
                     piece.name = "CratePiece_" + r + "_" + c;
                     piece.transform.position = pg.GetWorldPosition(c, r);
-                    piece.transform.localRotation = Quaternion.identity;
-                    piece.transform.localScale = Vector3.one * pg.unitSize;   // 与箱子拼块同一口径
+
+                    // yaw 乘在预制体自身朝向**外侧**（绕网格朝上轴），预制体让贴图铺平的原始旋转得以保留；
+                    // 缩放一个字节都不碰 —— 预制体已按实际尺寸制作。
+                    piece.transform.localRotation =
+                        Quaternion.Euler(0f, PieceYaw(c, r), 0f) * piece.transform.localRotation;
+
                     _visualPieces.Add(piece);
                 }
             }
 
             BuildSeals(pg);
+        }
+
+        /// <summary>
+        /// 该格拼接块绕网格朝上轴的 yaw。**素材基准姿态：角块 = 右下角、边块 = 下边缘**，
+        /// 于是每个方向都是一次 90° 的位移，公式与推导（已与用户核对）：
+        /// · 「下」= row 增大方向 = world −z（本工程约定 **row 0 = 最上**，见 PixelFillTools 的选格提示；
+        ///   <see cref="PiecePrefab"/> 里也是 <c>isBottom = r == rowMax</c>）；
+        /// · 「右」= col 增大方向 = world +x；
+        /// · Unity 的 <c>Quaternion.Euler(0, +90, 0)</c> 把 +z 转向 +x（即把 −z 转向 −x），据此推得
+        ///   **下 0° / 左 90° / 上 180° / 右 270°**；角块基准是「右 + 下」，四个角按
+        ///   右下 0° → 左下 90° → 左上 180° → 右上 270° 逐个转 90°。
+        ///
+        /// 角块的两个方向必须**成对**取下 / 右这条对角线：换另一条对角线等价于整体加 180°（仍是纯旋转），
+        /// 但若一角取下、另一个取右，就变成镜像 —— 旋转补不回来，素材会看着歪。
+        /// </summary>
+        private float PieceYaw(int c, int r)
+        {
+            bool isLeft = c == colMin;
+            bool isRight = c == colMax;
+            bool isTop = r == rowMin;
+            bool isBottom = r == rowMax;
+
+            // 角块（同时压着一条行边界与一条列边界）：基准姿态是右下角
+            if ((isLeft || isRight) && (isTop || isBottom))
+            {
+                if (isRight)
+                    return isBottom ? 0f : 270f;   // 右下（基准）/ 右上
+                return isBottom ? 90f : 180f;      // 左下 / 左上
+            }
+
+            // 边块：yaw 由「特征朝哪一侧」决定，与角块同一张表
+            if (isBottom)
+                return 0f;                         // 下边（基准）
+            if (isLeft)
+                return 90f;                        // 左边
+            if (isTop)
+                return 180f;                       // 上边
+            if (isRight)
+                return 270f;                       // 右边
+
+            return 0f;                             // 中心块：无方向
         }
 
         /// <summary>清掉已拼接的木箱视觉块与封条组（编辑器非 Play 模式下用 DestroyImmediate）。</summary>
@@ -354,7 +414,13 @@ namespace CrowdMatch
         /// 记一次「相邻像素移出」（一次点击调用一次，重复计数由调用方保证 —— 同一组只算 1 次）。
         /// 没计满就按计数表现摘掉一条封条（从先摘的那条开始）；
         /// 计满则本箱转为已拆：立刻不再占格 / 不再盖像素（掩码由 PixelGroup.RefreshCrateState 重建），
-        /// 并播放「弹一下再缩小」的消失动画（还剩着的封条跟着本体一起消失）。返回**本次是否刚拆掉**。
+        /// 视觉**立即消失**（本体与还剩着的封条一起销毁，不再弹缩），被盖住的像素随后按斜向波前浮现
+        /// （见 <see cref="StartRestoreWave"/>）。返回**本次是否刚拆掉**。
+        ///
+        /// 音效：**扣减后不为 0 → <see cref="hitSoundTag"/>；扣减后为 0（拆掉）→ <see cref="breakSoundTag"/>**。
+        /// 两者互斥 —— 拆掉那一次只播破碎音，不会再叠一声命中音。
+        /// 封条已经摘光但次数还没减完的情形（见 <see cref="SealCount"/>）照旧走「命中」这一支：
+        /// 计数的确被扣减了，与「摘了几条封条」无关。
         /// </summary>
         public bool RegisterAdjacentMoveOut()
         {
@@ -364,13 +430,29 @@ namespace CrowdMatch
             movedOutCount++;
             if (movedOutCount < Mathf.Max(1, destroyAfterMoves))
             {
+                PlayTag(hitSoundTag);   // 只减数、未拆掉
                 RemoveOneSeal();
                 return false;
             }
 
+            PlayTag(breakSoundTag);     // 扣减到 0：拆掉本体
             destroyed = true;
-            DisappearVisual();
+            ClearVisual();              // 木箱**立即消失**（不再弹一下再缩小），封条一并销毁
+            StartRestoreWave();         // 被盖住的像素按「左下 → 右上」的斜向波前浮现
             return true;
+        }
+
+        /// <summary>
+        /// 按 AudioConfig 的 tag 播一次音效（tag 留空则静默跳过）。写法与 <see cref="IceItem"/> 的融化音效一致。
+        /// 同一 tag 只有一个 AudioSource，所以同一次点击碰到多个木箱时会互相打断（听起来仍是一次音）——
+        /// 要「每次都完整播」得换 <c>AudioManager.PlayNoInterrupt</c>。
+        /// </summary>
+        private static void PlayTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag))
+                return;
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play(tag);
         }
 
         /// <summary>
@@ -408,31 +490,42 @@ namespace CrowdMatch
             }, PopDuration, ShrinkDuration, restoreScale: false);
         }
 
-        /// <summary>木箱视觉消失：弹一下再缩小（各块独立，回调里销毁自己）。</summary>
-        private void DisappearVisual()
+        /// <summary>
+        /// 木箱被拆掉那一刻：把**被它盖住的**像素按「从左下至右上」的斜向波前依次浮现
+        /// （单个动画见 <see cref="PixelItem.PlayCrateRestore"/>）。
+        ///
+        /// 波前号 = <c>(col - colMin) + (rowMax - row)</c>：左下角 (colMin, rowMax) 为 0、右上角
+        /// (colMax, rowMin) 最大 —— 等值线是一条沿反对角线推进的波，波从木箱左下角推到右上角。
+        /// delay = 波前号 × <see cref="PixelGroup.crateRestoreWaveInterval"/>。
+        ///
+        /// 三个参数（起始 y 偏移 / 波前间隔 / 单个时长）配在 <see cref="PixelGroup"/> 上，
+        /// 与其它木箱预制体参数同一处 —— 它们是全局表现参数，不进关卡 JSON。
+        ///
+        /// **只在 Play 模式触发**：编辑器里重建显示时协程没法跑（非 Play 下 StartCoroutine 会报错）。
+        /// 此刻像素其实还被标着「被盖住」（渲染器关着），同一帧稍后 <see cref="PixelGroup.RefreshCrateState"/>
+        /// 才把它们放出来 —— 于是玩家看到的是「箱子没了、像素从下方浮起」，而不是先亮一下再沉下去。
+        /// </summary>
+        private void StartRestoreWave()
         {
-            for (int i = 0; i < _visualPieces.Count; i++)
+            if (!Application.isPlaying || group == null || group.grid == null)
+                return;
+
+            float yOffset = group.crateRestoreYOffset;
+            float interval = Mathf.Max(0f, group.crateRestoreWaveInterval);
+            float duration = Mathf.Max(0f, group.crateRestoreDuration);
+
+            foreach (var cell in Cells)
             {
-                var piece = _visualPieces[i];
-                if (piece == null)
+                if (!group.IsInRange(cell.x, cell.y))
                     continue;
 
-                piece.transform.DisappearWithPop(() =>
-                {
-                    if (piece != null)
-                        Destroy(piece);
-                }, PopDuration, ShrinkDuration, restoreScale: false);
-            }
-            _visualPieces.Clear();
+                var pixel = group.grid[cell.x, cell.y];
+                if (pixel == null)
+                    continue;
 
-            // 还剩着的封条（次数 < 3 的木箱：封条没摘完就要拆本体）跟本体一起消失
-            for (int i = 0; i < _sealGroups.Count; i++)
-            {
-                var seal = _sealGroups[i];
-                if (seal != null)
-                    RemoveSealVisual(seal);
+                int wave = (cell.x - colMin) + (rowMax - cell.y);
+                pixel.PlayCrateRestore(wave * interval, yOffset, duration);
             }
-            _sealGroups.Clear();
         }
 
         /// <summary>

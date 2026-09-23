@@ -35,6 +35,18 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
+                "「检查并修复容器颜色」把容量 = 3 的车的颜色对齐到 PixelGroup 的像素分布，口径与「生成 Containers」一致\n" +
+                "（含管道计划 / 箱子隐藏 / 升降台分组，并按倍乘门倍率重复计）。先检查并弹窗列出问题，确认后才修改。\n" +
+                "容量≠3 的车视为已配好：其容量从该色像素数里扣掉，既不改色也不删；像素数不能被 3 整除则中止。",
+                MessageType.Info);
+
+            if (GUILayout.Button("检查并修复容器颜色"))
+            {
+                ContainerColorRepair.Run(group);
+            }
+
+            EditorGUILayout.Space();
+            EditorGUILayout.HelpBox(
                 "「导出 Containers」把当前容器布局存为文本：每行一列、从最前排到后排，\n" +
                 "每个容器记作 颜色ID/容量，同行（同列前后）用空格分隔，不记录空格。\n" +
                 "「导入 Containers」从文本重建容器布局（按文本调整 columns / rows 并重建子物体）。",
@@ -380,8 +392,9 @@ namespace CrowdMatch
             Debug.Log(Tag + " 已从 " + path + " 导入 " + created + " 个容器（" + cols + " 列 × " + parsedRows + " 行）。");
         }
 
-        /// <summary>实例化模板：预制体资产走 InstantiatePrefab，场景对象走 Object.Instantiate 克隆</summary>
-        private static GameObject InstantiateTemplate(ContainerItem template, Transform parent)
+        /// <summary>实例化模板：预制体资产走 InstantiatePrefab，场景对象走 Object.Instantiate 克隆。
+        /// <c>internal</c> 是给 <see cref="ContainerColorRepair"/> 补车时复用（同一套预制体/场景对象的处理）。</summary>
+        internal static GameObject InstantiateTemplate(ContainerItem template, Transform parent)
         {
             if (PrefabUtility.GetPrefabAssetType(template) == PrefabAssetType.NotAPrefab)
                 return (GameObject)Object.Instantiate(template.gameObject, parent);

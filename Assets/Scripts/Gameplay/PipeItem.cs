@@ -43,6 +43,12 @@ namespace CrowdMatch
         [Tooltip("剩余波次数字（UI Text，留空自动从子物体查找）")]
         public Text waveCountText;
 
+        [Tooltip("剩余波次数字的整体偏移（世界 xz：x = 世界 X，y = 世界 Z）。" +
+                 "**只有管道朝向左右两侧**（轨迹沿列方向，即 ±X）时才应用，竖直朝向时归零 —— " +
+                 "所以把 points 从横向改成竖向，数字会回到预制体原位，不会粘着旧偏移。\n" +
+                 "x 按朝向**镜像**：按「朝右」填正数，朝左时自动取负，数字始终落在外侧同一侧；z 分量不镜像")]
+        public Vector2 waveCountTextOffset = Vector2.zero;
+
         [Tooltip("勾选后，剩余波次数字按 ColorConfig 的字体颜色 / 描边颜色显示（按下一波颜色 ID 索引）")]
         public bool useConfigTextColor;
 
@@ -69,6 +75,15 @@ namespace CrowdMatch
 
         [System.NonSerialized] private int _waveIndex;   // 已生成波数（下一波用 colors[_waveIndex]）
         [System.NonSerialized] private bool _spawning;
+
+        /// <summary>剩余波次数字父物体**相对管道根**的原始位置（局部坐标）：只在第一次应用偏移时记一次，
+        /// 之后一切以它为基准重算 —— 反复调朝向 / 反复调偏移量都不会叠加，管道根被拖动时数字也跟着走。
+        ///
+        /// **必须序列化**：它记的是「原位」，而应用偏移会就地改掉物体的位置。只放 NonSerialized 的话，
+        /// 编辑器一次脚本重载就会把「已偏移后的位置」当成原位，再偏一次 → 越改越远
+        /// （<see cref="IceItem"/> 的计数文字基准踩过同一个坑，那边也是靠序列化解决的）。</summary>
+        [SerializeField, HideInInspector] private Vector3 _textBaseLocal;
+        [SerializeField, HideInInspector] private bool _textBaseCaptured;
 
         /// <summary>蛇形生成中，蛇当前占据的格子（蛇头→蛇尾顺序，含蛇头正在前往的格子）。仅 IsReleasing 期间有效。</summary>
         [System.NonSerialized] public List<Vector2Int> snakeCells = new List<Vector2Int>();
@@ -463,6 +478,7 @@ namespace CrowdMatch
         /// <summary>
         /// 把管道本体网格的本地 +Z 转向 points[0]→points[1] 的方向（世界方向换算到其父物体局部空间）。
         /// bodyMesh 留空时自动取子物体首个带 MeshFilter 的物体（排除「下一颜色指示器」的 Renderer）。
+        /// 顺带按同一方向摆好剩余波次数字（见 <see cref="ApplyWaveCountTextOffset"/>）。
         /// </summary>
         public void OrientBody()
         {
@@ -470,18 +486,81 @@ namespace CrowdMatch
             if (g == null || points == null || points.Count < 2)
                 return;
 
+            Vector2Int ca = ToCell(points[0]);
+            Vector2Int cb = ToCell(points[1]);
+
+            // 数字位置只取决于 points（跟有没有 Body Mesh 无关），所以放在取 bodyMesh 之前
+            ApplyWaveCountTextOffset(ca, cb);
+
             Transform target = bodyMesh != null ? bodyMesh : FindBodyMesh();
             if (target == null)
                 return;
 
-            Vector2Int ca = ToCell(points[0]);
-            Vector2Int cb = ToCell(points[1]);
             Vector3 worldDir = g.GetWorldPosition(cb.x, cb.y) - g.GetWorldPosition(ca.x, ca.y);
             if (worldDir.sqrMagnitude < 0.0001f)
                 return;
 
             Vector3 localDir = target.parent != null ? target.parent.InverseTransformDirection(worldDir) : worldDir;
             target.localRotation = Quaternion.LookRotation(localDir.normalized);
+        }
+
+        /// <summary>
+        /// 按管道朝向摆剩余波次数字：**只有朝向左右两侧**（轨迹沿列方向）时应用 <see cref="waveCountTextOffset"/>，
+        /// 竖直朝向（沿行方向）时归零 —— 于是把 points 从横向改成竖向，数字回到预制体原位。
+        ///
+        /// 偏移在**世界 xz** 上叠加，且 **x 按朝向镜像**（朝右用配置值，朝左取负）：配置里的 x 按「朝右」理解，
+        /// 两种左右朝向就能共用同一个「外侧」偏移量。z 分量不镜像。
+        ///
+        /// 改的是 Text **父物体**的世界坐标（不是 Text 自己的 localPosition）—— 预制体里 Text 嵌在
+        /// Canvas / 空物体下面也摆得对（与 <c>IceItem.countOffset</c> 同一套做法）。父物体就是管道根时是例外
+        /// （预制体里 Text 直接挂根下）：动它会连管道本体一起挪走，所以退回改 Text 自己的世界坐标。
+        /// </summary>
+        private void ApplyWaveCountTextOffset(Vector2Int pipeCell, Vector2Int firstTrackCell)
+        {
+            if (waveCountText == null)
+                waveCountText = GetComponentInChildren<Text>(true);
+            if (waveCountText == null || waveCountText.transform == null)
+                return;
+
+            Transform target = waveCountText.transform.parent != null
+                ? waveCountText.transform.parent
+                : waveCountText.transform;
+            if (target == transform)
+                target = waveCountText.transform;   // 父物体就是根：退到改 Text 自己
+
+            if (!_textBaseCaptured)
+            {
+                // 记「相对管道根」的局部位置（不是世界坐标）：管道根在场景里被拖动时数字跟着走，
+                // 也不会因为先前的偏移被当成基准而越推越远
+                _textBaseLocal = transform.InverseTransformPoint(target.position);
+                _textBaseCaptured = true;
+            }
+
+            int dx = firstTrackCell.x - pipeCell.x;
+            int dz = firstTrackCell.y - pipeCell.y;
+
+            Vector3 offset = Vector3.zero;
+            if (dx != 0 && Mathf.Abs(dx) >= Mathf.Abs(dz))
+            {
+                // 左右朝向：x 按朝向镜像（朝左取负），z 分量照搬
+                float x = dx < 0 ? -waveCountTextOffset.x : waveCountTextOffset.x;
+                offset = new Vector3(x, 0f, waveCountTextOffset.y);
+            }
+
+            target.position = transform.TransformPoint(_textBaseLocal) + offset;
+        }
+
+        /// <summary>
+        /// 把「数字父物体的原位」重新记成**当前**位置（Inspector 上有按钮，供 <see cref="OrientBody"/> 之后的摆放重设基准）。
+        /// 想把数字整体挪到别处时：先把 <see cref="waveCountTextOffset"/> 设成 0、把 Text 的父物体拖到想要的位置，
+        /// 再按这个按钮 —— 之后偏移都从这个新原位算起。
+        /// </summary>
+        public void RecaptureTextBase()
+        {
+            _textBaseCaptured = false;
+            if (points == null || points.Count < 2)
+                return;
+            ApplyWaveCountTextOffset(ToCell(points[0]), ToCell(points[1]));
         }
 
         private Transform FindBodyMesh()

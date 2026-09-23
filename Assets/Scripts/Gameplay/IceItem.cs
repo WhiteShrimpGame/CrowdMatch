@@ -4,14 +4,26 @@ using UnityEngine.UI;
 
 namespace CrowdMatch
 {
+    /// <summary>冰的显示方式。</summary>
+    public enum IceDisplayMode
+    {
+        /// <summary>四角拼接 Sprite：每个网格交点一张填充图（现状，圆角由贴图承担）。</summary>
+        CornerSprite,
+
+        /// <summary>实时生成 Mesh：底部多边形（逐角切 45° 斜边）→ 侧面棱柱 → 斜面 → 顶面。</summary>
+        GeneratedMesh,
+    }
+
     /// <summary>
     /// 冰冻组：在像素网格上占一片**任意形状的连通格**（以逐格列表记录，不是矩形也不是线段）。
     /// 冰组带一个**冰冻计数**：只要计数还没到 0，组内像素就**视为不暴露**
     /// （不可点击、也不参与同色连通块）；**每成功点击移出一次**（一次点击，不按它移出几颗像素），
     /// 全局计数 -1；归 0 后冰化开、组内像素恢复正常。
     ///
-    /// 冰的可见效果用**四角拼接**（**填充 · 单色** · Sprite 模式）：把冰组当成「一片格子组成的区域」，
-    /// 在每个网格交点放一张图，得到圆角与拐角连贯的整块冰。
+    /// 冰的可见效果有两种，由 <see cref="displayMode"/> 选：
+    ///   · **四角拼接**（**填充 · 单色** · Sprite 模式）：把冰组当成「一片格子组成的区域」，
+    ///     在每个网格交点放一张图，得到圆角与拐角连贯的整块冰。
+    ///   · **实时 Mesh**：逐格并集的轮廓切 45° 斜边 → 侧面棱柱 → 斜面 → 顶面，几何见 <see cref="IceMeshBuilder"/>。
     ///
     /// **每个冰组独立考虑**：只把**本组**的成员格当成激活，别的冰组与本组无关 —— 交界处各自收边、各自倒圆角。
     /// 因此既不需要全局变体图，也不需要「哪个交点归哪个组」的仲裁，最多只用到 5 张图（单元号 0/1/3/4/8）。
@@ -44,6 +56,26 @@ namespace CrowdMatch
                  "判定用的是**点击前**的暴露状态 —— 所以「使之暴露的那一次点击」本身不计数")]
         public bool meltOnlyWhenExposed;
 
+        [Header("融化表现（两个 tag 分别对应 SpawnPoolConfig 与 AudioConfig）")]
+        [Tooltip("冰化开时从 SpawnPool 生成的特效 tag（留空 = 不生成）。摆在冰组**包围矩形中心**，" +
+                 "且**不挂在冰下面** —— 冰在关卡重建时会被清掉，挂在池根下才不会连累它")]
+        public string meltEffectTag = "IceBreak";
+
+        [Tooltip("冰化开时播放的音效 tag（AudioManager；留空 = 不播）")]
+        public string meltSoundTag = "IceBreak";
+
+        [Tooltip("融化特效在对象池里的存活时长（秒），到点自动回池")]
+        [Min(0.1f)]
+        public float meltEffectDuration = 3f;
+
+        [Tooltip("融化特效播放位置的 **y 偏移（世界单位）**：在「冰组包围矩形中心」的 y 之上再加这么多，" +
+                 "正数抬高（中心的 y 就是 PixelGroup 所在平面的 y）")]
+        public float meltEffectYOffset = 0f;
+
+        [Header("显示模式")]
+        [Tooltip("四角拼接 Sprite（现状，用下面那组 sprites）/ 实时生成 Mesh（用下面那组 Mesh 参数）")]
+        public IceDisplayMode displayMode = IceDisplayMode.CornerSprite;
+
         [Header("显示（参考 FrameItem）")]
         [Tooltip("填充贴图，下标 = 单元号 0..12（含义见 CornerTileTable.FillClassNames）。" +
                  "单色填充只用 0/1/3/4/8 这 5 张，其余留空即可 —— 保留 13 格是为了以后想切多色时不用重配")]
@@ -54,6 +86,39 @@ namespace CrowdMatch
 
         [Tooltip("模板上的 SpriteRenderer（副本据此定位并换 Sprite；可位于模板子级）")]
         public SpriteRenderer atomicSprite;
+
+        [Header("实时 Mesh（displayMode = GeneratedMesh 时生效；距离都是 **Pixel 单位** = unitSize 的倍数）")]
+        [Tooltip("**整体外扩**：方阵轮廓先向外扩这么多，再往下做切斜边与顶面内缩 —— 想给冰留一圈富余就靠它（0 = 不扩）")]
+        public float meshExpand = 0f;
+
+        [Tooltip("整块 Mesh 在 **y 方向**上的偏移（底面默认在 y=0，正数抬高）")]
+        public float meshBaseY = 0f;
+
+        [Tooltip("底部多边形：**90° 凸角**（2×2 里占 1 格）的 45° 内切距离 —— 沿两条边各取这么多，把角切掉")]
+        public float meshCorner90Inset = 0.3f;
+
+        [Tooltip("底部多边形：**270° 凹角**（2×2 里占 3 格）的 45° 外切距离 —— 沿两条边各取这么多，把缺口补上")]
+        public float meshCorner270Outset = 0.3f;
+
+        [Tooltip("侧面棱柱高度：底部多边形垂直向上延展这么多")]
+        public float meshHeight = 1f;
+
+        [Tooltip("顶面相对「方阵轮廓」的内缩距离（先内缩、再切下面两个斜边）")]
+        public float meshTopInset = 0.15f;
+
+        [Tooltip("顶面：90° 凸角内切距离")]
+        public float meshTopCorner90Inset = 0.3f;
+
+        [Tooltip("顶面：270° 凹角外切距离")]
+        public float meshTopCorner270Outset = 0.3f;
+
+        [Tooltip("顶面相对侧面顶部的**上方 y 偏移**：连接顶面与侧面的斜面高度（0 = 一圈平沿）")]
+        public float meshTopYOffset = 0.2f;
+
+        [Tooltip("实时 Mesh 的材质（不生成 UV，用纯色 / 无贴图材质）。两个现成的可选：" +
+                 "Assets/Shaders/UnlitColorTransparent.shader（纯色半透）、" +
+                 "UnlitColorRimTransparent.shader（同上 + 边缘高光）。留空则用渲染器默认材质（白模）")]
+        public Material meshMaterial;
 
         [Tooltip("冰冻计数数字（UI Text，留空自动从子物体查找）。它的**父物体**会被当作锚点，见 countOffset")]
         public Text countText;
@@ -100,6 +165,15 @@ namespace CrowdMatch
 
         /// <summary>已生成的单元块副本。</summary>
         [System.NonSerialized] private readonly List<GameObject> _spawned = new List<GameObject>();
+
+        /// <summary>实时 Mesh 模式的子物体（带 MeshFilter / MeshRenderer；Sprite 模式下为 null）。</summary>
+        [System.NonSerialized] private GameObject _meshObject;
+
+        /// <summary>实时 Mesh 模式生成的 Mesh（Clear 时一并销毁，避免泄漏）。</summary>
+        [System.NonSerialized] private Mesh _mesh;
+
+        /// <summary>最近一次生成 Mesh 时的提示（几何被夹紧 / 孔洞被填实等），Inspector 显示用。</summary>
+        [System.NonSerialized] private string _meshWarning;
 
         /// <summary>去重后的成员格集合（由 <see cref="RefreshCells"/> 从 <see cref="cells"/> 算出）。</summary>
         [System.NonSerialized] private readonly HashSet<Vector2Int> _cellSet = new HashSet<Vector2Int>();
@@ -191,8 +265,8 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 摆放可见表现：在归属自己的每个网格交点上生成一张填充图，并把计数数字放到冰组左上角 + 偏移。
-        /// 已融化时只清空、不生成。编辑器改字段后与运行时重建走的是同一个方法。
+        /// 摆放可见表现：按 <see cref="displayMode"/> 走四角拼接 Sprite 或实时 Mesh，并把计数数字放到
+        /// 冰组包围矩形中心 + 偏移。已融化时只清空、不生成。编辑器改字段后与运行时重建走的是同一个方法。
         /// </summary>
         public void BuildVisual(PixelGroup pg)
         {
@@ -213,7 +287,22 @@ namespace CrowdMatch
                 return;
             }
 
-            if (Melted || atomicObject == null)
+            if (Melted)
+            {
+                UpdateDisplay();
+                return;
+            }
+
+            if (displayMode == IceDisplayMode.GeneratedMesh)
+            {
+                if (atomicObject != null)
+                    atomicObject.gameObject.SetActive(false);   // 模板别露出来（与 Sprite 模式一致）
+                BuildMeshVisual();
+                UpdateDisplay();
+                return;
+            }
+
+            if (atomicObject == null)
             {
                 UpdateDisplay();
                 return;
@@ -246,6 +335,73 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 实时 Mesh 表现：按 <see cref="IceMeshBuilder"/> 生成一块 Mesh，挂在子物体上。
+        /// 子物体摆在**与 PixelGroup 同一个局部空间**（冰组预制体一般就在组原点，这里兜住不在原点的情况），
+        /// 所以 Mesh 与四角拼接 Sprite 落在同一个位置。
+        /// 编辑器下生成物打 <see cref="HideFlags.DontSave"/>，不随场景保存（运行时由 BuildVisual 重新生成）。
+        /// </summary>
+        public void BuildMeshVisual()
+        {
+            if (group == null)
+                return;
+
+            float unit = group.unitSize;
+            var settings = new IceMeshBuilder.Settings
+            {
+                expand = Mathf.Max(0f, meshExpand) * unit,
+                baseY = meshBaseY * unit,
+                corner90Inset = Mathf.Max(0f, meshCorner90Inset) * unit,
+                corner270Outset = Mathf.Max(0f, meshCorner270Outset) * unit,
+                height = Mathf.Max(0f, meshHeight) * unit,
+                topInset = Mathf.Max(0f, meshTopInset) * unit,
+                topCorner90Inset = Mathf.Max(0f, meshTopCorner90Inset) * unit,
+                topCorner270Outset = Mathf.Max(0f, meshTopCorner270Outset) * unit,
+                topYOffset = meshTopYOffset * unit,
+            };
+
+            Mesh mesh = IceMeshBuilder.Build(_cellSet, group.columns, group.TotalRows,
+                group.CellSizeX, group.CellSizeZ, settings, out string warn);
+            _meshWarning = warn;
+            if (mesh == null)
+            {
+                if (!string.IsNullOrEmpty(warn))
+                    Debug.LogWarning("[IceItem] 实时 Mesh 未生成：" + warn, this);
+                return;
+            }
+
+            var go = new GameObject("IceMesh");
+            go.transform.SetParent(transform, false);
+            // 摆到 PixelGroup 的原点：Mesh 顶点按组局部坐标算，这样与 Sprite 模式的单元块重合
+            go.transform.position = group.transform.position;
+            go.transform.rotation = group.transform.rotation;
+            go.transform.localScale = Vector3.one;
+
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            var meshRenderer = go.AddComponent<MeshRenderer>();
+            if (meshMaterial != null)
+                meshRenderer.sharedMaterial = meshMaterial;
+
+            if (!Application.isPlaying)
+            {
+                go.hideFlags = HideFlags.DontSave;
+                mesh.hideFlags = HideFlags.DontSave;
+            }
+
+            _meshObject = go;
+            _mesh = mesh;
+        }
+
+        /// <summary>最近一次生成 Mesh 时的提示（几何被夹紧 / 孔洞被填实等）；null = 无。</summary>
+        public string MeshWarning => _meshWarning;
+
+        /// <summary>实时 Mesh 的顶点数（没生成时为 0）。</summary>
+        public int MeshVertexCount => _mesh != null ? _mesh.vertexCount : 0;
+
+        /// <summary>实时 Mesh 的三角数（没生成时为 0）。</summary>
+        public int MeshTriangleCount => _mesh != null ? _mesh.triangles.Length / 3 : 0;
+
+        /// <summary>
         /// 本组的角身份：是本组格 → 0（单色下具体取值无意义），否则 -1（不激活）。
         /// 越界格一律算不激活 —— 冰组里若不小心留了网格外的格，不至于把图铺到网格外面去。
         /// </summary>
@@ -256,7 +412,7 @@ namespace CrowdMatch
             return _cellSet.Contains(new Vector2Int(col, row)) ? 0 : CornerTileKey.None;
         }
 
-        /// <summary>销毁所有已生成的单元块副本。</summary>
+        /// <summary>销毁所有已生成的单元块副本与实时 Mesh（子物体 + Mesh 本身，避免泄漏）。</summary>
         public void Clear()
         {
             for (int i = _spawned.Count - 1; i >= 0; i--)
@@ -270,6 +426,23 @@ namespace CrowdMatch
                     DestroyImmediate(go);
             }
             _spawned.Clear();
+
+            if (_meshObject != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(_meshObject);
+                else
+                    DestroyImmediate(_meshObject);
+                _meshObject = null;
+            }
+            if (_mesh != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(_mesh);
+                else
+                    DestroyImmediate(_mesh);
+                _mesh = null;
+            }
         }
 
         /// <summary>
@@ -286,13 +459,11 @@ namespace CrowdMatch
             if (countText == null)
                 return;
 
-            if (group != null && _cellSet.Count > 0)
+            if (TryGetCentreWorld(out Vector3 centre))
             {
-                // 锚点 = 包围矩形中心（两端格中心的中点）+ countOffset。
-                // 用「中心」而不是「左上角」：冰组形状是任意的，中心更好调；而且这样 countOffset 是与
-                // 冰组形状无关的常量，关卡 JSON 导入回来的冰组也能落在同样的相对位置。
-                Vector3 centre = (group.GetWorldPosition(_colMin, _rowMin) +
-                                  group.GetWorldPosition(_colMax, _rowMax)) * 0.5f;
+                // 锚点 = 包围矩形中心 + countOffset。用「中心」而不是「左上角」：冰组形状是任意的，
+                // 中心更好调；而且这样 countOffset 是与冰组形状无关的常量，关卡 JSON 导入回来的冰组
+                // 也能落在同样的相对位置。
                 Vector3 world = centre + countOffset;
 
                 Transform anchor = countText.transform.parent;
@@ -311,6 +482,46 @@ namespace CrowdMatch
             countText.enabled = show;
             if (show)
                 countText.text = (remaining < 0 ? Mathf.Max(1, freezeCount) : remaining).ToString();
+        }
+
+        /// <summary>冰组**包围矩形中心**的世界坐标（计数数字与融化特效共用这个锚点）。没登记 group / 没有成员格时返回 false。</summary>
+        private bool TryGetCentreWorld(out Vector3 centre)
+        {
+            centre = Vector3.zero;
+            if (group == null || _cellSet.Count == 0)
+                return false;
+
+            centre = (group.GetWorldPosition(_colMin, _rowMin) +
+                      group.GetWorldPosition(_colMax, _rowMax)) * 0.5f;
+            return true;
+        }
+
+        /// <summary>
+        /// 冰化开时的表现：在包围矩形中心（再按 <see cref="meltEffectYOffset"/> 抬高）从 SpawnPool 生成
+        /// <see cref="meltEffectTag"/>（<see cref="meltEffectDuration"/> 秒后自动回池），
+        /// 并按 <see cref="meltSoundTag"/> 播一次音效。由 <see cref="PixelGroup.NotifyClickMovedOut"/> 在
+        /// <see cref="ConsumeOne"/> 归零的那一刻调用。
+        ///
+        /// 没配对象池 / tag / 音频管理器时**静默跳过** —— 表现缺料不该影响冰冻逻辑本身（与出车 Confetti、表情系统同一口径）。
+        /// 特效不挂到冰下面、也不挂任何会被销毁的物体：冰在关卡重建时会被清掉，而
+        /// <c>SpawnPool.SpawnDuration</c> 的延时回收没有空守卫，挂在池根下才不会被连累。
+        /// </summary>
+        public void PlayMeltEffect()
+        {
+            if (!string.IsNullOrEmpty(meltEffectTag) && TryGetCentreWorld(out Vector3 centre))
+            {
+                var gm = GameManager.Instance;
+                var pool = gm != null ? gm.spawnPool : null;
+                if (pool != null)
+                {
+                    var fx = pool.SpawnDuration(meltEffectTag, meltEffectDuration);
+                    if (fx != null)
+                        fx.transform.position = centre + Vector3.up * meltEffectYOffset;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(meltSoundTag) && AudioManager.Instance != null)
+                AudioManager.Instance.Play(meltSoundTag);
         }
 
         /// <summary>
@@ -404,12 +615,14 @@ namespace CrowdMatch
             _spawned.Add(copy.gameObject);
         }
 
-        /// <summary>交点（单元块中心）局部坐标：x=(col−columns/2)·CellSizeX，z=−(row−0.5)·CellSizeZ。</summary>
+        /// <summary>
+        /// 交点（单元块中心）局部坐标：x=(col−columns/2)·CellSizeX，z=−(row−0.5)·CellSizeZ。
+        /// 与 <see cref="IceMeshBuilder.LatticeXZ"/> 共用同一个算法 —— 两种显示模式必须落在同一位置。
+        /// </summary>
         private Vector3 CornerLocalPosition(int col, int row)
         {
-            float x = (col - group.columns * 0.5f) * group.CellSizeX;
-            float z = -(row - 0.5f) * group.CellSizeZ;
-            return new Vector3(x, 0f, z);
+            Vector2 xz = IceMeshBuilder.LatticeXZ(col, row, group.columns, group.CellSizeX, group.CellSizeZ);
+            return new Vector3(xz.x, 0f, xz.y);
         }
 
         private void CacheAtomicSpritePath()

@@ -39,7 +39,10 @@ namespace CrowdMatch
         {
             var gm = GameManager.Instance;
             if (gm != null)
+            {
                 gm.GameWin();
+                GameManager.Instance.ReloadLevel();
+            }
         }
 
         private void PrevLevel()

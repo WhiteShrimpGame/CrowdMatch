@@ -82,7 +82,8 @@
       "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/PixelItem.cs)",
       "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/PixelGroup.cs Assets/Scripts/Core/LevelLoader.cs Assets/Scripts/Core/LevelData.cs Assets/Scripts/Editor/LevelDataExporter.cs)",
       "Bash(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md)",
-      "Bash(echo \"fences: $\\(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md\\)\")"
+      "Bash(echo \"fences: $\\(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md\\)\")",
+      "Bash(grep -E \"错误|error|警告$|个警告\")"
     ]
   }
 }
