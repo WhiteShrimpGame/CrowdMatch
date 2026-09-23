@@ -109,26 +109,9 @@ public class FailPanel : MonoBehaviour
     private void OnBackHomeBtnClick()
     {
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        /*if (GameController.Instance.isStreakActive && GameData.WinStreak > 0)
-        {
-            Reporter.WinStreakFail();
-        }
-
-        GameData.WinStreak = 0;
-
-        if (AvatarData.IsUnlock())
-        {
-            AvatarData.Data.CurrentWinStreak = 0;
-            AvatarData.Data.TotalPlayCount++;
-            AvatarData.Save();
-        }
-
-        AudioManager.Instance.PlayButtonAudioAndVibrate();
-        //UIManager.Instance.showFailPanel(false);
-        //UIManager.Instance.showMainPanel(true);
-        //GameData.IsGaming = false;
-        Reporter.TapeUpCount();
-        GameManager.Instance.ReloadScene(false);*/
+        UIManager.Instance.showGamePanel(false);
+        UIManager.Instance.ShowMenuPanel(true);
+        UIManager.Instance.showFailPanel(false);
     }
 
     /*private void OnAdBtnClick()

@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using DG.Tweening;
+using MetaSystem.MenuPanel;
 using UnityEngine.Events;
 using UnityEngine.Networking;
 
@@ -24,11 +25,10 @@ public class UIManager : MonoBehaviour
     [HideInInspector] public Transform settingPanel;
     [HideInInspector] public Transform winPartPanel;
     [HideInInspector] public Transform retryPanel;
-    [HideInInspector] public Transform shareBoxPanel;
-    [HideInInspector] public Transform addBoxPanel;
     [HideInInspector] public Transform getStaminaPanel;
     [HideInInspector] public Transform unlimitedStaminaPanel;
     [HideInInspector] public Transform propGetTipPanel;
+    [HideInInspector] public Transform menuPanel;
     
     public GameObject mainPanelPrefab;
     public GameObject settingPanelPrefab;
@@ -38,23 +38,14 @@ public class UIManager : MonoBehaviour
     public GameObject failPanelPrefab;
     public GameObject getRewardPanelPrefab;
     public GameObject retryPanelPrefab;
-    public GameObject collectionPanelPrefab;
-    public GameObject propGetTipPanelPrefab;
     public GameInnerUI gameInnerUI;
-    public GameObject handPanelTipsPanel;
     public GameObject recordPanelPrefab;
-    public GameObject shareBoxPanelPrefab;
-    public GameObject addBoxPanelPrefab;
     public GameObject getStaminaPanelPrefab;
     public GameObject unlimitedStaminaPanelPrefab;
-
-
+    public GameObject menuPanelPrefab;
+    
     public Transform tipsTransform;
-
     public static bool IsPanelShow = false;
-
-    public Camera uiCam;
-
     EventSystem _es;
     GraphicRaycaster _gr;
 
@@ -69,9 +60,8 @@ public class UIManager : MonoBehaviour
     {
         get
         {
-            return false;
-            /*return mainPanel != null &&
-                   mainPanel.GetComponent<MainPanel>().isActiveAndEnabled;*/
+            return mainPanel != null &&
+                   mainPanel.GetComponent<MainPanel>().isActiveAndEnabled;
         }
     }
 
@@ -110,10 +100,12 @@ public class UIManager : MonoBehaviour
 
             gameInnerUI?.GetComponent<GameInnerUI>().ResetLevel();
             ShowBanner();
+            ShowMenuPanel(false);
         }
         else
         {
             showGamePanel(false);
+            ShowMenuPanel(true);
             HideBanner();
         }
 
@@ -154,6 +146,11 @@ public class UIManager : MonoBehaviour
 
         if (mainPanel != null)
             mainPanel.gameObject.SetActive(isShow);
+        if (isShow)
+        {
+            GameController.Instance.pixelGroup.transform.ClearChildren();
+            GameController.Instance.containerGroup.transform.ClearChildren();
+        }
     }
 
     public void showGamePanel(bool isShow)
@@ -199,7 +196,25 @@ public class UIManager : MonoBehaviour
         }
 
     }
+    public void ShowMenuPanel(bool isShow)
+    {
+        if (menuPanel == null && isShow)
+        {
+            menuPanel = Instantiate(menuPanelPrefab, transform).transform;
+            menuPanel.SetAsLastSibling();
+            menuPanel.GetComponent<MenuPanel>().Init();
+            if (isShowingBanner)
+            {
+                var rect = menuPanel as RectTransform;
+                var pos = rect.anchoredPosition;
+                pos.y += 200;
+                rect.anchoredPosition = pos;
+            }
+        }
 
+        if (menuPanel != null)
+            menuPanel.gameObject.SetActive(isShow);
+    }
     public void showWinPanel(bool isShow)
     {
         if (winPanel == null && isShow)
@@ -400,6 +415,7 @@ public class UIManager : MonoBehaviour
 
     public void ShowWinPart()
     {
+        
         if (winPartPanel == null)
         {
             winPartPanel = Instantiate(winPartPanelPrefab, transform).transform;

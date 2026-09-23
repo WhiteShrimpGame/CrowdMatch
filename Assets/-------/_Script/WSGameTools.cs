@@ -211,4 +211,11 @@ public static class WSGameTools
         float a = hex.Length >= 8 ? byte.Parse(hex.Substring(6,2), System.Globalization.NumberStyles.HexNumber) / 255f : 1f;
         return new Color(r,g,b,a);
     }
+    public static void ClearChildren(this Transform parent)
+    {
+        for (int i = parent.childCount - 1; i >= 0; i--)
+        {
+            GameObject.Destroy(parent.GetChild(i).gameObject);
+        }
+    }
 }

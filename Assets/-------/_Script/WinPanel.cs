@@ -114,15 +114,13 @@ public class WinPanel : MonoBehaviour
         getBtn_Normal.interactable = false;
 
         int lastGold = GameData.Gold.Count - rewardData.gold;
-        if (multiCount > 1)
+        if (multiple > 1)
         {
-            Debug.Log(222);
             rewardData.AddReward(multiple - 1, way: "Level", type: type);
             coinAniStartPosTran = coinAniStartPosTran2;
         }
         else
         {
-            Debug.Log(111);
             coinAniStartPosTran = coinAniStartPosTran1;
         }
         UIManager.Instance.gameInnerUI.RefreshGoldCount();

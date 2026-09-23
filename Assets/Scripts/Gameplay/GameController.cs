@@ -299,7 +299,10 @@ namespace CrowdMatch
                 _lastFailCheckLog = null;   // 真判了失败：清掉去重记忆，复活后的诊断不被旧行压掉
                 //GameState.GameFail();
                 //Invoke(nameof(DoRevive), 1.5f);
-                UIManager.Instance.showRevivePanel(true);
+                DOVirtual.DelayedCall(1.5f, () =>
+                {
+                    UIManager.Instance.showRevivePanel(true);
+                });
                 return;
             }
             LogFailCheck(checkpoint, reason);

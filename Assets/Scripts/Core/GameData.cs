@@ -144,7 +144,7 @@ namespace CrowdMatch
                 Debug.Log(countLoop);*/
                 if (CurrentLevel <= count)
                 {
-                    Debug.Log(CurrentLevel-1);
+                    //Debug.Log(CurrentLevel-1);
                     return GameManager.Instance.levelDataConfig.levelDiff[CurrentLevel-1];
                 }
                 else if (countLoop > 0)
