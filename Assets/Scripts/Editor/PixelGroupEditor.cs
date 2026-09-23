@@ -99,6 +99,12 @@ namespace CrowdMatch
                 ImportColors(group);
             }
             EditorGUILayout.EndHorizontal();
+
+            // 新增的手工编辑方式：格子画布 + 颜色/橡皮笔刷（原有上面两个 PNG 按钮全部保留）
+            if (GUILayout.Button("打开像素颜色画布（笔刷涂色）"))
+            {
+                PixelColorBrushWindow.OpenFor(group);
+            }
         }
 
         private void GenerateGrid(PixelGroup group)

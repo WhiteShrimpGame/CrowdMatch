@@ -118,6 +118,17 @@ namespace CrowdMatch
         [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
         public float crateSealYawOffset = 0f;
 
+        [Tooltip("木箱被拆掉时，**被它盖住的**像素的起始 Y 偏移（世界单位，默认 -0.5 = 先沉下去半个像素），" +
+                 "随后按从左下至右上的斜向波前恢复回原位")]
+        public float crateRestoreYOffset = -0.5f;
+
+        [Tooltip("波前相邻两档之间的间隔（秒）：波前号 = (col - colMin) + (rowMax - row)，" +
+                 "左下角为 0、右上角最大，于是波从木箱左下角推到右上角。填 0 = 整块同时恢复")]
+        public float crateRestoreWaveInterval = 0.04f;
+
+        [Tooltip("单个像素恢复的时长（秒），运动为**先匀加速后匀减速**（等价 DOTween 的 InOutQuad）")]
+        public float crateRestoreDuration = 0.25f;
+
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
 
@@ -131,7 +142,8 @@ namespace CrowdMatch
         [System.NonSerialized] public bool[,] pipeGrid;
 
         /// <summary>倍乘门门格表 [column, row]：该格属于哪道门（不在任何门上为 null）。
-        /// 注意门格**不是**障碍——门是区域的唯一出口，寻路与暴露都必须能穿过它。</summary>
+        /// **门格对闭合区域外的像素是障碍、对区域内的像素是唯一出口**（见 <see cref="IsGateBlockedFor"/>）：
+        /// 区域内的像素必须穿门格才出得去，所以暴露 BFS 与寻路都必须为它们放行。</summary>
         [System.NonSerialized] public GateItem[,] gateGrid;
 
         /// <summary>该格是否落在某道门的闭合区域内（供「区域内像素必须走到门格才允许离场」的守卫用）。</summary>
