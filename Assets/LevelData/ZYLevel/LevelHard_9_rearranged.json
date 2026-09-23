@@ -115,15 +115,15 @@
             5,
             1,
             4,
-            4,
-            -1,
-            -1,
-            -1,
-            -1,
-            -1,
-            0,
-            0,
             22,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            0,
+            0,
+            0,
             22,
             22,
             -1,
@@ -342,7 +342,7 @@
             false,
             false,
             false,
-            false,
+            true,
             false,
             false,
             false,
@@ -668,7 +668,7 @@
             {
                 "x": 0,
                 "y": 25,
-                "colorId": 12,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -956,7 +956,7 @@
             {
                 "x": 1,
                 "y": 29,
-                "colorId": 12,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1492,8 +1492,8 @@
                 }
             ],
             "colors": [
-                4,
-                12
+                12,
+                4
             ]
         },
         {

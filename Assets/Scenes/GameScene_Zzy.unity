@@ -1236,6 +1236,9 @@ MonoBehaviour:
   crateSealHeight: 0
   crateSealFirstLift: 0.05
   crateSealYawOffset: 0
+  crateRestoreYOffset: -0.5
+  crateRestoreWaveInterval: 0.04
+  crateRestoreDuration: 0.25
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
 --- !u!4 &882082745
 Transform:
