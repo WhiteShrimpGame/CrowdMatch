@@ -9,15 +9,20 @@ namespace CrowdMatch
     /// 菜单里的矩形填充/清除、选中 Pixel 改 colorId）**全部保留**，这个窗口只是多一条更快的手工回。
     ///
     /// 把网格铺成一张格子画布：每格显示它当前的颜色（色块 + 数字）或「空格」，
-    /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂与矩形填/抹。整览（自适应宽度）与细编（手动格子像素）
-    /// 两档共用同一个双向滚动视图。
+    /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂、矩形填充、矩形染色（后两者互斥，**只在涂颜色模式下显示**）。
+    /// 整览（自适应宽度）与细编（手动格子像素）两档共用同一个双向滚动视图。
     ///
-    /// ## 十条口径（都与既有工具对齐）
+    /// ## 十一条口径（都与既有工具对齐）
     /// · **画布顶行 = gridZ 0 = 最前排**，与「导出颜色 (PNG)」一致（那边图片顶行就是 gridZ 0）。
     /// · **障碍格不可涂**，只以底色 + 单字标记显示并写明类别：墙 / 管 / 箱 / 木 / 门 / 冰 / 升。
     ///   像素不存在于障碍格上，唯一例外是冰 —— 冰不是障碍、冰底下的像素仍在，所以冰格照常画出颜色、
     ///   悬停时另报底下像素的 colorId。
     /// · **colorId 与 ColorConfig.materials 下标一一对应**，调色板直接取自 ColorConfig，不另立一份选项表。
+    /// · **涂颜色的三种手势**（「矩形填充」/「矩形染色」两个勾选框互斥，都不勾 = 自由涂；勾选框在「操作」行的
+    ///   「刷新快照」右侧、与「冰·自由涂抹」同一位置，且**只在涂颜色模式下显示**）：
+    ///   自由涂 = 按下即涂、拖过即涂；**矩形填充** = 拖出矩形、松手落库，**空格会新建像素**；
+    ///   **矩形染色** = 同样拖矩形，但**只改已有像素的颜色、空格不动**。橡皮笔刷在两种矩形下一致
+    ///   （都是「抹掉区域内的像素」——本来就不新建，所以两者无差别）。三者的矩形预览与 Undo 分组完全相同。
     /// · **问号不是颜色**：它是 <c>PixelItem.isQuestion</c> 上的 flag，colorId 照旧保留（所以问号像素仍画得出本色）。
     ///   所以「问号标注」模式**不看调色板**（切模式时笔刷原位不动）：按下那格原本不是问号 → **标记**、
     ///   原本是问号 → **取消**。整笔只作用于「按下位置**同色四向连通**的那一组」，划出组外一律不动（防越界误标）。
@@ -66,11 +71,17 @@ namespace CrowdMatch
     /// </summary>
     public class PixelColorBrushWindow : EditorWindow
     {
-        /// <summary>笔刷手势模式：自由涂（按下即涂、拖过即涂）/ 矩形（按下定锚点、拖动预览、松手才落库）。</summary>
+        /// <summary>
+        /// 笔刷手势模式（**只影响「涂颜色」模式**，由该模式下的两个互斥勾选框切换）：
+        /// <see cref="Free"/> = 自由涂（按下即涂、拖过即涂，两个勾选框都不勾）；
+        /// <see cref="Rect"/> = 矩形填充（拖出矩形、松手落库，**空格会新建像素**）；
+        /// <see cref="Dye"/> = 矩形染色（同样拖矩形，但**只改已有像素的颜色，空格不新建**）。
+        /// </summary>
         private enum Tool
         {
             Free,
             Rect,
+            Dye,
         }
 
         /// <summary>窗口的十五种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
@@ -809,8 +820,6 @@ namespace CrowdMatch
             _cellPx = Mathf.RoundToInt(EditorGUILayout.Slider("格子像素", _cellPx, 12f, 64f));
             EditorGUI.EndDisabledGroup();
 
-            using (new EditorGUI.DisabledScope(!colorMode))   // 工具只影响「涂颜色」模式的手势（问号模式固定自由拖动）
-                _tool = (Tool)EditorGUILayout.EnumPopup("工具", _tool, GUILayout.Width(130f));
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -822,6 +831,31 @@ namespace CrowdMatch
                 {
                     RefreshSnapshot();
                     SceneView.RepaintAll();
+                }
+            }
+
+            // 涂颜色模式的两个互斥矩形选项：**只在「涂颜色」模式下画出来**（其它模式直接不显示，不做灰化）。
+            // 位置与「添加冰」的自由涂抹一致 —— 就贴在「刷新快照」右边，只占这一行、不改变行高，
+            // 下面的控件不会跳位。都不勾 = 自由涂（按下即涂、拖过即涂）。
+            if (colorMode)
+            {
+                using (new EditorGUI.DisabledScope(playing))
+                {
+                    bool fill = _tool == Tool.Rect;
+                    bool dye = _tool == Tool.Dye;
+
+                    bool wantFill = GUILayout.Toggle(fill,
+                        new GUIContent("矩形填充", "拖出矩形，松手填满：格子有像素就改色、空格新建像素"),
+                        GUILayout.Width(84f));
+                    bool wantDye = GUILayout.Toggle(dye,
+                        new GUIContent("矩形染色", "拖出矩形，松手只染已有像素的颜色：空格不动"),
+                        GUILayout.Width(84f));
+
+                    // 互斥：勾上一个另一个自动关掉；点掉当前那个 = 回到自由涂
+                    if (wantFill != fill)
+                        _tool = wantFill ? Tool.Rect : Tool.Free;
+                    else if (wantDye != dye)
+                        _tool = wantDye ? Tool.Dye : Tool.Free;
                 }
             }
 
@@ -1466,7 +1500,7 @@ namespace CrowdMatch
 
             if (_mode == Mode.Color)
                 text += "　｜　笔刷 " + (_brush < 0 ? "橡皮" : "颜色 " + _brush) +
-                        "　｜　工具 " + (_tool == Tool.Free ? "自由涂" : "矩形");
+                        "　｜　工具 " + ToolLabel();
             else if (_mode == Mode.Question)
                 text += "　｜　" + (_questionGroup == null
                     ? "按下有像素的格子：不是问号 → 标记，已是问号 → 取消（只作用于按下位置同色相连的那一组）"
@@ -1704,12 +1738,19 @@ namespace CrowdMatch
         {
             Undo.IncrementCurrentGroup();
             _undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName(_tool == Tool.Free ? "画布涂色" : "画布矩形涂色");
+            Undo.SetCurrentGroupName(_tool == Tool.Free ? "画布涂色"
+                : _tool == Tool.Rect ? "画布矩形填充" : "画布矩形染色");
 
             _dragging = true;
             _dirty = false;
             _rectActive = false;
             _strokePainted.Clear();
+        }
+
+        /// <summary>当前工具名（状态行用）。</summary>
+        private string ToolLabel()
+        {
+            return _tool == Tool.Free ? "自由涂" : _tool == Tool.Rect ? "矩形填充" : "矩形染色";
         }
 
         /// <summary>
@@ -1727,7 +1768,7 @@ namespace CrowdMatch
 
             if (_mode == Mode.Color || _mode == Mode.Question)
             {
-                if (_tool == Tool.Rect && _rectActive && !Application.isPlaying)
+                if (_tool != Tool.Free && _rectActive && !Application.isPlaying)
                     PaintRect();
 
                 _rectActive = false;
@@ -1798,19 +1839,27 @@ namespace CrowdMatch
             return col >= c0 && col <= c1 && gridZ >= r0 && gridZ <= r1;
         }
 
-        /// <summary>矩形模式松手落库：逐格走同一条 <see cref="PaintCell"/>（橡皮笔刷就是「矩形抹」）。</summary>
+        /// <summary>
+        /// 矩形模式松手落库：逐格走同一条 <see cref="PaintCell"/>（橡皮笔刷就是「矩形抹」）。
+        /// **矩形染色**（<see cref="Tool.Dye"/>）只染已有像素 —— 把 <c>allowSpawn</c> 关掉即可，
+        /// 其它分支（橡皮销毁、改色）两者完全一致。
+        /// </summary>
         private void PaintRect()
         {
             int c0, c1, r0, r1;
             NormalizeRect(out c0, out c1, out r0, out r1);
 
+            bool allowSpawn = _tool != Tool.Dye;
             for (int r = r0; r <= r1; r++)
                 for (int c = c0; c <= c1; c++)
-                    PaintCell(c, r);
+                    PaintCell(c, r, allowSpawn);
         }
 
         /// <summary>
         /// 涂 / 擦一格。障碍格直接跳过；橡皮只在有像素时销毁；颜色笔在有像素时改写 colorId、在空格上新建像素。
+        ///
+        /// <paramref name="allowSpawn"/> = false 时**空格什么都不做**（矩形染色用）：既不改色也不新建，
+        /// 顺带也不该为空格去报「pixelPrefab 为空」。
         ///
         /// **新建 / 销毁之后立刻同步 <c>group.grid</c>**：画布是读 <c>group.grid</c> 画的，而
         /// <see cref="PixelGroup.SpawnPixel"/> 只创建对象、**不写这张表** —— 不同步的话，拖动中新建的空格
@@ -1819,7 +1868,7 @@ namespace CrowdMatch
         ///
         /// 同一笔内重复划过同一格由 <see cref="_strokePainted"/> 挡掉。
         /// </summary>
-        private void PaintCell(int col, int row)
+        private void PaintCell(int col, int row, bool allowSpawn = true)
         {
             if (Application.isPlaying || !_group.IsInRange(col, row))
                 return;
@@ -1847,6 +1896,9 @@ namespace CrowdMatch
 
             if (item == null)
             {
+                if (!allowSpawn)
+                    return;   // 矩形染色：空格不动
+
                 if (_group.pixelPrefab == null)
                 {
                     Debug.LogWarning("[像素颜色画布] PixelGroup.pixelPrefab 为空，无法新建像素。");
