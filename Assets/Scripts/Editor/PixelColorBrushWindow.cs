@@ -12,7 +12,7 @@ namespace CrowdMatch
     /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂与矩形填/抹。整览（自适应宽度）与细编（手动格子像素）
     /// 两档共用同一个双向滚动视图。
     ///
-    /// ## 八条口径（都与既有工具对齐）
+    /// ## 十条口径（都与既有工具对齐）
     /// · **画布顶行 = gridZ 0 = 最前排**，与「导出颜色 (PNG)」一致（那边图片顶行就是 gridZ 0）。
     /// · **障碍格不可涂**，只以底色 + 单字标记显示并写明类别：墙 / 管 / 箱 / 木 / 门 / 冰 / 升。
     ///   像素不存在于障碍格上，唯一例外是冰 —— 冰不是障碍、冰底下的像素仍在，所以冰格照常画出颜色、
@@ -33,6 +33,17 @@ namespace CrowdMatch
     ///   容量 = 本体 + 相邻 4 方向格数，colorIds 默认全填当前笔刷色。点箱子区域开**内部颜色二级面板**
     ///   （与管道那个同形：点色块替换、− / + 增删末端、清空全部；色块每行最多 20 个，超过换行）。
     ///   删除箱子会连隐藏 Pixel 一起销毁，**不回填**区域 Pixel。
+    /// · **木箱可加可删，且不挡编辑**：木箱**盖住**底下的像素而不清除，所以画布上木箱格照常显示原颜色与编号、
+    ///   照常能涂色 / 标问号 —— 辨认木箱靠**双层粗描边（外圈棕、内圈黄）**（不再画「木」字标记）。添加木箱 = 拖出矩形
+    ///   （长宽至少 2 格、区域内不能有别的障碍，但**允许有像素**），松手即创建，拆箱次数固定 3（要改去 Inspector）；
+    ///   删除木箱只销毁木箱本体，底下的像素原样保留。
+    /// · **冰可加可删，还能就地编辑**：添加冰 = 拖出矩形（画布上按矩形建，矩形天然连通；区域内允许有像素与空格，
+    ///   只挡别的障碍），松手即创建，次数初值 5；「操作」栏勾上**冰·自由涂抹**后改成**逐格划过**（非矩阵填充，
+    ///   形状任意、不强求连通）。冰格照常显示底下像素的颜色与编号，辨认冰靠**双层粗描边（外深蓝内浅蓝）**。
+    ///   删除冰只销毁冰组本体，格上的像素原样保留。「**编辑冰**」模式点冰格选中一组，改
+    ///   次数 / 仅暴露后扣减 / 计数数字偏移（**本窗口只给 X / Z，Y 保持原值**）/ 计数数字缩放 —— **改动即时预览，
+    ///   点「保存编辑」才落库**；保存会落成**一个 Undo 步骤**（Ctrl+Z 一键回到编辑前）。切模式 / 换冰组 / 取消选中时
+    ///   若有未保存改动会弹窗二选一（保存并离开 / 放弃并离开，后者回到编辑前状态）；关窗与进出 Play 静默回退。
     /// · **管道波次颜色走二级面板**：涂颜色模式下点**管道格**（不是轨道格）打开 —— 选色复用上面那个调色板
     ///   （面板不再自带一份），面板里顺次列出该管道当前的波次颜色（点一下 = 用当前选中色替换），
     ///   最右 − / + 各删 / 追加末端一个。打开时没有可用颜色就自动落到 0 号色；选橡皮、
@@ -62,8 +73,9 @@ namespace CrowdMatch
             Rect,
         }
 
-        /// <summary>窗口的十种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
-        /// 添加倍乘门 / 删除倍乘门 / 添加箱子 / 删除箱子。十种互斥，切换时清掉各自的待定状态。</summary>
+        /// <summary>窗口的十五种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
+        /// 添加倍乘门 / 删除倍乘门 / 添加箱子 / 删除箱子 / 添加木箱 / 删除木箱 / 添加冰 / 删除冰 / 编辑冰。
+        /// 十五种互斥，切换时清掉各自的待定状态（编辑冰还会问一句未保存的改动）。</summary>
         private enum Mode
         {
             Color,
@@ -76,6 +88,11 @@ namespace CrowdMatch
             DeleteGate,
             AddBox,
             DeleteBox,
+            AddCrate,
+            DeleteCrate,
+            AddIce,
+            DeleteIce,
+            EditIce,
         }
 
         private const float SwatchSize = 24f;
@@ -190,7 +207,105 @@ namespace CrowdMatch
         /// <summary>「箱内颜色」二级面板正在编辑的箱子（涂颜色模式下点箱子区域打开）。null = 面板关闭。</summary>
         private BoxItem _boxColorTarget;
 
+        /// <summary>「添加木箱」的两个对角（按下格 + 拖动格）—— 木箱也是矩形区域（长宽至少 2 格）。</summary>
+        private Vector2Int _crateAnchor;
+        private Vector2Int _crateCurrent;
+
+        /// <summary>待创建木箱区域占据的格，每帧在工具栏里算一次。非「添加木箱」模式为 null。</summary>
+        private HashSet<Vector2Int> _crateStrokeCells;
+
+        /// <summary>「删除木箱」已高亮待删的那个木箱（再点一下才真删）。</summary>
+        private CrateItem _deletePendingCrate;
+
+        /// <summary>格 → 盖住它的木箱（未拆掉的；每次 RefreshSnapshot 重建）。
+        /// 用途：棕色描边、删除模式反查、添加模式判重叠。</summary>
+        private readonly Dictionary<Vector2Int, CrateItem> _crateCells = new Dictionary<Vector2Int, CrateItem>();
+
+        /// <summary>画布建的木箱固定的「拆箱所需移出次数」（要改去木箱的 Inspector）。</summary>
+        private const int CrateDestroyAfterMoves = 3;
+
+        /// <summary>「添加冰」的两个对角（按下格 + 拖动格）—— 不勾「自由涂抹」时按矩形建（矩形天然连通）。</summary>
+        private Vector2Int _iceAnchor;
+        private Vector2Int _iceCurrent;
+
+        /// <summary>「添加冰」勾了自由涂抹时的划过的格（逐格计入，与墙 / 管的笔画同构）。</summary>
+        private readonly List<Vector2Int> _iceStroke = new List<Vector2Int>();
+
+        /// <summary>「添加冰」是否自由涂抹（非矩阵填充）：勾选后不再是拖矩形，而是像画笔一样逐格划过。</summary>
+        private bool _iceFreeform;
+
+        /// <summary>待创建冰组占据的格，每帧在工具栏里算一次。非「添加冰」模式为 null。</summary>
+        private HashSet<Vector2Int> _iceStrokeCells;
+
+        /// <summary>「删除冰」已高亮待删的那个冰组（再点一下才真删）。</summary>
+        private IceItem _deletePendingIce;
+
+        /// <summary>格 → 属于它的冰组（每次 RefreshSnapshot 重建）。用途：双层描边、删除 / 编辑模式反查、添加模式判重叠。</summary>
+        private readonly Dictionary<Vector2Int, IceItem> _iceCells = new Dictionary<Vector2Int, IceItem>();
+
+        /// <summary>画布建的冰组固定的次数初值（要改去冰组的 Inspector，或用「编辑冰」模式）。</summary>
+        private const int DefaultIceFreezeCount = 5;
+
+        /// <summary>「编辑冰」模式正在编辑的冰组（点冰格选中）。null = 没选。</summary>
+        private IceItem _iceEditTarget;
+
+        /// <summary>这一轮编辑**开始前**的那份值：不保存就按它回到编辑前状态。</summary>
+        private IceEditValues _iceBefore;
+
+        /// <summary>当前编辑中的值（实时预览用的就是它）。</summary>
+        private IceEditValues _iceEditing;
+
+        /// <summary>本轮编辑有没有**未保存**的改动（切模式 / 换冰组 / 关窗时据此提示）。</summary>
+        private bool _iceDirty;
+
+        /// <summary>本帧需要重建一次冰的可见表现（改字段后统一在面板末尾重建，别每个控件都重建一次 Mesh）。</summary>
+        private bool _iceVisualDirty;
+
+        /// <summary>
+        /// 「编辑冰」能改的那几个字段切片（次数 / 是否暴露扣减 / 计数数字偏移 / 计数数字缩放）。
+        /// 做成结构体是为了能同时留「编辑前」和「编辑中」两份，随时互相写回。
+        /// </summary>
+        private struct IceEditValues
+        {
+            public int freezeCount;
+            public bool meltOnlyWhenExposed;
+            public Vector3 countOffset;
+            public float countFontScale;
+
+            public static IceEditValues Capture(IceItem ice)
+            {
+                var v = new IceEditValues();
+                v.freezeCount = ice.freezeCount;
+                v.meltOnlyWhenExposed = ice.meltOnlyWhenExposed;
+                v.countOffset = ice.countOffset;
+                v.countFontScale = ice.countFontScale;
+                return v;
+            }
+
+            public void ApplyTo(IceItem ice)
+            {
+                ice.freezeCount = freezeCount;
+                ice.meltOnlyWhenExposed = meltOnlyWhenExposed;
+                ice.countOffset = countOffset;
+                ice.countFontScale = countFontScale;
+            }
+
+            public bool SameAs(IceEditValues other)
+            {
+                return freezeCount == other.freezeCount
+                    && meltOnlyWhenExposed == other.meltOnlyWhenExposed
+                    && countOffset == other.countOffset
+                    && Mathf.Approximately(countFontScale, other.countFontScale);
+            }
+        }
+
         private Vector2 _scroll;
+
+        /// <summary>场景里的关卡内容被别的工具改过（层级变了）→ 需要重建快照。合并到每帧一次，见 <see cref="SyncWithSceneIfDirty"/>。</summary>
+        private bool _sceneDirty;
+
+        /// <summary>上次看到的 PixelGroup 子物体数：「内容变了」的兜底判据（层级事件漏发时也能发现）。</summary>
+        private int _lastChildCount = -1;
 
         // ===== 手势状态 =====
 
@@ -257,9 +372,10 @@ namespace CrowdMatch
             Selection.selectionChanged += BindFromSelection;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
+            EditorApplication.hierarchyChanged += OnHierarchyChanged;
             BindFromSelection();
 
-            // 域重载（改脚本 / 重开窗口）后 _wallCells / _pipeCells 这两个 Dictionary 是**空的**
+            // 域重载（改脚本 / 重开窗口）后 _wallCells / _pipeCells 这些 Dictionary 是**空的**
             // （Unity 不序列化 Dictionary），而 BindFromSelection 在「还是同一个 group」时会早退 →
             // 不重建就会「打开窗口什么都没有」：管道没有粗描边、删墙模式反查不到墙。这里强制重建一次。
             if (_group != null)
@@ -271,7 +387,39 @@ namespace CrowdMatch
             Selection.selectionChanged -= BindFromSelection;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             Undo.undoRedoPerformed -= OnUndoRedoPerformed;
+            EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             CancelStroke();   // 关窗时别把手势留在 dragging / rectActive
+            RevertIceEditSilently();   // 关窗不适合弹窗：未保存的冰组编辑直接回退
+            _iceEditTarget = null;
+            _iceDirty = false;
+        }
+
+        /// <summary>
+        /// 场景层级变了（**导入关卡 JSON / 清空 Group / 生成 Pixel / 加删墙体管道**… 都会新建或销毁对象）：
+        /// 这里只置脏，真正的重建放到下一次 OnGUI 里做 —— 导入那种批量操作会连续触发成百上千次事件，
+        /// 每次都在回调里重建网格会卡到不可用；置脏 + 每帧最多重建一次就够，且不会漏。
+        /// </summary>
+        private void OnHierarchyChanged()
+        {
+            _sceneDirty = true;
+            Repaint();
+        }
+
+        /// <summary>
+        /// 别的工具动过场景就重建一次快照（每帧最多一次），让画布跟上外部改动。
+        /// 除了层级事件，另外拿「子物体数」兜一次底（层级事件漏发 / 同一层级内换了对象时也能发现）。
+        /// 运行中画布是只读的，不跟场景同步。
+        /// </summary>
+        private void SyncWithSceneIfDirty()
+        {
+            if (Application.isPlaying)
+                return;
+
+            bool childrenChanged = _group == null || _group.transform.childCount != _lastChildCount;
+            if (!_sceneDirty && !childrenChanged)
+                return;
+
+            RefreshSnapshot();   // 内部会把 _sceneDirty / _lastChildCount 归位
         }
 
         /// <summary>
@@ -287,6 +435,25 @@ namespace CrowdMatch
                 return;
 
             CancelStroke();
+
+            // 编辑冰时按了 Ctrl+Z：撤销可能动的正是冰组本身 ——
+            // 目标没了（被撤销掉）就清掉编辑状态；目标还在就重新对齐：有未保存改动时下一帧把预览值写回去，
+            // 没改动时重新记一次基线（撤销可能正好撤掉了上一次「保存编辑」）。
+            if (_iceEditTarget != null)
+            {
+                if (_iceDirty)
+                    _iceVisualDirty = true;
+                else
+                {
+                    _iceBefore = IceEditValues.Capture(_iceEditTarget);
+                    _iceEditing = _iceBefore;
+                }
+            }
+            else
+            {
+                _iceDirty = false;
+            }
+
             RefreshSnapshot();
             SceneView.RepaintAll();
             Repaint();
@@ -299,7 +466,14 @@ namespace CrowdMatch
             CancelStroke();
             _pipeColorTarget = null;
             _boxColorTarget = null;
+            RevertIceEditSilently();   // 进出 Play 前先把未保存的冰组预览收掉（运行时不该改冰组配置）
+            _iceEditTarget = null;
             BindFromSelection();
+
+            // 进出 Play 都会动到像素 / 障碍对象：重建一次快照（BindFromSelection 对同一个 group 会早退，不能指望它）
+            if (_group != null)
+                RefreshSnapshot();
+
             Repaint();
         }
 
@@ -337,6 +511,69 @@ namespace CrowdMatch
             RebuildPipeCellMap();
             RebuildGateCellMap();
             RebuildBoxCellMap();
+            RebuildCrateCellMap();
+            RebuildIceCellMap();
+
+            // 记住这份快照对应的场景状态，免得下一次 OnGUI 又白重建一遍（重建路径分散在多处，放在这里最省心）
+            _sceneDirty = false;
+            _lastChildCount = _group != null ? _group.transform.childCount : -1;
+        }
+
+        /// <summary>
+        /// 重建「格 → 冰组」表。冰**不是障碍**（不写 wallGrid/pipeGrid/boxGrid），它只是让组内像素
+        /// 「视为不暴露」；冰下面的像素仍在 <c>grid</c> 里，所以画布上冰格照常显示原颜色。
+        /// </summary>
+        private void RebuildIceCellMap()
+        {
+            _iceCells.Clear();
+
+            if (_group == null)
+            {
+                _deletePendingIce = null;
+                return;
+            }
+
+            foreach (var ice in _group.GetComponentsInChildren<IceItem>())
+            {
+                if (ice == null)
+                    continue;
+
+                foreach (var cell in ice.CellSet)
+                {
+                    if (_group.IsInRange(cell.x, cell.y) && !_iceCells.ContainsKey(cell))
+                        _iceCells[cell] = ice;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 重建「格 → 木箱」表。木箱**不是障碍**（不写 wallGrid/pipeGrid/boxGrid），它只是**盖住**底下的像素
+        /// （关渲染器 + 不可点），像素本身还在 <c>grid</c> 里 —— 所以画布上它照常显示原颜色、也照常能涂。
+        /// 只登记未拆掉的木箱（<c>crate.destroyed</c>）。
+        /// </summary>
+        private void RebuildCrateCellMap()
+        {
+            _crateCells.Clear();
+
+            if (_group == null)
+            {
+                _deletePendingCrate = null;
+                return;
+            }
+
+            foreach (var crate in _group.GetComponentsInChildren<CrateItem>())
+            {
+                if (crate == null || crate.destroyed)
+                    continue;
+
+                for (int r = crate.rowMin; r <= crate.rowMax; r++)
+                    for (int c = crate.colMin; c <= crate.colMax; c++)
+                    {
+                        var cell = new Vector2Int(c, r);
+                        if (_group.IsInRange(c, r) && !_crateCells.ContainsKey(cell))
+                            _crateCells[cell] = crate;
+                    }
+            }
         }
 
         /// <summary>
@@ -493,10 +730,14 @@ namespace CrowdMatch
 
             _hover = new Vector2Int(-1, -1);
 
+            // 别的工具动过场景（导入关卡 JSON / 清空 Group / 生成 Pixel…）：先重建快照，这一帧就画新的
+            SyncWithSceneIfDirty();
+
             DrawViewToolbar();
             DrawPalette();
             DrawPipeColorPanel();   // 二级面板：涂颜色模式下点了管道格才出现（选色复用上面的调色板）
             DrawBoxColorPanel();    // 二级面板：涂颜色模式下点了箱子区域才出现（与上者互斥）
+            DrawIceEditPanel();     // 编辑冰面板：编辑冰模式下点了冰格才出现
             DrawCanvas();
             DrawStatusLine();
 
@@ -505,7 +746,7 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 工具栏三段：模式（十选一，分三行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作（刷新快照）。
+        /// 工具栏三段：模式（十五选一，分四行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作（刷新快照）。
         /// **每一段都常驻**，不按模式隐藏 —— 隐藏会让下面控件的命中矩形当场换人（见 skill 的说明）。
         /// 不适用的控件只禁用，不改布局高度。
         /// </summary>
@@ -519,6 +760,8 @@ namespace CrowdMatch
             _pipeStrokeCells = _mode == Mode.AddPipe ? CollectPipeStrokeCells() : null;
             _gateStrokeCells = _mode == Mode.AddGate ? CollectGateStrokeCells() : null;
             _boxStrokeCells = _mode == Mode.AddBox ? CollectBoxStrokeCells() : null;
+            _crateStrokeCells = _mode == Mode.AddCrate ? CollectCrateStrokeCells() : null;
+            _iceStrokeCells = _mode == Mode.AddIce ? CollectIceStrokeCells() : null;
 
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("模式", GUILayout.Width(90f));
@@ -541,6 +784,15 @@ namespace CrowdMatch
             GUILayout.Label("", GUILayout.Width(90f));
             DrawModeButton(Mode.AddBox, "添加箱子");
             DrawModeButton(Mode.DeleteBox, "删除箱子");
+            DrawModeButton(Mode.AddCrate, "添加木箱");
+            DrawModeButton(Mode.DeleteCrate, "删除木箱");
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("", GUILayout.Width(90f));
+            DrawModeButton(Mode.AddIce, "添加冰");
+            DrawModeButton(Mode.DeleteIce, "删除冰");
+            DrawModeButton(Mode.EditIce, "编辑冰");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -566,6 +818,17 @@ namespace CrowdMatch
                 }
             }
 
+            // 「添加冰」的自由涂抹（非矩阵填充）：勾选后不再是拖矩形，而是像画笔一样逐格划过。
+            // **只在「添加冰」模式下画出来**（其它模式直接不显示，不做灰化）——它只在这一行里，
+            // 不画也不改变行高，下面的控件不会跳位。
+            if (_mode == Mode.AddIce)
+            {
+                using (new EditorGUI.DisabledScope(playing))
+                {
+                    _iceFreeform = GUILayout.Toggle(_iceFreeform, "冰·自由涂抹", GUILayout.Width(110f));
+                }
+            }
+
             // 「创建墙体 / 创建管道」已取消按钮：添加模式下**松手即创建（合法时）**，见 FinishWallStroke / FinishPipeStroke。
             // 拖动过程中的实时判据仍由状态行给出（可生成 ✓ / ✗ 原因），所以不必再放一个按钮。
 
@@ -584,6 +847,10 @@ namespace CrowdMatch
             if (!on || _mode == mode)
                 return;
 
+            // 离开「编辑冰」：有未保存的改动先问一句（保存 / 放弃，两者都会离开）
+            if (_mode == Mode.EditIce)
+                ConfirmLeaveIceEdit();
+
             _mode = mode;
             _wallStroke.Clear();
             _deletePendingWall = null;
@@ -591,6 +858,11 @@ namespace CrowdMatch
             _deletePendingPipe = null;
             _deletePendingGate = null;
             _deletePendingBox = null;
+            _deletePendingCrate = null;
+            _deletePendingIce = null;
+            _iceStroke.Clear();
+            _iceEditTarget = null;
+            _iceDirty = false;
             _lastStrokeError = null;
             // 笔刷不动：问号模式不看笔刷，切回来时原来选的是哪个色块 / 橡皮都还在原位
             Repaint();
@@ -766,9 +1038,11 @@ namespace CrowdMatch
                         EditorGUI.DrawRect(rect, baseColor);
                     }
                 }
-                else if (kind == CellKind.Ice && item != null && item.colorId >= 0 && item.colorId < _palette.Length)
+                else if ((kind == CellKind.Ice || kind == CellKind.Crate)
+                         && item != null && item.colorId >= 0 && item.colorId < _palette.Length)
                 {
-                    // 冰格：底下像素的颜色照常画出来，再叠冰的标记（冰只是「视为不暴露」，不是障碍）
+                    // 冰格 / 木箱格：底下像素的颜色照常画出来（冰只是「视为不暴露」，木箱只是「盖住」，
+                    // 两者都不是别的像素意义上的障碍：像素还在 grid 里）
                     EditorGUI.DrawRect(rect, _palette[item.colorId]);
                 }
                 else
@@ -776,8 +1050,15 @@ namespace CrowdMatch
                     EditorGUI.DrawRect(rect, BackgroundOf(kind));
                 }
 
-                // 内容：障碍画单字标记，颜色格画 colorId 数字（太小就不画了，看不清反而乱）
-                if (!IsPaintable(kind))
+                // 内容：障碍画单字标记，颜色格画 colorId 数字（太小就不画了，看不清反而乱）。
+                // 木箱 / 冰格例外：不画「木」「冰」字 —— 它们靠各自的**双层描边**辨认；
+                // 底下还有像素时（两者都不清除像素）连颜色 + 编号一起画出来。
+                if (kind == CellKind.Crate || kind == CellKind.Ice)
+                {
+                    if (item != null && px >= 14)
+                        EditorGUI.LabelField(rect, item.colorId.ToString(), NumStyle(Mathf.Clamp(px / 3, 9, 24)));
+                }
+                else if (!IsPaintable(kind))
                 {
                     EditorGUI.LabelField(rect, MarkerOf(kind),
                         MarkStyle(Mathf.Clamp(px / 5, 7, 11)));
@@ -805,6 +1086,20 @@ namespace CrowdMatch
                 // 正在二级面板里编辑的那个箱子：淡黄打底 + 黄色外框（与选中管道同一套「选中」口径）
                 if (_boxCells.TryGetValue(new Vector2Int(col, gridZ), out var coveringBox) && coveringBox == _boxColorTarget)
                     DrawSelectedBoxHighlight(rect, col, gridZ, coveringBox);
+
+                // 木箱覆盖区域：**双层粗描边（外棕内黄）**，常显；只看这格属于哪只木箱，几只挨着时各自完整描框
+                if (_crateCells.TryGetValue(new Vector2Int(col, gridZ), out var coveringCrate) && coveringCrate != null)
+                    DrawCrateOutline(rect, col, gridZ, coveringCrate);
+
+                // 冰组覆盖区域：**双层粗描边（外深蓝内浅蓝）**，常显；
+                // 正在「编辑冰」里选中的那一组另加一层淡黄打底（蓝描边保留，免得看不出是冰）
+                if (_iceCells.TryGetValue(new Vector2Int(col, gridZ), out var coveringIce) && coveringIce != null)
+                {
+                    if (_mode == Mode.EditIce && coveringIce == _iceEditTarget)
+                        EditorGUI.DrawRect(rect, new Color(1f, 0.85f, 0.2f, 0.22f));
+
+                    DrawIceOutline(rect, col, gridZ, coveringIce);
+                }
 
                 // 矩形拖动中的实时预览：范围内的格叠一层半透明黄
                 if (_rectActive && InDraggedRect(col, gridZ))
@@ -839,6 +1134,18 @@ namespace CrowdMatch
                     if (_boxStrokeCells.Contains(new Vector2Int(col, gridZ)))
                         EditorGUI.DrawRect(rect, new Color(0.85f, 0.45f, 0.95f, 0.4f));
                 }
+                else if (_mode == Mode.AddCrate && _crateStrokeCells != null)
+                {
+                    // 待创建的木箱区域（矩形）：棕色
+                    if (_crateStrokeCells.Contains(new Vector2Int(col, gridZ)))
+                        EditorGUI.DrawRect(rect, new Color(0.55f, 0.35f, 0.15f, 0.45f));
+                }
+                else if (_mode == Mode.AddIce && _iceStrokeCells != null)
+                {
+                    // 待创建的冰组区域（画布上按矩形建，矩形天然连通）：浅蓝
+                    if (_iceStrokeCells.Contains(new Vector2Int(col, gridZ)))
+                        EditorGUI.DrawRect(rect, new Color(0.35f, 0.7f, 0.95f, 0.4f));
+                }
                 else if (_mode == Mode.DeleteWall && IsCellOfPendingWall(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
@@ -852,6 +1159,14 @@ namespace CrowdMatch
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
                 else if (_mode == Mode.DeleteBox && IsCellOfPendingBox(col, gridZ))
+                {
+                    EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
+                }
+                else if (_mode == Mode.DeleteCrate && IsCellOfPendingCrate(col, gridZ))
+                {
+                    EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
+                }
+                else if (_mode == Mode.DeleteIce && IsCellOfPendingIce(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
@@ -1035,6 +1350,88 @@ namespace CrowdMatch
                 else
                     text = "点一下箱子区域高亮，再点一次删除；点空格取消高亮";
             }
+            else if (_mode == Mode.AddCrate)
+            {
+                NormalizeCrateRect(out int k0, out int kr0, out int k1, out int kr1);
+                text = "待创建木箱：(" + k0 + ", " + kr0 + ") ~ (" + k1 + ", " + kr1 + ")　｜　" +
+                       (k1 - k0 + 1) + "×" + (kr1 - kr0 + 1) + " 格　｜　拆箱需移出 " + CrateDestroyAfterMoves + " 次";
+                if (_crateAnchor != _crateCurrent)
+                {
+                    text += TryValidateCrateStroke(_crateStrokeCells, out string crateReason, out _)
+                        ? "　｜　可生成 ✓ 松手即创建（区域内像素原样保留）"
+                        : "　｜　✗ " + crateReason;
+                }
+                else
+                {
+                    text += "　｜　按住左键拖出矩形（长宽至少 2 格），**松手即创建**";
+                    if (_lastStrokeError != null)
+                        text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
+                }
+            }
+            else if (_mode == Mode.DeleteCrate)
+            {
+                if (_deletePendingCrate != null)
+                    text = "已高亮 " + _deletePendingCrate.name + "（" + _deletePendingCrate.ColCount + "×" +
+                           _deletePendingCrate.RowCount + " 格）—— 再点一下删除（底下 Pixel 保留）";
+                else
+                    text = "点一下木箱区域高亮，再点一次删除；点空格取消高亮";
+            }
+            else if (_mode == Mode.AddIce)
+            {
+                if (_iceFreeform)
+                {
+                    // 自由涂抹：按「已划多少格」报，不报矩形尺寸
+                    text = "待创建冰组：自由涂抹（逐格划过）　｜　已划 " + _iceStroke.Count +
+                           " 格　｜　次数 " + DefaultIceFreezeCount;
+                    if (_iceStroke.Count >= 2)
+                    {
+                        text += TryValidateIceStroke(_iceStrokeCells, out string freeReason, out _)
+                            ? "　｜　可生成 ✓ 松手即创建（格上像素原样保留）"
+                            : "　｜　✗ " + freeReason;
+                    }
+                    else
+                    {
+                        text += "　｜　按住左键逐格划过（划到哪格算哪格），**松手即创建**";
+                        if (_lastStrokeError != null)
+                            text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
+                    }
+                }
+                else
+                {
+                    NormalizeIceRect(out int i0, out int ir0, out int i1, out int ir1);
+                    text = "待创建冰组：(" + i0 + ", " + ir0 + ") ~ (" + i1 + ", " + ir1 + ")　｜　" +
+                           (i1 - i0 + 1) + "×" + (ir1 - ir0 + 1) + " 格　｜　次数 " + DefaultIceFreezeCount;
+                    if (_iceAnchor != _iceCurrent)
+                    {
+                        text += TryValidateIceStroke(_iceStrokeCells, out string iceReason, out _)
+                            ? "　｜　可生成 ✓ 松手即创建（格上像素原样保留）"
+                            : "　｜　✗ " + iceReason;
+                    }
+                    else
+                    {
+                        text += "　｜　按住左键拖出矩形，**松手即创建**（勾「冰·自由涂抹」改成逐格划过）";
+                        if (_lastStrokeError != null)
+                            text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
+                    }
+                }
+            }
+            else if (_mode == Mode.DeleteIce)
+            {
+                if (_deletePendingIce != null)
+                    text = "已高亮 " + _deletePendingIce.name + "（" + _deletePendingIce.CellCount +
+                           " 格，次数 " + _deletePendingIce.freezeCount + "）—— 再点一下删除（格上 Pixel 保留）";
+                else
+                    text = "点一下冰格高亮，再点一次删除；点空格取消高亮";
+            }
+            else if (_mode == Mode.EditIce)
+            {
+                if (_iceEditTarget == null)
+                    text = "点一组冰（冰格）选中来编辑；四个字段即时预览，「保存编辑」才落库";
+                else
+                    text = "编辑中：" + _iceEditTarget.name + "　｜　次数 " + _iceEditing.freezeCount +
+                           (_iceEditing.meltOnlyWhenExposed ? "（仅暴露后扣减）" : "（一直扣减）") +
+                           "　｜　" + (_iceDirty ? "**有未保存的改动**" : "已保存");
+            }
             else if (_rectActive)
             {
                 int c0, c1, r0, r1;
@@ -1189,6 +1586,34 @@ namespace CrowdMatch
                     _boxCurrent = _boxAnchor;
                     _lastStrokeError = null;
                 }
+                else if (_mode == Mode.AddCrate)
+                {
+                    // 木箱的两个对角：按下格 + 当前格（矩形区域，松手即创建）
+                    _dragging = true;
+                    _rectActive = false;
+                    _crateAnchor = new Vector2Int(col, gridZ);
+                    _crateCurrent = _crateAnchor;
+                    _lastStrokeError = null;
+                }
+                else if (_mode == Mode.AddIce)
+                {
+                    _dragging = true;
+                    _rectActive = false;
+                    _lastStrokeError = null;
+
+                    if (_iceFreeform)
+                    {
+                        // 自由涂抹：这一笔的格 = 划过的格（逐格计入）
+                        _iceStroke.Clear();
+                        AppendIceCell(col, gridZ);
+                    }
+                    else
+                    {
+                        // 矩形填充：按下格 + 当前格两个对角
+                        _iceAnchor = new Vector2Int(col, gridZ);
+                        _iceCurrent = _iceAnchor;
+                    }
+                }
                 else if (_mode == Mode.DeletePipe)
                 {
                     HandlePipeDeleteClick(col, gridZ);   // 单击，不进入拖动手势
@@ -1200,6 +1625,18 @@ namespace CrowdMatch
                 else if (_mode == Mode.DeleteBox)
                 {
                     HandleBoxDeleteClick(col, gridZ);    // 单击，不进入拖动手势
+                }
+                else if (_mode == Mode.DeleteCrate)
+                {
+                    HandleCrateDeleteClick(col, gridZ);  // 单击，不进入拖动手势
+                }
+                else if (_mode == Mode.DeleteIce)
+                {
+                    HandleIceDeleteClick(col, gridZ);    // 单击，不进入拖动手势
+                }
+                else if (_mode == Mode.EditIce)
+                {
+                    HandleIceEditClick(col, gridZ);      // 单击选中一个冰组来编辑
                 }
                 else
                 {
@@ -1237,6 +1674,17 @@ namespace CrowdMatch
                 else if (_mode == Mode.AddBox)
                 {
                     _boxCurrent = new Vector2Int(col, gridZ);    // 只记对角：矩形由两个角现算
+                }
+                else if (_mode == Mode.AddCrate)
+                {
+                    _crateCurrent = new Vector2Int(col, gridZ);
+                }
+                else if (_mode == Mode.AddIce)
+                {
+                    if (_iceFreeform)
+                        AppendIceCell(col, gridZ);
+                    else
+                        _iceCurrent = new Vector2Int(col, gridZ);
                 }
 
                 ev.Use();
@@ -1305,6 +1753,14 @@ namespace CrowdMatch
             {
                 FinishBoxStroke();
             }
+            else if (_mode == Mode.AddCrate)
+            {
+                FinishCrateStroke();
+            }
+            else if (_mode == Mode.AddIce)
+            {
+                FinishIceStroke();
+            }
 
             Repaint();
             ev.Use();
@@ -1366,8 +1822,8 @@ namespace CrowdMatch
 
             int colorId;
             CellKind kind = Classify(col, row, out colorId);
-            if (!IsPaintable(kind))
-                return;   // 障碍格不可涂
+            if (!IsBrushEditable(kind))
+                return;   // 障碍格不可涂（木箱盖住的像素格除外）
 
             var item = _group.GetItem(col, row);
 
@@ -1468,8 +1924,8 @@ namespace CrowdMatch
             if (!_strokePainted.Add(new Vector2Int(col, row)))
                 return;   // 本笔已经处理过这一格
 
-            if (!IsPaintable(Classify(col, row, out _)))
-                return;   // 障碍格（含冰）不动
+            if (!IsBrushEditable(Classify(col, row, out _)))
+                return;   // 障碍格（含冰）不动；木箱盖住的像素格照常可标
 
             var item = _group.GetItem(col, row);
             if (item == null || item.isQuestion == _questionTarget)
@@ -2530,6 +2986,730 @@ namespace CrowdMatch
         }
 
         // ============================================================
+        // 木箱：添加 / 删除（矩形区域；它**盖住**像素，所以画布上照样显示原颜色、也照样能涂）
+        // ============================================================
+
+        /// <summary>待创建木箱区域的两个角归一化后的范围（列 / 行各从小到大）。</summary>
+        private void NormalizeCrateRect(out int c0, out int r0, out int c1, out int r1)
+        {
+            c0 = Mathf.Min(_crateAnchor.x, _crateCurrent.x);
+            c1 = Mathf.Max(_crateAnchor.x, _crateCurrent.x);
+            r0 = Mathf.Min(_crateAnchor.y, _crateCurrent.y);
+            r1 = Mathf.Max(_crateAnchor.y, _crateCurrent.y);
+        }
+
+        /// <summary>待创建木箱区域占据的格。还没拖出区域时返回空集，免得预览停在上一笔上。</summary>
+        private HashSet<Vector2Int> CollectCrateStrokeCells()
+        {
+            var cells = new HashSet<Vector2Int>();
+            if (_crateAnchor == _crateCurrent)
+                return cells;
+
+            NormalizeCrateRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    cells.Add(new Vector2Int(c, r));
+            return cells;
+        }
+
+        /// <summary>
+        /// 待创建木箱的体检：① 区域完全在网格内；② **长宽至少 2 格**（<see cref="CrateItem.IsValidSize"/> 的口径）；
+        /// ③ 区域内不能有别的障碍（墙 / 管 / 箱 / 门 / 冰 / 升降台 / 另一只木箱）。
+        /// **像素格是允许的** —— 木箱本来就是用来盖像素的（这点与箱子相反：箱子会把像素吃掉）。
+        /// </summary>
+        private bool TryValidateCrateStroke(HashSet<Vector2Int> region, out string error, out int blockedCells)
+        {
+            error = null;
+            blockedCells = 0;
+
+            NormalizeCrateRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    if (!_group.IsInRange(c, r))
+                    {
+                        error = "区域越界：格 (" + c + ", " + r + ") 不在网格内。";
+                        return false;
+                    }
+
+            int w = c1 - c0 + 1;
+            int h = r1 - r0 + 1;
+            if (w < 2 || h < 2)
+            {
+                error = "木箱长宽至少 2 格（当前 " + w + "×" + h + "）。";
+                return false;
+            }
+
+            if (region != null)
+            {
+                foreach (var cell in region)
+                    if (!IsPaintable(Classify(cell.x, cell.y, out _)))
+                        blockedCells++;
+            }
+
+            if (blockedCells > 0)
+            {
+                error = "区域内有 " + blockedCells + " 格已被其它障碍占用（墙 / 管 / 箱 / 门 / 冰 / 升降台 / 木箱）。";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>「添加木箱」松手：体检通过就直接建；不通过只记原因。单击一格不算「想建木箱」，不报错。</summary>
+        private void FinishCrateStroke()
+        {
+            var region = CollectCrateStrokeCells();
+            bool ok = TryValidateCrateStroke(region, out string reason, out _);
+
+            bool isClick = _crateAnchor == _crateCurrent;
+            _lastStrokeError = ok || isClick ? null : reason;
+
+            if (ok)
+                CreateCrateFromStroke();
+
+            Repaint();
+        }
+
+        /// <summary>
+        /// 「创建木箱」：走 <see cref="PixelGroup.SpawnCrate"/>（与关卡 JSON 导入同一条路径）。
+        /// **不动区域内的像素** —— 木箱只是盖住它们（关渲染器 + 不可点），
+        /// 所以画布上照常显示原颜色、也照常能以原颜色编辑，辨认木箱全靠那道棕色描边。
+        /// 「拆箱所需移出次数」固定 <see cref="CrateDestroyAfterMoves"/>（要改去木箱的 Inspector）。
+        /// </summary>
+        private void CreateCrateFromStroke()
+        {
+            if (_group == null)
+                return;
+
+            NormalizeCrateRect(out int c0, out int r0, out int c1, out int r1);
+
+            var data = new LevelData.CrateData
+            {
+                colMin = c0,
+                rowMin = r0,
+                colMax = c1,
+                rowMax = r1,
+                destroyAfterMoves = CrateDestroyAfterMoves,
+            };
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("创建木箱");
+
+            var crate = _group.SpawnCrate(data);
+            if (crate == null)
+            {
+                Undo.CollapseUndoOperations(undoGroup);
+                return;
+            }
+
+            // 视觉与封条都是它的子物体，登记根物体即可整只撤销
+            Undo.RegisterCreatedObjectUndo(crate.gameObject, "创建木箱");
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(crate);
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _crateCurrent = _crateAnchor;   // 清掉区域预览
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已创建木箱：(" + c0 + ", " + r0 + ") ~ (" + c1 + ", " + r1 + ")，" +
+                (c1 - c0 + 1) + "×" + (r1 - r0 + 1) + " 格，拆箱需移出 " + CrateDestroyAfterMoves +
+                " 次（区域内像素原样保留，只是被盖住）。");
+        }
+
+        /// <summary>某格是否属于「已高亮待删除」的那只木箱。</summary>
+        private bool IsCellOfPendingCrate(int col, int gridZ)
+        {
+            if (_deletePendingCrate == null)
+                return false;
+            return _crateCells.TryGetValue(new Vector2Int(col, gridZ), out var crate) && crate == _deletePendingCrate;
+        }
+
+        /// <summary>「删除木箱」的单击：点到的与已高亮的是同一只 → 真删；否则只切高亮；点空格取消高亮。</summary>
+        private void HandleCrateDeleteClick(int col, int gridZ)
+        {
+            if (!_crateCells.TryGetValue(new Vector2Int(col, gridZ), out var crate) || crate == null)
+            {
+                _deletePendingCrate = null;
+                return;
+            }
+
+            if (crate != _deletePendingCrate)
+            {
+                _deletePendingCrate = crate;   // 第一次点：只高亮
+                return;
+            }
+
+            DeleteCrate(crate);
+        }
+
+        /// <summary>删掉一只木箱：销毁木箱本体（视觉 / 封条都是子物体）—— 底下的像素**原样保留**，不需要回填。</summary>
+        private void DeleteCrate(CrateItem crate)
+        {
+            if (crate == null || _group == null)
+                return;
+
+            string crateName = crate.name;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("删除木箱");
+
+            Undo.DestroyObjectImmediate(crate.gameObject);
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _deletePendingCrate = null;
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已删除木箱 " + crateName + "（底下的 Pixel 原样保留）。");
+        }
+
+        /// <summary>该格是否被**指定的这一只**木箱盖住（越界一律算「没盖住」→ 会被当成区域外缘画线）。</summary>
+        private bool IsCoveredByCrate(int col, int gridZ, CrateItem crate)
+        {
+            return _crateCells.TryGetValue(new Vector2Int(col, gridZ), out var other) && other == crate;
+        }
+
+        /// <summary>
+        /// 木箱覆盖区的**双层粗描边**：四邻里凡是不被**这一只**木箱盖住的那一侧各画两条 3px 线 ——
+        /// 外面一条棕色、紧挨着里面一条黄色（「再套一层」）。只看这只自己的归属 ——
+        /// 两只木箱挨着时，交界两侧各画各的（各自完整描框）。
+        /// 木箱格照常显示底下像素的颜色与编号，**辨认木箱全靠这道描边**（不再画「木」字标记）。
+        /// </summary>
+        private void DrawCrateOutline(Rect rect, int col, int gridZ, CrateItem crate)
+        {
+            const float t = 3f;
+            var outer = new Color(0.55f, 0.33f, 0.15f);   // 外圈：棕
+            var inner = new Color(1f, 0.85f, 0.2f);       // 内圈：黄（与「选中」同一套黄）
+
+            // 上
+            if (!IsCoveredByCrate(col, gridZ - 1, crate))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, t), outer);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y + t, rect.width, t), inner);
+            }
+            // 下
+            if (!IsCoveredByCrate(col, gridZ + 1, crate))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - t, rect.width, t), outer);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 2f * t, rect.width, t), inner);
+            }
+            // 左
+            if (!IsCoveredByCrate(col - 1, gridZ, crate))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, t, rect.height), outer);
+                EditorGUI.DrawRect(new Rect(rect.x + t, rect.y, t, rect.height), inner);
+            }
+            // 右
+            if (!IsCoveredByCrate(col + 1, gridZ, crate))
+            {
+                EditorGUI.DrawRect(new Rect(rect.xMax - t, rect.y, t, rect.height), outer);
+                EditorGUI.DrawRect(new Rect(rect.xMax - 2f * t, rect.y, t, rect.height), inner);
+            }
+        }
+
+        // ============================================================
+        // 冰：添加 / 删除（矩形区域）+ 编辑冰模式（次数 / 暴露扣减 / 数字偏移与缩放）
+        // ============================================================
+
+        /// <summary>待创建冰组区域的两个角归一化后的范围。</summary>
+        private void NormalizeIceRect(out int c0, out int r0, out int c1, out int r1)
+        {
+            c0 = Mathf.Min(_iceAnchor.x, _iceCurrent.x);
+            c1 = Mathf.Max(_iceAnchor.x, _iceCurrent.x);
+            r0 = Mathf.Min(_iceAnchor.y, _iceCurrent.y);
+            r1 = Mathf.Max(_iceAnchor.y, _iceCurrent.y);
+        }
+
+        /// <summary>「添加冰」自由涂抹：把划过的一格记进笔画（连续重复的同一格只记一次 —— 手在同一个格子里会抖）。</summary>
+        private void AppendIceCell(int col, int gridZ)
+        {
+            var cell = new Vector2Int(col, gridZ);
+            if (_iceStroke.Count > 0 && _iceStroke[_iceStroke.Count - 1] == cell)
+                return;
+            _iceStroke.Add(cell);
+        }
+
+        /// <summary>
+        /// 待创建冰组占据的格：勾了**自由涂抹**就是划过的那些格（形状任意、不强求连通）；
+        /// 否则是矩形区域的所有格。还没划/拖出东西时返回空集，免得预览停在上一笔上。
+        /// </summary>
+        private HashSet<Vector2Int> CollectIceStrokeCells()
+        {
+            var cells = new HashSet<Vector2Int>();
+
+            if (_iceFreeform)
+            {
+                foreach (var cell in _iceStroke)
+                    cells.Add(cell);
+                return cells;
+            }
+
+            if (_iceAnchor == _iceCurrent)
+                return cells;
+
+            NormalizeIceRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    cells.Add(new Vector2Int(c, r));
+            return cells;
+        }
+
+        /// <summary>
+        /// 待创建冰组的体检：① 区域完全在网格内；② 区域内不能有别的障碍
+        /// （墙 / 管 / 箱 / 门 / 木箱 / 升降台 / 另一组冰）。
+        /// **像素格与空格都允许** —— 冰下面本来就可以有像素（那些像素只是「视为不暴露」）。
+        /// 冰的形状本身没有最小尺寸限制（1 格也算一组，与 IceItem 的口径一致）。
+        /// </summary>
+        private bool TryValidateIceStroke(HashSet<Vector2Int> region, out string error, out int blockedCells)
+        {
+            error = null;
+            blockedCells = 0;
+
+            NormalizeIceRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    if (!_group.IsInRange(c, r))
+                    {
+                        error = "区域越界：格 (" + c + ", " + r + ") 不在网格内。";
+                        return false;
+                    }
+
+            if (region != null)
+            {
+                foreach (var cell in region)
+                    if (!IsPaintable(Classify(cell.x, cell.y, out _)))
+                        blockedCells++;
+            }
+
+            if (blockedCells > 0)
+            {
+                error = "区域内有 " + blockedCells + " 格已被其它障碍占用（墙 / 管 / 箱 / 门 / 木箱 / 升降台 / 冰）。";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>「添加冰」松手：体检通过就直接建；不通过只记原因。单击（没有真正划/拖出范围）不算「想建冰」，不报错也不建。</summary>
+        private void FinishIceStroke()
+        {
+            var region = CollectIceStrokeCells();
+            bool ok = TryValidateIceStroke(region, out string reason, out _);
+
+            bool isClick = _iceFreeform ? _iceStroke.Count < 2 : _iceAnchor == _iceCurrent;
+            _lastStrokeError = ok || isClick ? null : reason;
+
+            if (ok && !isClick)
+                CreateIceFromStroke();
+
+            Repaint();
+        }
+
+        /// <summary>
+        /// 「创建冰组」：走 <see cref="PixelGroup.SpawnIce"/>（与关卡 JSON 导入同一条路径）。
+        /// 格集合取自 <see cref="CollectIceStrokeCells"/>（自由涂抹 = 划过的格；否则 = 矩形区域），
+        /// 按「行升序、同行列升序」排一下再写，导出的 JSON 才稳定、不会因 HashSet 顺序每次不同。
+        /// 次数初值固定 <see cref="DefaultIceFreezeCount"/>；要改次数 / 暴露扣减 / 数字偏移与缩放，用「编辑冰」模式。
+        /// **不动格上的像素** —— 冰只是让它们「视为不暴露」。
+        /// </summary>
+        private void CreateIceFromStroke()
+        {
+            if (_group == null)
+                return;
+
+            var region = CollectIceStrokeCells();
+            if (region.Count == 0)
+                return;
+
+            var ordered = new List<Vector2Int>(region);
+            ordered.Sort((a, b) => a.y != b.y ? a.y.CompareTo(b.y) : a.x.CompareTo(b.x));
+
+            var cells = new List<Vector2>(ordered.Count);
+            foreach (var c in ordered)
+                cells.Add(new Vector2(c.x, c.y));
+
+            var data = new LevelData.IceGroupData
+            {
+                cells = cells.ToArray(),
+                count = DefaultIceFreezeCount,
+                meltWhenExposed = false,
+                countOffset = IceItem.DefaultCountOffset,
+                fontScale = 1f,
+            };
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("创建冰组");
+
+            var ice = _group.SpawnIce(data);
+            if (ice == null)
+            {
+                Undo.CollapseUndoOperations(undoGroup);
+                return;
+            }
+
+            // 冰面 / 计数数字都是它的子物体，登记根物体即可整组撤销
+            Undo.RegisterCreatedObjectUndo(ice.gameObject, "创建冰组");
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(ice);
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _iceCurrent = _iceAnchor;   // 清掉预览
+            _iceStroke.Clear();
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已创建冰组：" + ordered.Count + " 格（" +
+                (_iceFreeform ? "自由涂抹，形状任意" : "矩形填充") + "），次数 " + DefaultIceFreezeCount +
+                "（要改次数 / 偏移 / 缩放，切「编辑冰」模式点它）。");
+        }
+
+        /// <summary>某格是否属于「已高亮待删除」的那组冰。</summary>
+        private bool IsCellOfPendingIce(int col, int gridZ)
+        {
+            if (_deletePendingIce == null)
+                return false;
+            return _iceCells.TryGetValue(new Vector2Int(col, gridZ), out var ice) && ice == _deletePendingIce;
+        }
+
+        /// <summary>「删除冰」的单击：点到的与已高亮的是同一组 → 真删；否则只切高亮；点空格取消高亮。</summary>
+        private void HandleIceDeleteClick(int col, int gridZ)
+        {
+            if (!_iceCells.TryGetValue(new Vector2Int(col, gridZ), out var ice) || ice == null)
+            {
+                _deletePendingIce = null;
+                return;
+            }
+
+            if (ice != _deletePendingIce)
+            {
+                _deletePendingIce = ice;   // 第一次点：只高亮
+                return;
+            }
+
+            DeleteIce(ice);
+        }
+
+        /// <summary>删掉一组冰：销毁冰组本体（冰面 / 计数数字都是子物体）—— 格上的像素**原样保留**（冰不清除像素）。</summary>
+        private void DeleteIce(IceItem ice)
+        {
+            if (ice == null || _group == null)
+                return;
+
+            string iceName = ice.name;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("删除冰组");
+
+            Undo.DestroyObjectImmediate(ice.gameObject);
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _deletePendingIce = null;
+            if (_iceEditTarget == ice)
+            {
+                _iceEditTarget = null;
+                _iceDirty = false;
+            }
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已删除冰组 " + iceName + "（格上的 Pixel 原样保留）。");
+        }
+
+        /// <summary>该格是否属于**指定的这一组**冰（越界一律算「不属于」→ 会被当成区域外缘画线）。</summary>
+        private bool IsCoveredByIce(int col, int gridZ, IceItem ice)
+        {
+            return _iceCells.TryGetValue(new Vector2Int(col, gridZ), out var other) && other == ice;
+        }
+
+        /// <summary>
+        /// 冰组覆盖区的**双层粗描边**：四邻里凡是不被**这一组**冰覆盖的那一侧各画两条 3px 线 ——
+        /// 外面一条深蓝、紧挨着里面一条浅蓝（与木箱那套双层描边同形，颜色换成冰的深浅蓝）。
+        /// 冰格照常显示底下像素的颜色与编号，**辨认冰全靠这道描边**（不再画「冰」字标记）。
+        /// </summary>
+        private void DrawIceOutline(Rect rect, int col, int gridZ, IceItem ice)
+        {
+            const float t = 3f;
+            var outer = new Color(0.1f, 0.25f, 0.6f);    // 外圈：深蓝
+            var inner = new Color(0.55f, 0.8f, 1f);      // 内圈：浅蓝
+
+            // 上
+            if (!IsCoveredByIce(col, gridZ - 1, ice))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, t), outer);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y + t, rect.width, t), inner);
+            }
+            // 下
+            if (!IsCoveredByIce(col, gridZ + 1, ice))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - t, rect.width, t), outer);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 2f * t, rect.width, t), inner);
+            }
+            // 左
+            if (!IsCoveredByIce(col - 1, gridZ, ice))
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, t, rect.height), outer);
+                EditorGUI.DrawRect(new Rect(rect.x + t, rect.y, t, rect.height), inner);
+            }
+            // 右
+            if (!IsCoveredByIce(col + 1, gridZ, ice))
+            {
+                EditorGUI.DrawRect(new Rect(rect.xMax - t, rect.y, t, rect.height), outer);
+                EditorGUI.DrawRect(new Rect(rect.xMax - 2f * t, rect.y, t, rect.height), inner);
+            }
+        }
+
+        // ============================================================
+        // 编辑冰：选中一组 → 改四个字段（实时预览）→「保存编辑」才落库
+        // ============================================================
+
+        /// <summary>
+        /// 编辑冰模式单击：点冰格选中那组来编辑；点空格取消选中。
+        /// 换组 / 取消前都会先问一句未保存的改动（见 <see cref="ConfirmLeaveIceEdit"/>）。
+        /// </summary>
+        private void HandleIceEditClick(int col, int gridZ)
+        {
+            if (!_iceCells.TryGetValue(new Vector2Int(col, gridZ), out var ice) || ice == null)
+            {
+                if (_iceEditTarget != null)
+                {
+                    ConfirmLeaveIceEdit();
+                    _iceEditTarget = null;
+                    _iceDirty = false;
+                    Repaint();
+                }
+                return;
+            }
+
+            if (ice == _iceEditTarget)
+                return;   // 点的还是同一组：什么都不做（免得每次点都弹窗）
+
+            if (_iceEditTarget != null)
+                ConfirmLeaveIceEdit();   // 换组前先处理上一组的未保存改动
+
+            SelectIceForEdit(ice);
+        }
+
+        /// <summary>选中一组冰进入编辑：把**编辑前**的值记成基线（此时不记 Undo —— 保存时才落成一步）。</summary>
+        private void SelectIceForEdit(IceItem ice)
+        {
+            _iceEditTarget = ice;
+            _iceBefore = IceEditValues.Capture(ice);
+            _iceEditing = _iceBefore;
+            _iceDirty = false;
+            _iceVisualDirty = false;
+
+            Repaint();
+            SceneView.RepaintAll();
+        }
+
+        /// <summary>编辑冰面板：四个字段 + 保存 / 还原 / 取消选中。改动实时预览，落库要等「保存编辑」。</summary>
+        private void DrawIceEditPanel()
+        {
+            if (_iceEditTarget == null)
+                return;
+
+            var ice = _iceEditTarget;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("编辑冰组 " + ice.name + "（" + ice.CellCount + " 格）" +
+                (_iceDirty ? "　·　**有未保存的改动**" : ""), EditorStyles.boldLabel);
+
+            using (new EditorGUI.DisabledScope(!_iceDirty))
+            {
+                if (GUILayout.Button("保存编辑", GUILayout.Width(70f)))
+                    SaveIceEdit();
+            }
+            using (new EditorGUI.DisabledScope(!_iceDirty))
+            {
+                if (GUILayout.Button("还原", GUILayout.Width(44f)))
+                    RevertIceEdit();
+            }
+            if (GUILayout.Button("取消选中", GUILayout.Width(64f)))
+            {
+                ConfirmLeaveIceEdit();
+                _iceEditTarget = null;
+                _iceDirty = false;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            var v = _iceEditing;
+            EditorGUI.BeginChangeCheck();
+
+            v.freezeCount = Mathf.Max(1, EditorGUILayout.IntField("冰冻次数", v.freezeCount));
+            v.meltOnlyWhenExposed = EditorGUILayout.Toggle("仅暴露后才扣减", v.meltOnlyWhenExposed);
+
+            // 偏移只暴露 X / Z（Y 保持原值不动）：这类俯视摆位基本只调水平两轴
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("计数数字偏移", GUILayout.Width(EditorGUIUtility.labelWidth));
+            v.countOffset.x = EditorGUILayout.FloatField(v.countOffset.x, GUILayout.Width(60f));
+            v.countOffset.z = EditorGUILayout.FloatField(v.countOffset.z, GUILayout.Width(60f));
+            GUILayout.Label("(X / Z；Y 保持 " + _iceBefore.countOffset.y.ToString("0.##") + " 不变)", EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+
+            v.countFontScale = EditorGUILayout.FloatField("计数数字缩放", v.countFontScale);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                _iceEditing = v;
+                _iceDirty = !_iceEditing.SameAs(_iceBefore);
+                _iceVisualDirty = true;   // 本帧末尾统一重建一次可见表现（别每个控件都重建一次 Mesh）
+            }
+
+            EditorGUILayout.LabelField(
+                _iceDirty
+                    ? "改动已在场景里实时预览；点「保存编辑」才落库（保存后 Ctrl+Z 可一键回到编辑前）。"
+                    : "改任意字段即时预览；点「保存编辑」落库。切模式 / 换冰组会问你要不要保存。",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.EndVertical();
+
+            if (_iceVisualDirty)
+                PreviewIceEdit();
+        }
+
+        /// <summary>
+        /// 实时预览：把编辑值写到冰组上并重建可见表现（**不记 Undo** —— 保存时才落库）。
+        /// 重建序列与 <c>IceItemEditor</c> 的「重建显示」一致：先 RebuildGrid（冻结掩码 / 计数显示跟着走），
+        /// 再 BuildVisual（冰面 + 数字的位置与缩放）。
+        /// </summary>
+        private void PreviewIceEdit()
+        {
+            _iceVisualDirty = false;
+
+            var ice = _iceEditTarget;
+            if (ice == null || _group == null)
+                return;
+
+            _iceEditing.ApplyTo(ice);
+            ice.RefreshCells();
+            _group.RebuildGrid();
+            ice.BuildVisual(_group);
+            SceneView.RepaintAll();
+            Repaint();
+        }
+
+        /// <summary>
+        /// 「保存编辑」：把这一轮编辑落成**一个 Undo 步骤**（撤销即回到编辑前）。
+        ///
+        /// 关键顺序：① 先把对象写回**编辑前**的值 → ② `Undo.RecordObject`（此刻记下的就是编辑前）
+        /// → ③ 再写编辑值。直接在「已经预览成编辑值」的状态上 RecordObject，撤销会变成空操作
+        /// （画布上那几个颜色面板踩过同一个坑）。
+        /// </summary>
+        private void SaveIceEdit()
+        {
+            var ice = _iceEditTarget;
+            if (ice == null || _group == null || !_iceDirty)
+                return;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("编辑冰组");
+
+            _iceBefore.ApplyTo(ice);             // ① 回到编辑前
+            Undo.RecordObject(ice, "编辑冰组");    // ② 记下编辑前的状态
+            _iceEditing.ApplyTo(ice);            // ③ 写入编辑值
+
+            ice.RefreshCells();
+            _group.RebuildGrid();
+            ice.BuildVisual(_group);
+            EditorUtility.SetDirty(ice);
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _iceBefore = _iceEditing;   // 新基线
+            _iceDirty = false;
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已保存冰组 " + ice.name + " 的编辑（Ctrl+Z 可一键回到编辑前）。");
+        }
+
+        /// <summary>「还原」：放弃未保存的改动，回到编辑前状态（此时还没记 Undo，直接写回即可）。</summary>
+        private void RevertIceEdit()
+        {
+            var ice = _iceEditTarget;
+            if (ice == null)
+                return;
+
+            _iceBefore.ApplyTo(ice);
+            _iceEditing = _iceBefore;
+            _iceDirty = false;
+
+            if (_group != null)
+            {
+                ice.RefreshCells();
+                _group.RebuildGrid();
+                ice.BuildVisual(_group);
+            }
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已放弃未保存的冰组编辑，回到编辑前状态。");
+        }
+
+        /// <summary>
+        /// 要离开当前编辑（切模式 / 换冰组 / 取消选中）时问一句：有未保存改动就二选一 ——
+        /// 「保存并离开」= 落库（之后 Ctrl+Z 可回到编辑前）；「放弃并离开」= 回到编辑前。
+        /// 两种都是离开，不提供「留下」（与口径一致：不保存就回到编辑前状态）。
+        /// </summary>
+        private void ConfirmLeaveIceEdit()
+        {
+            if (_iceEditTarget == null || !_iceDirty)
+                return;
+
+            bool save = EditorUtility.DisplayDialog("冰组编辑未保存",
+                "冰组 " + _iceEditTarget.name + " 有未保存的编辑。\n\n" +
+                "「保存并离开」= 落库（之后 Ctrl+Z 可一键回到编辑前）\n" +
+                "「放弃并离开」= 回到编辑前的状态",
+                "保存并离开", "放弃并离开");
+
+            if (save)
+                SaveIceEdit();
+            else
+                RevertIceEdit();
+        }
+
+        /// <summary>关窗 / 进出 Play 时静默回退未保存的冰组编辑（这些时机不适合弹窗）。</summary>
+        private void RevertIceEditSilently()
+        {
+            if (_iceEditTarget == null)
+                return;
+
+            _iceBefore.ApplyTo(_iceEditTarget);
+            _iceEditing = _iceBefore;
+            _iceDirty = false;
+
+            if (_group != null)
+            {
+                _iceEditTarget.RefreshCells();
+                _group.RebuildGrid();
+                _iceEditTarget.BuildVisual(_group);
+            }
+            SceneView.RepaintAll();
+        }
+
+        // ============================================================
         // 箱子「内部颜色」二级面板（涂颜色模式下点箱子区域打开）
         // ============================================================
 
@@ -2826,6 +4006,18 @@ namespace CrowdMatch
         private static bool IsPaintable(CellKind kind)
         {
             return kind == CellKind.Empty || kind == CellKind.Color;
+        }
+
+        /// <summary>
+        /// 画笔能改的格：空、颜色格，以及**木箱盖住的像素格** —— 木箱只是盖住，底下的像素仍是像素，
+        /// 画布上照常显示它的颜色、也照常能涂色 / 标问号（木箱只在外围加棕色描边）。
+        ///
+        /// 与 <see cref="IsPaintable"/> 的区别：后者表示「这格没有被别的障碍占用」，建箱子 / 建木箱、
+        /// 判重叠用的都是那个口径 —— 木箱格在那套口径里**不算可用**，两套别混用。
+        /// </summary>
+        private static bool IsBrushEditable(CellKind kind)
+        {
+            return kind == CellKind.Empty || kind == CellKind.Color || kind == CellKind.Crate;
         }
 
         /// <summary>
