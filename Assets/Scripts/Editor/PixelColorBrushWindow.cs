@@ -477,15 +477,19 @@ namespace CrowdMatch
             Repaint();
         }
 
-        /// <summary>按当前选中重绑 PixelGroup（选中它或其子物体都行；没选中、或还是同一个，就不动）。</summary>
+        /// <summary>
+        /// 绑到当前选中的 PixelGroup（选中它或其子物体都行）。选中里没有的话，退一步在**当前打开场景的根物体**上找
+        /// （<see cref="SceneRootLookup"/>）；还是找不到就保持未绑定，**不报错**。
+        /// 已经绑着的那个（且没被销毁）就不动 —— 注意销毁后的引用要当作「没绑」，否则重开场景后窗口会一直卡在未绑定。
+        /// </summary>
         private void BindFromSelection()
         {
             var selected = Selection.activeGameObject;
-            if (selected == null)
-                return;
+            var group = selected != null ? selected.GetComponentInParent<PixelGroup>() : null;
+            if (group == null)
+                group = SceneRootLookup.FindComponent<PixelGroup>();
 
-            var group = selected.GetComponentInParent<PixelGroup>();
-            if (group == null || group == _group)
+            if (group == null || (_group != null && group == _group))
                 return;
 
             _group = group;
@@ -716,7 +720,10 @@ namespace CrowdMatch
         {
             if (_group == null)
             {
-                EditorGUILayout.HelpBox("未绑定 PixelGroup：请选中场景里的 PixelGroup（或其子物体）。", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    "未绑定 PixelGroup：当前选中里没有，当前打开场景的根物体里也没找到。\n" +
+                    "在 Hierarchy 里选中它（或其子物体）即可自动绑定；组如果挂在别的节点下面，需要手动选中一次。",
+                    MessageType.Info);
                 return;
             }
 
