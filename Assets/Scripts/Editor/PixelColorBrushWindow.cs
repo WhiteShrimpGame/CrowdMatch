@@ -12,7 +12,7 @@ namespace CrowdMatch
     /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂与矩形填/抹。整览（自适应宽度）与细编（手动格子像素）
     /// 两档共用同一个双向滚动视图。
     ///
-    /// ## 六条口径（都与既有工具对齐）
+    /// ## 七条口径（都与既有工具对齐）
     /// · **画布顶行 = gridZ 0 = 最前排**，与「导出颜色 (PNG)」一致（那边图片顶行就是 gridZ 0）。
     /// · **障碍格不可涂**，只以底色 + 单字标记显示并写明类别：墙 / 管 / 箱 / 木 / 门 / 冰 / 升。
     ///   像素不存在于障碍格上，唯一例外是冰 —— 冰不是障碍、冰底下的像素仍在，所以冰格照常画出颜色、
@@ -24,6 +24,10 @@ namespace CrowdMatch
     /// · **管道覆盖区域画粗描边（常显，与当前模式无关）**：覆盖范围 = 管道格 + 轨道格（与运行时
     ///   <c>PipeItem.CoversCell</c> 同口径），只沿**本根**的外缘画线、区域内部不画；两根管覆盖区相邻时
     ///   交界两侧各画各的（各自完整描框，忽略叠加）。轨道格本身仍是普通颜色格 —— 那里确实有像素（开局阻挡）。
+    /// · **倍乘门可加可删**：添加门 = 按下起点、拖到终点（必须**轴对齐**、≥2 格），松手即创建，**倍率固定 x2**
+    ///   （画布不给改倍率的入口；要改去 GateItem 的 Inspector，那边改完会重建显示）。
+    ///   门格上的 Pixel 会被**清掉并记进 <c>GateItem.clearedPixels</c> 快照**（与「用选中 Pixel 创建倍乘门」同口径），
+    ///   删除门时按快照**还原 Pixel** —— 这点与墙体 / 管道相反（那两者删除不回填）。
     /// · **管道波次颜色走二级面板**：涂颜色模式下点**管道格**（不是轨道格）打开 —— 选色复用上面那个调色板
     ///   （面板不再自带一份），面板里顺次列出该管道当前的波次颜色（点一下 = 用当前选中色替换），
     ///   最右 − / + 各删 / 追加末端一个。打开时没有可用颜色就自动落到 0 号色；选橡皮、
@@ -53,8 +57,8 @@ namespace CrowdMatch
             Rect,
         }
 
-        /// <summary>窗口的六种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道。
-        /// 六种互斥，切换时清掉各自的待定状态。</summary>
+        /// <summary>窗口的八种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
+        /// 添加倍乘门 / 删除倍乘门。八种互斥，切换时清掉各自的待定状态。</summary>
         private enum Mode
         {
             Color,
@@ -63,6 +67,8 @@ namespace CrowdMatch
             Question,
             AddPipe,
             DeletePipe,
+            AddGate,
+            DeleteGate,
         }
 
         private const float SwatchSize = 24f;
@@ -138,6 +144,25 @@ namespace CrowdMatch
         /// 三处用途：删除模式反查「点到的是哪根管」、添加模式判重叠、画布给覆盖区画**粗描边**。
         /// </summary>
         private readonly Dictionary<Vector2Int, PipeItem> _pipeCells = new Dictionary<Vector2Int, PipeItem>();
+
+        /// <summary>「添加倍乘门」的两个端点（按下格 = 起点，拖动格 = 终点；门必须是轴对齐笔直线段）。</summary>
+        private Vector2Int _gateAnchor;
+        private Vector2Int _gateCurrent;
+
+        /// <summary>待创建门线占据的格（由两个端点换算而来），每帧在工具栏里算一次。非「添加倍乘门」模式为 null。</summary>
+        private HashSet<Vector2Int> _gateStrokeCells;
+
+        /// <summary>「添加倍乘门」固定的倍率：画布不提供修改入口（要改去 GateItem 的 Inspector，那边改完会重建显示）。</summary>
+        private const int GateMultiplier = 2;
+
+        /// <summary>「删除倍乘门」已高亮待删的那道门（再点一下才真删）。</summary>
+        private GateItem _deletePendingGate;
+
+        /// <summary>
+        /// 格 → 占据它的倍乘门（每次 <see cref="RefreshSnapshot"/> 重建）。
+        /// 两处用途：删除模式反查「点到的是哪道门」、添加模式判重叠。
+        /// </summary>
+        private readonly Dictionary<Vector2Int, GateItem> _gateCells = new Dictionary<Vector2Int, GateItem>();
 
         private Vector2 _scroll;
 
@@ -283,6 +308,35 @@ namespace CrowdMatch
 
             RebuildWallCellMap();
             RebuildPipeCellMap();
+            RebuildGateCellMap();
+        }
+
+        /// <summary>
+        /// 重建「格 → 倍乘门」表。门格由 <see cref="GateItem.cells"/> 给出（= start～end 那段轴对齐线段经过的格，
+        /// <see cref="PixelGroup.RebuildGrid"/> 已经 RefreshCells 过）。门**不是障碍**（不写 wallGrid/pipeGrid），
+        /// 但它的门格是闭合区域计算里的屏障，所以这里照样登记。
+        /// </summary>
+        private void RebuildGateCellMap()
+        {
+            _gateCells.Clear();
+
+            if (_group == null)
+            {
+                _deletePendingGate = null;
+                return;
+            }
+
+            foreach (var gate in _group.GetComponentsInChildren<GateItem>())
+            {
+                if (gate == null)
+                    continue;
+
+                foreach (var cell in gate.cells)
+                {
+                    if (_group.IsInRange(cell.x, cell.y) && !_gateCells.ContainsKey(cell))
+                        _gateCells[cell] = gate;
+                }
+            }
         }
 
         /// <summary>
@@ -392,7 +446,7 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 工具栏三段：模式（六选一，分两行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作。
+        /// 工具栏三段：模式（八选一，分两行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作（刷新快照）。
         /// **每一段都常驻**，不按模式隐藏 —— 隐藏会让下面控件的命中矩形当场换人（见 skill 的说明）。
         /// 不适用的控件只禁用，不改布局高度。
         /// </summary>
@@ -401,23 +455,26 @@ namespace CrowdMatch
             bool colorMode = _mode == Mode.Color;
             bool playing = Application.isPlaying;
 
-            // 待创建墙线 / 管道的占格：本帧只算一次，下面按钮 / 画布 / 状态行都读这一份
+            // 待创建墙线 / 管道 / 门线的占格：本帧只算一次，下面按钮 / 画布 / 状态行都读这一份
             _wallStrokeCells = _mode == Mode.AddWall ? CollectStrokeCells() : null;
             _pipeStrokeCells = _mode == Mode.AddPipe ? CollectPipeStrokeCells() : null;
+            _gateStrokeCells = _mode == Mode.AddGate ? CollectGateStrokeCells() : null;
 
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("模式", GUILayout.Width(90f));
             DrawModeButton(Mode.Color, "涂颜色");
             DrawModeButton(Mode.AddWall, "添加墙体");
             DrawModeButton(Mode.DeleteWall, "删除墙体");
+            DrawModeButton(Mode.Question, "问号标注");
             EditorGUILayout.EndHorizontal();
 
-            // 第二行：用等宽空标签对齐到第一行的按钮起点（模式变多了，一行放不下）
+            // 第二行：用等宽空标签对齐到第一行的按钮起点（八个模式，一行放不下）
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("", GUILayout.Width(90f));
-            DrawModeButton(Mode.Question, "问号标注");
             DrawModeButton(Mode.AddPipe, "添加管道");
             DrawModeButton(Mode.DeletePipe, "删除管道");
+            DrawModeButton(Mode.AddGate, "加倍乘门");
+            DrawModeButton(Mode.DeleteGate, "删倍乘门");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -466,6 +523,7 @@ namespace CrowdMatch
             _deletePendingWall = null;
             _pipeStroke.Clear();
             _deletePendingPipe = null;
+            _deletePendingGate = null;
             _lastStrokeError = null;
             // 笔刷不动：问号模式不看笔刷，切回来时原来选的是哪个色块 / 橡皮都还在原位
             Repaint();
@@ -698,11 +756,21 @@ namespace CrowdMatch
                     else if (_pipeStrokeCells.Contains(cell))
                         EditorGUI.DrawRect(rect, new Color(0.15f, 0.75f, 0.95f, 0.22f));
                 }
+                else if (_mode == Mode.AddGate && _gateStrokeCells != null)
+                {
+                    // 待创建的门线：按下格 = 起点、当前格 = 终点，预览直接画「最终会占的那几格」
+                    if (_gateStrokeCells.Contains(new Vector2Int(col, gridZ)))
+                        EditorGUI.DrawRect(rect, new Color(1f, 0.45f, 0.15f, 0.4f));
+                }
                 else if (_mode == Mode.DeleteWall && IsCellOfPendingWall(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
                 else if (_mode == Mode.DeletePipe && IsCellOfPendingPipe(col, gridZ))
+                {
+                    EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
+                }
+                else if (_mode == Mode.DeleteGate && IsCellOfPendingGate(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
@@ -832,6 +900,32 @@ namespace CrowdMatch
                 else
                     text = "点一下管道覆盖区高亮，再点一次删除；点空格取消高亮";
             }
+            else if (_mode == Mode.AddGate)
+            {
+                text = "待创建倍乘门：(" + _gateAnchor.x + ", " + _gateAnchor.y + ") → (" +
+                       _gateCurrent.x + ", " + _gateCurrent.y + ")　｜　倍率 x" + GateMultiplier + "（固定）";
+                if (_gateAnchor != _gateCurrent)
+                {
+                    text += TryValidateGateStroke(_gateStrokeCells, out string gateReason, out _)
+                        ? "　｜　可生成 ✓ 松手即创建（" + (_gateStrokeCells != null ? _gateStrokeCells.Count : 0) +
+                          " 格，门格上的 Pixel 会被清掉并存快照）"
+                        : "　｜　✗ " + gateReason;
+                }
+                else
+                {
+                    text += "　｜　按住左键拖到另一格，**松手即创建**（门必须是轴对齐笔直线段，≥2 格）";
+                    if (_lastStrokeError != null)
+                        text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
+                }
+            }
+            else if (_mode == Mode.DeleteGate)
+            {
+                if (_deletePendingGate != null)
+                    text = "已高亮 " + _deletePendingGate.name + "（" + _deletePendingGate.CellCount +
+                           " 格）—— 再点一下删除（按快照还原 Pixel）";
+                else
+                    text = "点一下门格高亮，再点一次删除；点空格取消高亮";
+            }
             else if (_rectActive)
             {
                 int c0, c1, r0, r1;
@@ -951,9 +1045,22 @@ namespace CrowdMatch
                     _lastStrokeError = null;
                     AppendPipeCell(col, gridZ);
                 }
+                else if (_mode == Mode.AddGate)
+                {
+                    // 门的两个端点：按下格 = 起点、当前格 = 终点（门必须是轴对齐笔直线段，松手即创建）
+                    _dragging = true;
+                    _rectActive = false;
+                    _gateAnchor = new Vector2Int(col, gridZ);
+                    _gateCurrent = _gateAnchor;
+                    _lastStrokeError = null;
+                }
                 else if (_mode == Mode.DeletePipe)
                 {
                     HandlePipeDeleteClick(col, gridZ);   // 单击，不进入拖动手势
+                }
+                else if (_mode == Mode.DeleteGate)
+                {
+                    HandleGateDeleteClick(col, gridZ);   // 单击，不进入拖动手势
                 }
                 else
                 {
@@ -983,6 +1090,10 @@ namespace CrowdMatch
                 else if (_mode == Mode.AddPipe)
                 {
                     AppendPipeCell(col, gridZ);
+                }
+                else if (_mode == Mode.AddGate)
+                {
+                    _gateCurrent = new Vector2Int(col, gridZ);   // 只记终点：预览/校验按「起点→终点」现算
                 }
 
                 ev.Use();
@@ -1042,6 +1153,10 @@ namespace CrowdMatch
             else if (_mode == Mode.AddPipe)
             {
                 FinishPipeStroke();
+            }
+            else if (_mode == Mode.AddGate)
+            {
+                FinishGateStroke();
             }
 
             Repaint();
@@ -1803,6 +1918,212 @@ namespace CrowdMatch
                 EditorGUI.DrawRect(new Rect(rect.x, rect.y, thickness, rect.height), line);
             if (!IsCoveredBy(col + 1, gridZ, pipe))
                 EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), line);
+        }
+
+        // ============================================================
+        // 倍乘门：添加 / 删除（门格的像素会被清掉并存快照，删除时按快照还原）
+        // ============================================================
+
+        /// <summary>待创建门线的起点（门 / 墙 / 管共用的口径：Vector2 的 x = 列 col、y = 行 row）。</summary>
+        private Vector2 GateStart => new Vector2(_gateAnchor.x, _gateAnchor.y);
+
+        /// <summary>待创建门线的终点。</summary>
+        private Vector2 GateEnd => new Vector2(_gateCurrent.x, _gateCurrent.y);
+
+        /// <summary>待创建门线占据的格 —— 借 <see cref="GateItem.CollectCells"/> 的静态换算，与真正建出来的门同一口径。
+        /// 还没拖出线段（起点 == 终点）时返回空集，免得预览停在上一笔上。</summary>
+        private HashSet<Vector2Int> CollectGateStrokeCells()
+        {
+            var cells = new HashSet<Vector2Int>();
+            if (_gateAnchor == _gateCurrent)
+                return cells;
+
+            GateItem.CollectCells(GateStart, GateEnd, cells);
+            return cells;
+        }
+
+        /// <summary>
+        /// 待创建门的体检：① 线段合法（轴对齐、≥2 格，交给 <see cref="GateItem.IsValidSegment"/>）；
+        /// ② 不与已有门 / 墙体 / 管道重叠（已有障碍只能用各自的删除模式移除）。
+        /// **不校验门格上有没有像素** —— 创建时会把它们清掉并记进快照，这正是门的正常用法。
+        /// </summary>
+        private bool TryValidateGateStroke(HashSet<Vector2Int> occupied, out string error, out int overlapCells)
+        {
+            overlapCells = 0;
+
+            if (!GateItem.IsValidSegment(GateStart, GateEnd, out error))
+                return false;
+
+            if (occupied != null)
+            {
+                foreach (var cell in occupied)
+                    if (_gateCells.ContainsKey(cell) || _wallCells.ContainsKey(cell) || _pipeCells.ContainsKey(cell))
+                        overlapCells++;
+            }
+
+            if (overlapCells > 0)
+            {
+                error = "与已有门 / 墙体 / 管道重叠 " + overlapCells + " 格（已有障碍只能用各自的删除模式移除）。";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>「添加倍乘门」松手：体检通过就直接建；不通过只记原因。单击一格不算「想建门」，不报错。</summary>
+        private void FinishGateStroke()
+        {
+            var occupied = CollectGateStrokeCells();
+            bool ok = TryValidateGateStroke(occupied, out string reason, out _);
+
+            bool isClick = _gateAnchor == _gateCurrent;
+            _lastStrokeError = ok || isClick ? null : reason;
+
+            if (ok)
+                CreateGateFromStroke();   // 内部会重建快照
+
+            Repaint();
+        }
+
+        /// <summary>
+        /// 「创建倍乘门」：口径与 <c>GateCreator</c> 一致 —— 门格上的 Pixel 会被清掉并记进
+        /// <see cref="GateItem.clearedPixels"/> 快照（供删除时还原），倍率固定 <see cref="GateMultiplier"/>。
+        /// </summary>
+        private void CreateGateFromStroke()
+        {
+            if (_group == null)
+                return;
+
+            var start = GateStart;
+            var end = GateEnd;
+            if (!GateItem.IsValidSegment(start, end, out string segErr))
+            {
+                Debug.LogWarning("[像素颜色画布] 无法创建倍乘门：" + segErr);
+                return;
+            }
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("创建倍乘门");
+
+            var gate = _group.SpawnGate(start, end, GateMultiplier);
+            if (gate == null)
+                return;   // SpawnGate 已经打过日志（gatePrefab 为空 / 预制体缺 GateItem）
+
+            Undo.RegisterCreatedObjectUndo(gate.gameObject, "创建倍乘门");
+
+            // 清掉门格上的 Pixel，并把它们记进快照（删除这道门时按快照还原）
+            _group.RebuildGrid();   // 先让 gate.cells / 门格表就位
+            gate.clearedPixels = new List<GateItem.ClearedPixel>();
+            foreach (var cell in gate.cells)
+            {
+                var item = _group.GetItem(cell.x, cell.y);
+                if (item == null)
+                    continue;
+
+                gate.clearedPixels.Add(new GateItem.ClearedPixel
+                {
+                    col = cell.x,
+                    row = cell.y,
+                    colorId = item.colorId,
+                    isQuestion = item.isQuestion,
+                });
+                Undo.DestroyObjectImmediate(item.gameObject);
+            }
+
+            _group.RebuildGrid();       // 清格后重建：占用表 + 门格表 + 闭合区域 + 倍率图
+            gate.BuildVisual(_group);
+            EditorUtility.SetDirty(gate);
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _gateCurrent = _gateAnchor;   // 清掉门线预览
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已创建倍乘门：(" + start.x + "," + start.y + ") → (" + end.x + "," + end.y +
+                ")，" + gate.CellCount + " 格，倍率 x" + gate.multiplier + "，清除 Pixel " + gate.clearedPixels.Count +
+                " 个。闭合区域请用「校验倍乘门」确认。");
+        }
+
+        /// <summary>某格是否属于「已高亮待删除」的那道门。</summary>
+        private bool IsCellOfPendingGate(int col, int gridZ)
+        {
+            if (_deletePendingGate == null)
+                return false;
+            return _gateCells.TryGetValue(new Vector2Int(col, gridZ), out var gate) && gate == _deletePendingGate;
+        }
+
+        /// <summary>
+        /// 「删除倍乘门」的单击：点到的门与已高亮的是同一道 → 真删；否则只把高亮切过去；
+        /// 点到没有门的格子 → 取消高亮。
+        /// </summary>
+        private void HandleGateDeleteClick(int col, int gridZ)
+        {
+            if (!_gateCells.TryGetValue(new Vector2Int(col, gridZ), out var gate) || gate == null)
+            {
+                _deletePendingGate = null;
+                return;
+            }
+
+            if (gate != _deletePendingGate)
+            {
+                _deletePendingGate = gate;   // 第一次点：只高亮
+                return;
+            }
+
+            DeleteGate(gate);
+        }
+
+        /// <summary>
+        /// 删掉一道门：**按 <see cref="GateItem.clearedPixels"/> 快照把门格上的 Pixel 还原回去**
+        /// （与 Inspector 的「移除倍乘门并还原 Pixel」同口径；该格已有像素就不重复生成），再销毁门本体。
+        /// 还原 + 销毁合成一个 Undo 步骤。
+        /// </summary>
+        private void DeleteGate(GateItem gate)
+        {
+            if (gate == null || _group == null)
+                return;
+
+            string gateName = gate.name;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("删除倍乘门");
+
+            _group.RebuildGrid();   // 取当前占用状态，避免还原出来的 Pixel 与已有像素重叠
+            var config = ColorConfigLocator.Find();
+            int restored = 0;
+            if (gate.clearedPixels != null)
+            {
+                foreach (var snap in gate.clearedPixels)
+                {
+                    if (!_group.IsInRange(snap.col, snap.row))
+                        continue;
+                    if (_group.GetItem(snap.col, snap.row) != null)
+                        continue;   // 该格已经有像素（后来手工填过）：不重复生成
+
+                    var item = _group.SpawnPixel(snap.col, snap.row, snap.colorId, config, false, snap.isQuestion);
+                    if (item == null)
+                        continue;
+                    Undo.RegisterCreatedObjectUndo(item.gameObject, "还原 Pixel");
+                    restored++;
+                }
+            }
+
+            Undo.DestroyObjectImmediate(gate.gameObject);
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _deletePendingGate = null;
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已删除倍乘门 " + gateName + "，还原 Pixel " + restored + " 个。");
         }
 
         // ============================================================
