@@ -26,6 +26,8 @@ namespace CrowdMatch
     /// ## 手势与撤销
     /// 按下记一个 Undo 组 → 拖动期间只改对象 + <c>Repaint</c>（不记 Undo、不 SetDirty）→
     /// 松手才 <c>RebuildGrid</c> + <c>SetDirty</c> + 收拢 Undo 组，整笔一步撤销。
+    /// 撤销 / 重做回来的改动由 <c>Undo.undoRedoPerformed</c> 重绑快照接住（见 <see cref="OnUndoRedoPerformed"/>），
+    /// 窗口与场景同步。
     ///
     /// **收尾必须放在滚动视图之外**：拖到画布外松手时格子上收不到 MouseUp，手势会永久卡在 dragging。
     /// 同理，格子一律用 <c>Rect.Contains</c> 命中而不是 <c>GUILayout.Button</c> —— 按钮的按下态会和拖拽、
@@ -156,6 +158,7 @@ namespace CrowdMatch
         {
             Selection.selectionChanged += BindFromSelection;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            Undo.undoRedoPerformed += OnUndoRedoPerformed;
             BindFromSelection();
         }
 
@@ -163,7 +166,26 @@ namespace CrowdMatch
         {
             Selection.selectionChanged -= BindFromSelection;
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            Undo.undoRedoPerformed -= OnUndoRedoPerformed;
             CancelStroke();   // 关窗时别把手势留在 dragging / rectActive
+        }
+
+        /// <summary>
+        /// 撤销 / 重做之后重建快照并重画，让窗口跟着场景一起回到撤销后的状态。
+        ///
+        /// 必须重建的原因：Undo 会**新建 / 销毁** PixelItem 与 WallItem，而画布读的是缓存的占用表
+        /// （<c>_group.grid</c>，只由 <c>RebuildGrid</c> 重算）与「格 → 墙」表 —— 不重建就会停在撤销前那一刻，
+        /// 画出已经不存在的像素 / 墙。顺手取消进行中的手势：被撤销掉的那一格可能已经不在原位了。
+        /// </summary>
+        private void OnUndoRedoPerformed()
+        {
+            if (_group == null)
+                return;
+
+            CancelStroke();
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
         }
 
         private void OnPlayModeStateChanged(PlayModeStateChange state)
@@ -905,6 +927,17 @@ namespace CrowdMatch
                 return;   // 已经是这个颜色：不必记一条空 Undo
 
             Undo.RecordObject(item, "画布涂色");
+            // 颜色的**视觉**来自 Renderer.sharedMaterial（ApplyMaterial 改的是 renderer 组件，不是 PixelItem 上的字段）：
+            // 只记 PixelItem 会出现「colorId 撤销回来了、场景里的颜色没变」——窗口读 colorId 先变回旧色、
+            // 场景还顶着新材质，两边对不上。所以 renderer 也要逐个记（与 PixelItemEditor / PixelGroupEditor
+            // 改色时的既有口径一致）。
+            for (int i = 0; i < item.renderers.Count; i++)
+            {
+                var renderer = item.renderers[i];
+                if (renderer != null)
+                    Undo.RecordObject(renderer, "画布涂色");
+            }
+
             item.colorId = _brush;
             item.ApplyMaterial(_config);
             EditorUtility.SetDirty(item);
