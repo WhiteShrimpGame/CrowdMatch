@@ -12,7 +12,7 @@ namespace CrowdMatch
     /// 用笔刷涂**颜色**或**橡皮**，支持连续拖涂与矩形填/抹。整览（自适应宽度）与细编（手动格子像素）
     /// 两档共用同一个双向滚动视图。
     ///
-    /// ## 七条口径（都与既有工具对齐）
+    /// ## 八条口径（都与既有工具对齐）
     /// · **画布顶行 = gridZ 0 = 最前排**，与「导出颜色 (PNG)」一致（那边图片顶行就是 gridZ 0）。
     /// · **障碍格不可涂**，只以底色 + 单字标记显示并写明类别：墙 / 管 / 箱 / 木 / 门 / 冰 / 升。
     ///   像素不存在于障碍格上，唯一例外是冰 —— 冰不是障碍、冰底下的像素仍在，所以冰格照常画出颜色、
@@ -28,6 +28,11 @@ namespace CrowdMatch
     ///   （画布不给改倍率的入口；要改去 GateItem 的 Inspector，那边改完会重建显示）。
     ///   门格上的 Pixel 会被**清掉并记进 <c>GateItem.clearedPixels</c> 快照**（与「用选中 Pixel 创建倍乘门」同口径），
     ///   删除门时按快照**还原 Pixel** —— 这点与墙体 / 管道相反（那两者删除不回填）。
+    /// · **箱子可加可删**：添加箱子 = 拖出 **2×2** 的矩形区域（画布只放开这一种；必须完全在网格内、且不含别的障碍），
+    ///   松手即创建；创建时**吃掉区域内的 Pixel**（箱内像素改由 <c>colorIds</c> 提供，与 BoxCreator 同口径），
+    ///   容量 = 本体 + 相邻 4 方向格数，colorIds 默认全填当前笔刷色。点箱子区域开**内部颜色二级面板**
+    ///   （与管道那个同形：点色块替换、− / + 增删末端、清空全部；色块每行最多 20 个，超过换行）。
+    ///   删除箱子会连隐藏 Pixel 一起销毁，**不回填**区域 Pixel。
     /// · **管道波次颜色走二级面板**：涂颜色模式下点**管道格**（不是轨道格）打开 —— 选色复用上面那个调色板
     ///   （面板不再自带一份），面板里顺次列出该管道当前的波次颜色（点一下 = 用当前选中色替换），
     ///   最右 − / + 各删 / 追加末端一个。打开时没有可用颜色就自动落到 0 号色；选橡皮、
@@ -57,8 +62,8 @@ namespace CrowdMatch
             Rect,
         }
 
-        /// <summary>窗口的八种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
-        /// 添加倍乘门 / 删除倍乘门。八种互斥，切换时清掉各自的待定状态。</summary>
+        /// <summary>窗口的十种模式：涂颜色 / 添加墙体 / 删除墙体 / 问号标注 / 添加管道 / 删除管道 /
+        /// 添加倍乘门 / 删除倍乘门 / 添加箱子 / 删除箱子。十种互斥，切换时清掉各自的待定状态。</summary>
         private enum Mode
         {
             Color,
@@ -69,6 +74,8 @@ namespace CrowdMatch
             DeletePipe,
             AddGate,
             DeleteGate,
+            AddBox,
+            DeleteBox,
         }
 
         private const float SwatchSize = 24f;
@@ -76,6 +83,9 @@ namespace CrowdMatch
 
         /// <summary>自适应宽度时给滚动条与缩进留的余量，不留就会横向滚出画布。</summary>
         private const float CanvasMargin = 90f;
+
+        /// <summary>「内部颜色」面板里色块每行的上限：超过就换行（窗口更窄时按实际宽度算，会更早换）。</summary>
+        private const int MaxColorsPerRow = 20;
 
         private PixelGroup _group;
         private ColorConfig _config;
@@ -163,6 +173,22 @@ namespace CrowdMatch
         /// 两处用途：删除模式反查「点到的是哪道门」、添加模式判重叠。
         /// </summary>
         private readonly Dictionary<Vector2Int, GateItem> _gateCells = new Dictionary<Vector2Int, GateItem>();
+
+        /// <summary>「添加箱子」的两个对角（按下格 + 拖动格）—— 箱子是**矩形区域**。</summary>
+        private Vector2Int _boxAnchor;
+        private Vector2Int _boxCurrent;
+
+        /// <summary>待创建箱子区域占据的格（由两个对角换算），每帧在工具栏里算一次。非「添加箱子」模式为 null。</summary>
+        private HashSet<Vector2Int> _boxStrokeCells;
+
+        /// <summary>「删除箱子」已高亮待删的那个箱子（再点一下才真删）。</summary>
+        private BoxItem _deletePendingBox;
+
+        /// <summary>格 → 占据它的箱子（只登记未开箱的，与 boxGrid 同口径；每次 RefreshSnapshot 重建）。</summary>
+        private readonly Dictionary<Vector2Int, BoxItem> _boxCells = new Dictionary<Vector2Int, BoxItem>();
+
+        /// <summary>「箱内颜色」二级面板正在编辑的箱子（涂颜色模式下点箱子区域打开）。null = 面板关闭。</summary>
+        private BoxItem _boxColorTarget;
 
         private Vector2 _scroll;
 
@@ -272,6 +298,7 @@ namespace CrowdMatch
             // 波次颜色二级界面也关掉：运行时不该改管道的波次配置。
             CancelStroke();
             _pipeColorTarget = null;
+            _boxColorTarget = null;
             BindFromSelection();
             Repaint();
         }
@@ -309,6 +336,37 @@ namespace CrowdMatch
             RebuildWallCellMap();
             RebuildPipeCellMap();
             RebuildGateCellMap();
+            RebuildBoxCellMap();
+        }
+
+        /// <summary>
+        /// 重建「格 → 箱子」表。只登记**未开箱**的箱子（开箱后它不再占格，格子归像素用），与
+        /// <c>PixelGroup.boxGrid</c> 同口径。用途：删除模式反查「点到的是哪个箱子」、涂颜色模式判断
+        /// 「点到的格子属于哪个箱子（好开二级面板）」。
+        /// </summary>
+        private void RebuildBoxCellMap()
+        {
+            _boxCells.Clear();
+
+            if (_group == null)
+            {
+                _deletePendingBox = null;
+                return;
+            }
+
+            foreach (var box in _group.GetComponentsInChildren<BoxItem>())
+            {
+                if (box == null || box.opened)
+                    continue;
+
+                for (int r = box.rowMin; r <= box.rowMax; r++)
+                    for (int c = box.colMin; c <= box.colMax; c++)
+                    {
+                        var cell = new Vector2Int(c, r);
+                        if (_group.IsInRange(c, r) && !_boxCells.ContainsKey(cell))
+                            _boxCells[cell] = box;
+                    }
+            }
         }
 
         /// <summary>
@@ -438,6 +496,7 @@ namespace CrowdMatch
             DrawViewToolbar();
             DrawPalette();
             DrawPipeColorPanel();   // 二级面板：涂颜色模式下点了管道格才出现（选色复用上面的调色板）
+            DrawBoxColorPanel();    // 二级面板：涂颜色模式下点了箱子区域才出现（与上者互斥）
             DrawCanvas();
             DrawStatusLine();
 
@@ -446,7 +505,7 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 工具栏三段：模式（八选一，分两行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作（刷新快照）。
+        /// 工具栏三段：模式（十选一，分三行）/ 视图（自适应 + 格子像素 + 颜色笔刷的手势）/ 操作（刷新快照）。
         /// **每一段都常驻**，不按模式隐藏 —— 隐藏会让下面控件的命中矩形当场换人（见 skill 的说明）。
         /// 不适用的控件只禁用，不改布局高度。
         /// </summary>
@@ -459,6 +518,7 @@ namespace CrowdMatch
             _wallStrokeCells = _mode == Mode.AddWall ? CollectStrokeCells() : null;
             _pipeStrokeCells = _mode == Mode.AddPipe ? CollectPipeStrokeCells() : null;
             _gateStrokeCells = _mode == Mode.AddGate ? CollectGateStrokeCells() : null;
+            _boxStrokeCells = _mode == Mode.AddBox ? CollectBoxStrokeCells() : null;
 
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("模式", GUILayout.Width(90f));
@@ -468,13 +528,19 @@ namespace CrowdMatch
             DrawModeButton(Mode.Question, "问号标注");
             EditorGUILayout.EndHorizontal();
 
-            // 第二行：用等宽空标签对齐到第一行的按钮起点（八个模式，一行放不下）
+            // 第二行：用等宽空标签对齐到第一行的按钮起点（十个模式，一行放不下，分三行每行四个）
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("", GUILayout.Width(90f));
             DrawModeButton(Mode.AddPipe, "添加管道");
             DrawModeButton(Mode.DeletePipe, "删除管道");
             DrawModeButton(Mode.AddGate, "加倍乘门");
             DrawModeButton(Mode.DeleteGate, "删倍乘门");
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("", GUILayout.Width(90f));
+            DrawModeButton(Mode.AddBox, "添加箱子");
+            DrawModeButton(Mode.DeleteBox, "删除箱子");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -524,6 +590,7 @@ namespace CrowdMatch
             _pipeStroke.Clear();
             _deletePendingPipe = null;
             _deletePendingGate = null;
+            _deletePendingBox = null;
             _lastStrokeError = null;
             // 笔刷不动：问号模式不看笔刷，切回来时原来选的是哪个色块 / 橡皮都还在原位
             Repaint();
@@ -735,6 +802,10 @@ namespace CrowdMatch
                     DrawPipeOutline(rect, col, gridZ, coveringPipe, selected);
                 }
 
+                // 正在二级面板里编辑的那个箱子：淡黄打底 + 黄色外框（与选中管道同一套「选中」口径）
+                if (_boxCells.TryGetValue(new Vector2Int(col, gridZ), out var coveringBox) && coveringBox == _boxColorTarget)
+                    DrawSelectedBoxHighlight(rect, col, gridZ, coveringBox);
+
                 // 矩形拖动中的实时预览：范围内的格叠一层半透明黄
                 if (_rectActive && InDraggedRect(col, gridZ))
                     EditorGUI.DrawRect(rect, new Color(1f, 0.9f, 0.3f, 0.35f));
@@ -762,6 +833,12 @@ namespace CrowdMatch
                     if (_gateStrokeCells.Contains(new Vector2Int(col, gridZ)))
                         EditorGUI.DrawRect(rect, new Color(1f, 0.45f, 0.15f, 0.4f));
                 }
+                else if (_mode == Mode.AddBox && _boxStrokeCells != null)
+                {
+                    // 待创建的箱子区域（矩形）：紫色，与墙 / 管 / 门的橙青区分开
+                    if (_boxStrokeCells.Contains(new Vector2Int(col, gridZ)))
+                        EditorGUI.DrawRect(rect, new Color(0.85f, 0.45f, 0.95f, 0.4f));
+                }
                 else if (_mode == Mode.DeleteWall && IsCellOfPendingWall(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
@@ -771,6 +848,10 @@ namespace CrowdMatch
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
                 else if (_mode == Mode.DeleteGate && IsCellOfPendingGate(col, gridZ))
+                {
+                    EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
+                }
+                else if (_mode == Mode.DeleteBox && IsCellOfPendingBox(col, gridZ))
                 {
                     EditorGUI.DrawRect(rect, new Color(1f, 0.15f, 0.15f, 0.55f));
                 }
@@ -926,6 +1007,34 @@ namespace CrowdMatch
                 else
                     text = "点一下门格高亮，再点一次删除；点空格取消高亮";
             }
+            else if (_mode == Mode.AddBox)
+            {
+                NormalizeBoxRect(out int b0, out int br0, out int b1, out int br1);
+                text = "待创建箱子：(" + b0 + ", " + br0 + ") ~ (" + b1 + ", " + br1 + ")" +
+                       "　｜　" + (b1 - b0 + 1) + "×" + (br1 - br0 + 1) + " 格";
+                if (_boxAnchor != _boxCurrent)
+                {
+                    text += TryValidateBoxStroke(_boxStrokeCells, out string boxReason, out _)
+                        ? "　｜　可生成 ✓ 松手即创建（容量 " +
+                          Mathf.Max(1, BoxItem.ComputeCapacity(_group, b0, br0, b1, br1)) +
+                          "，区域内 Pixel 会被吃掉）"
+                        : "　｜　✗ " + boxReason;
+                }
+                else
+                {
+                    text += "　｜　按住左键拖出 **2×2** 的矩形，**松手即创建**（箱内颜色建完可点它改）";
+                    if (_lastStrokeError != null)
+                        text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
+                }
+            }
+            else if (_mode == Mode.DeleteBox)
+            {
+                if (_deletePendingBox != null)
+                    text = "已高亮 " + _deletePendingBox.name + "（" + _deletePendingBox.BodyCount +
+                           " 格，容量 " + _deletePendingBox.capacity + "）—— 再点一下删除（不回填区域 Pixel）";
+                else
+                    text = "点一下箱子区域高亮，再点一次删除；点空格取消高亮";
+            }
             else if (_rectActive)
             {
                 int c0, c1, r0, r1;
@@ -965,6 +1074,11 @@ namespace CrowdMatch
                         (_pipeColorTarget.colors != null ? _pipeColorTarget.colors.Count : 0) + " 个" +
                         (_brush < 0 ? "（ColorConfig 里没有颜色）" : "（当前选中色 " + _brush + "，选色用上面的调色板）");
 
+            if (_boxColorTarget != null)
+                text += "　｜　二级面板：箱子 " + _boxColorTarget.name + " 内容 " +
+                        (_boxColorTarget.colorIds != null ? _boxColorTarget.colorIds.Length : 0) + " 个" +
+                        (_brush < 0 ? "（ColorConfig 里没有颜色）" : "（当前选中色 " + _brush + "，选色用上面的调色板）");
+
             EditorGUI.LabelField(rect, text, EditorStyles.miniLabel);
         }
 
@@ -1000,13 +1114,25 @@ namespace CrowdMatch
             {
                 if (_mode == Mode.Color)
                 {
-                    bool openedPipe = TryOpenPipeColorPanel(col, gridZ);
-
-                    // 点到管道格以外的地方（别的 pixel / 空格）→ 退出管道编辑，照常涂色
-                    if (!openedPipe)
+                    // 点到管道格 / 箱子区域 → 打开对应的「内部颜色」二级面板（两者互斥，只留一个）
+                    bool openedPanel = TryOpenPipeColorPanel(col, gridZ);
+                    if (openedPanel)
+                    {
+                        _boxColorTarget = null;
+                    }
+                    else if (TryOpenBoxColorPanel(col, gridZ))
+                    {
                         _pipeColorTarget = null;
+                        openedPanel = true;
+                    }
+                    else
+                    {
+                        // 点到两个面板绑定的物件以外 → 退出面板，照常涂色
+                        _pipeColorTarget = null;
+                        _boxColorTarget = null;
+                    }
 
-                    if (openedPipe)
+                    if (openedPanel)
                     {
                         // 这一下不涂色、也不开笔（末尾统一 ev.Use() + Repaint()）
                     }
@@ -1054,6 +1180,15 @@ namespace CrowdMatch
                     _gateCurrent = _gateAnchor;
                     _lastStrokeError = null;
                 }
+                else if (_mode == Mode.AddBox)
+                {
+                    // 箱子的两个对角：按下格 + 当前格（矩形区域，松手即创建）
+                    _dragging = true;
+                    _rectActive = false;
+                    _boxAnchor = new Vector2Int(col, gridZ);
+                    _boxCurrent = _boxAnchor;
+                    _lastStrokeError = null;
+                }
                 else if (_mode == Mode.DeletePipe)
                 {
                     HandlePipeDeleteClick(col, gridZ);   // 单击，不进入拖动手势
@@ -1061,6 +1196,10 @@ namespace CrowdMatch
                 else if (_mode == Mode.DeleteGate)
                 {
                     HandleGateDeleteClick(col, gridZ);   // 单击，不进入拖动手势
+                }
+                else if (_mode == Mode.DeleteBox)
+                {
+                    HandleBoxDeleteClick(col, gridZ);    // 单击，不进入拖动手势
                 }
                 else
                 {
@@ -1094,6 +1233,10 @@ namespace CrowdMatch
                 else if (_mode == Mode.AddGate)
                 {
                     _gateCurrent = new Vector2Int(col, gridZ);   // 只记终点：预览/校验按「起点→终点」现算
+                }
+                else if (_mode == Mode.AddBox)
+                {
+                    _boxCurrent = new Vector2Int(col, gridZ);    // 只记对角：矩形由两个角现算
                 }
 
                 ev.Use();
@@ -1157,6 +1300,10 @@ namespace CrowdMatch
             else if (_mode == Mode.AddGate)
             {
                 FinishGateStroke();
+            }
+            else if (_mode == Mode.AddBox)
+            {
+                FinishBoxStroke();
             }
 
             Repaint();
@@ -2127,6 +2274,342 @@ namespace CrowdMatch
         }
 
         // ============================================================
+        // 箱子：添加 / 删除（矩形区域；箱内颜色走二级面板）
+        // ============================================================
+
+        /// <summary>待创建箱子区域的两个角归一化后的范围（列 / 行各从小到大）。</summary>
+        private void NormalizeBoxRect(out int c0, out int r0, out int c1, out int r1)
+        {
+            c0 = Mathf.Min(_boxAnchor.x, _boxCurrent.x);
+            c1 = Mathf.Max(_boxAnchor.x, _boxCurrent.x);
+            r0 = Mathf.Min(_boxAnchor.y, _boxCurrent.y);
+            r1 = Mathf.Max(_boxAnchor.y, _boxCurrent.y);
+        }
+
+        /// <summary>待创建箱子区域占据的格。还没拖出区域（两个角相同）时返回空集，免得预览停在上一笔上。</summary>
+        private HashSet<Vector2Int> CollectBoxStrokeCells()
+        {
+            var cells = new HashSet<Vector2Int>();
+            if (_boxAnchor == _boxCurrent)
+                return cells;
+
+            NormalizeBoxRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    cells.Add(new Vector2Int(c, r));
+            return cells;
+        }
+
+        /// <summary>
+        /// 待创建箱子的体检：① 区域完全在网格内；② **必须是 2×2**（画布只放开这一种，
+        /// 2×2 也正是 <see cref="BoxItem.ShouldUseWholePrefab"/> 有意义的形状）；
+        /// ③ 区域内不能有别的障碍（墙 / 管 / 箱 / 门 / 冰 / 木箱 / 升降台）——空与像素格都可以，
+        /// **像素会被箱子吃掉**（箱内颜色由 colorIds 提供，与 BoxCreator 的口径一致）。
+        /// </summary>
+        private bool TryValidateBoxStroke(HashSet<Vector2Int> region, out string error, out int blockedCells)
+        {
+            error = null;
+            blockedCells = 0;
+
+            NormalizeBoxRect(out int c0, out int r0, out int c1, out int r1);
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    if (!_group.IsInRange(c, r))
+                    {
+                        error = "区域越界：格 (" + c + ", " + r + ") 不在网格内。";
+                        return false;
+                    }
+
+            int w = c1 - c0 + 1;
+            int h = r1 - r0 + 1;
+            if (w != 2 || h != 2)
+            {
+                error = "画布只允许创建 2×2 箱子（当前 " + w + "×" + h + "）。";
+                return false;
+            }
+
+            if (region != null)
+            {
+                foreach (var cell in region)
+                    if (!IsPaintable(Classify(cell.x, cell.y, out _)))
+                        blockedCells++;
+            }
+
+            if (blockedCells > 0)
+            {
+                error = "区域内有 " + blockedCells + " 格已被其它障碍占用（墙 / 管 / 箱 / 门 / 冰 / 木箱 / 升降台）。";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>「添加箱子」松手：体检通过就直接建；不通过只记原因。单击一格不算「想建箱子」，不报错。</summary>
+        private void FinishBoxStroke()
+        {
+            var region = CollectBoxStrokeCells();
+            bool ok = TryValidateBoxStroke(region, out string reason, out _);
+
+            bool isClick = _boxAnchor == _boxCurrent;
+            _lastStrokeError = ok || isClick ? null : reason;
+
+            if (ok)
+                CreateBoxFromStroke();   // 内部会重建快照
+
+            Repaint();
+        }
+
+        /// <summary>
+        /// 「创建箱子」：口径与 <c>BoxCreator</c> 一致 —— 先清掉区域内的 Pixel（箱子区域应为空，
+        /// 开箱后的 Pixel 由 <see cref="BoxItem.colorIds"/> 提供），再按「本体 + 相邻 4 方向」算出容量、
+        /// 用当前笔刷色填满 colorIds 建箱。
+        /// </summary>
+        private void CreateBoxFromStroke()
+        {
+            if (_group == null)
+                return;
+
+            NormalizeBoxRect(out int c0, out int r0, out int c1, out int r1);
+            var region = CollectBoxStrokeCells();
+
+            int capacity = Mathf.Max(1, BoxItem.ComputeCapacity(_group, c0, r0, c1, r1));
+            int fill = _brush >= 0 ? _brush : 0;
+            var colorIds = new int[capacity];
+            for (int i = 0; i < capacity; i++)
+                colorIds[i] = fill;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("创建箱子");
+
+            // 箱子区域应为空：开箱后的像素由 colorIds 提供（与 BoxCreator.RemovePixelsInRegion 同口径）
+            int removed = 0;
+            foreach (var cell in region)
+            {
+                var item = _group.GetItem(cell.x, cell.y);
+                if (item == null)
+                    continue;
+                Undo.DestroyObjectImmediate(item.gameObject);
+                removed++;
+            }
+
+            var data = new LevelData.BoxData
+            {
+                colMin = c0,
+                rowMin = r0,
+                colMax = c1,
+                rowMax = r1,
+                capacity = capacity,
+                colorIds = colorIds,
+            };
+
+            var box = _group.SpawnBox(data, _config);
+            if (box == null)
+            {
+                Undo.CollapseUndoOperations(undoGroup);
+                return;   // SpawnBox 已经打过日志（pixelPrefab 为空等）
+            }
+
+            Undo.RegisterCreatedObjectUndo(box.gameObject, "创建箱子");
+            // 隐藏 Pixel 挂在 PixelGroup 下（不是箱子的子物体），撤销时得单独登记，否则会留一堆孤儿
+            if (box.hiddenPixels != null)
+            {
+                foreach (var p in box.hiddenPixels)
+                    if (p != null)
+                        Undo.RegisterCreatedObjectUndo(p.gameObject, "创建箱子");
+            }
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(box);
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _boxCurrent = _boxAnchor;   // 清掉区域预览
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已创建箱子：(" + c0 + ", " + r0 + ") ~ (" + c1 + ", " + r1 +
+                ")，容量 " + capacity + "（colorIds 全填 " + fill + "），吃掉区域 Pixel " + removed +
+                " 个。箱内颜色可点它开二级面板改。");
+        }
+
+        /// <summary>
+        /// 选中的箱子（正在改箱内颜色的那个）在画布上的高亮：淡黄打底 + 沿**箱子矩形外框**画 3px 黄线
+        /// （只画落在矩形边界上的那几条边）。用的是与选中管道同一套「选中」颜色。
+        /// </summary>
+        private static void DrawSelectedBoxHighlight(Rect rect, int col, int gridZ, BoxItem box)
+        {
+            const float thickness = 3f;
+            var line = new Color(1f, 0.85f, 0.2f);
+
+            EditorGUI.DrawRect(rect, new Color(1f, 0.85f, 0.2f, 0.28f));
+
+            if (col == box.colMin)
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, thickness, rect.height), line);
+            if (col == box.colMax)
+                EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), line);
+            if (gridZ == box.rowMin)
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, thickness), line);
+            if (gridZ == box.rowMax)
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), line);
+        }
+
+        /// <summary>某格是否属于「已高亮待删除」的那个箱子。</summary>
+        private bool IsCellOfPendingBox(int col, int gridZ)
+        {
+            if (_deletePendingBox == null)
+                return false;
+            return _boxCells.TryGetValue(new Vector2Int(col, gridZ), out var box) && box == _deletePendingBox;
+        }
+
+        /// <summary>
+        /// 「删除箱子」的单击：点到的箱子与已高亮的是同一个 → 真删；否则只把高亮切过去；
+        /// 点到没有箱子的格子 → 取消高亮。
+        /// </summary>
+        private void HandleBoxDeleteClick(int col, int gridZ)
+        {
+            if (!_boxCells.TryGetValue(new Vector2Int(col, gridZ), out var box) || box == null)
+            {
+                _deletePendingBox = null;
+                return;
+            }
+
+            if (box != _deletePendingBox)
+            {
+                _deletePendingBox = box;   // 第一次点：只高亮
+                return;
+            }
+
+            DeleteBox(box);
+        }
+
+        /// <summary>
+        /// 删掉一个箱子：连同它的**隐藏 Pixel** 一起销毁（隐藏 Pixel 挂在 PixelGroup 下、不是箱子的子物体，
+        /// 不显式删就会留下孤儿），并收起它的颜色面板。**不回填**创建时吃掉的区域 Pixel（与删除墙体 / 管道同口径）。
+        /// </summary>
+        private void DeleteBox(BoxItem box)
+        {
+            if (box == null || _group == null)
+                return;
+
+            string boxName = box.name;
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("删除箱子");
+
+            int hidden = 0;
+            if (box.hiddenPixels != null)
+            {
+                foreach (var p in box.hiddenPixels)
+                {
+                    if (p == null)
+                        continue;
+                    Undo.DestroyObjectImmediate(p.gameObject);
+                    hidden++;
+                }
+                box.hiddenPixels.Clear();
+            }
+
+            Undo.DestroyObjectImmediate(box.gameObject);
+
+            _group.RebuildGrid();
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            _deletePendingBox = null;
+            if (_boxColorTarget == box)
+                _boxColorTarget = null;
+            RefreshSnapshot();
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[像素颜色画布] 已删除箱子 " + boxName + "（连同 " + hidden +
+                " 个隐藏 Pixel；不回填区域 Pixel）。");
+        }
+
+        // ============================================================
+        // 箱子「内部颜色」二级面板（涂颜色模式下点箱子区域打开）
+        // ============================================================
+
+        /// <summary>
+        /// 涂颜色模式下点到**箱子区域内的格**：打开（或切换到）它的「箱内颜色」二级面板，而不是涂色
+        /// （箱子区域本来也是不可涂的障碍格）。返回 true = 已打开 / 已切换。
+        /// 打开时若没有可用颜色（选了橡皮 / 从没选过），自动落到 0 号色，面板一打开就能按 +。
+        /// </summary>
+        private bool TryOpenBoxColorPanel(int col, int gridZ)
+        {
+            if (!_boxCells.TryGetValue(new Vector2Int(col, gridZ), out var box) || box == null)
+                return false;
+
+            _boxColorTarget = box;
+            if (_brush < 0 && _palette.Length > 0)
+                _brush = 0;
+
+            Repaint();
+            return true;
+        }
+
+        /// <summary>箱子「内部颜色」二级面板：只列出箱内像素的颜色（点一下 = 用当前选中色替换），最右 − / +。</summary>
+        private void DrawBoxColorPanel()
+        {
+            if (_boxColorTarget == null)
+                return;
+
+            bool close = false;
+            var box = _boxColorTarget;
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("箱子 " + box.name + " 的内部颜色（" + (box.colorIds != null ? box.colorIds.Length : 0) +
+                " 个 = 容量；选色用上面的调色板）", EditorStyles.boldLabel);
+            if (GUILayout.Button("关闭", GUILayout.Width(52f)))
+                close = true;
+            EditorGUILayout.EndHorizontal();
+
+            DrawBoxColorRow(box);
+
+            EditorGUILayout.EndVertical();
+
+            if (close)
+            {
+                _boxColorTarget = null;
+                Repaint();
+            }
+        }
+
+        /// <summary>
+        /// 箱子面板的颜色行：箱内颜色顺次排列（点一下 = 用当前选中色替换），下面 − / + / 清空。
+        /// **清空** = colorIds 变空（容量 0）→ 箱子成为「无内容」：开箱时直接清障碍消失（运行时支持这种箱子）。
+        /// </summary>
+        private void DrawBoxColorRow(BoxItem box)
+        {
+            var working = new List<int>(box.colorIds ?? new int[0]);   // 工作副本
+            DrawColorListBlock(working, () => WriteBoxColors(box, working.ToArray(), "箱内颜色"));
+        }
+
+        /// <summary>
+        /// 把箱内颜色写回：<c>colorIds</c> 是权威数据（容量 = 它的数量），导出 JSON、容器规划、校验读的都是它。
+        ///
+        /// **不主动同步隐藏 Pixel**：那是 <see cref="BoxItem.BuildVisual"/> 在运行时 / 导入关卡时按 colorIds
+        /// 生成的（编辑器里手工摆的箱子本来就没有隐藏 Pixel）。改了颜色后场景里旧的那批会过时，但没有任何
+        /// 编辑器工具读它们（导出读 colorIds），下次进游戏也会由 SpawnBox 重新生成，所以无害。
+        /// </summary>
+        private void WriteBoxColors(BoxItem box, int[] colorIds, string op)
+        {
+            Undo.RecordObject(box, op);
+            box.colorIds = colorIds;
+            box.capacity = colorIds.Length;
+            box.UpdateCountText();   // 箱子头顶那个数字就是容量，改了数量要当场刷新
+            EditorUtility.SetDirty(box);
+
+            Repaint();
+            SceneView.RepaintAll();
+        }
+
+        // ============================================================
         // 管道「波次颜色」二级界面（涂颜色模式下点管道格打开）
         // ============================================================
 
@@ -2171,7 +2654,8 @@ namespace CrowdMatch
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("管道 " + pipe.name + " 的波次颜色（从左到右 = 释放顺序；选色用上面的调色板）",
+            EditorGUILayout.LabelField("管道 " + pipe.name + " 的波次颜色（" +
+                (pipe.colors != null ? pipe.colors.Count : 0) + " 个，从左到右 = 释放顺序；选色用上面的调色板）",
                 EditorStyles.boldLabel);
             if (GUILayout.Button("关闭", GUILayout.Width(52f)))
                 close = true;
@@ -2188,97 +2672,137 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>二级界面下方：波次颜色顺次排列（点一下 = 用当前选中色替换）+ 最右的 − / +。</summary>
-        private void DrawPipeColorRow(PipeItem pipe)
+        /// <summary>
+        /// 「内部颜色」面板共用的颜色块（管道波次 / 箱内内容都用它）：
+        /// 色块逐行排，**第一排与右侧的 − / + / 清空同排**（第一排因此少排几个，给按钮留位置），
+        /// 之后的排每行最多 <see cref="MaxColorsPerRow"/> 个（窗口更窄时按实际宽度更早换行）。
+        /// 行数先算好、一次性占位再画 —— 边画边撑高会让下面的控件命中矩形当场换人。
+        ///
+        /// <paramref name="colors"/> 是**工作副本**：点色块 = 就地替换成当前选中色，− / + / 清空改的也是它；
+        /// 任何改动之后调 <paramref name="apply"/> 落库 —— 落库时才 <c>Undo.RecordObject</c>，
+        /// 所以撤销拿到的是**改之前**的状态（就地改真身会让撤销变成空操作）。
+        /// </summary>
+        private void DrawColorListBlock(List<int> colors, System.Action apply)
         {
             if (_palette.Length == 0)
             {
-                EditorGUILayout.LabelField("ColorConfig 里没有颜色，无法编辑波次。");
+                EditorGUILayout.LabelField("ColorConfig 里没有颜色，无法编辑。");
                 return;
             }
-
-            if (pipe.colors == null)
-                pipe.colors = new List<int>();
 
             bool playing = Application.isPlaying;
             bool hasBrush = _brush >= 0;   // 橡皮选中时没有「要填的颜色」
 
+            float stride = SwatchSize + SwatchPad;
+            float usable = Mathf.Max(SwatchSize, position.width - 16f);
+
+            // 第一排要给右侧那三个按钮留位置（它们**永远和第一排同排**），所以排得比后面几排少
+            const float ButtonsWidth = 108f;
+            int firstRow = Mathf.Clamp(Mathf.FloorToInt((usable - ButtonsWidth) / stride), 1, MaxColorsPerRow);
+            int restPerRow = Mathf.Clamp(Mathf.FloorToInt(usable / stride), 1, MaxColorsPerRow);
+
+            int firstCount = Mathf.Min(colors.Count, firstRow);
+            int rest = colors.Count - firstCount;
+            int extraRows = rest > 0 ? Mathf.CeilToInt(rest / (float)restPerRow) : 0;
+
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("波次", GUILayout.Width(34f));
 
-            if (pipe.colors.Count == 0)
-                GUILayout.Label("（空：点 + 追加第一个）", EditorStyles.miniLabel);
-
-            for (int i = 0; i < pipe.colors.Count; i++)
+            if (colors.Count == 0)
             {
-                var rect = GUILayoutUtility.GetRect(SwatchSize, SwatchSize,
-                    GUILayout.Width(SwatchSize), GUILayout.Height(SwatchSize));
-
-                int colorId = Mathf.Clamp(pipe.colors[i], 0, _palette.Length - 1);
-                DrawSwatch(rect, colorId, false);   // 不画选中黄框：这里的色块是「波次内容」，不是笔刷
-
-                if (playing || !hasBrush)
-                    continue;
-
-                Event ev = Event.current;
-                if (ev.type == EventType.MouseDown && rect.Contains(ev.mousePosition))
-                {
-                    if (pipe.colors[i] != _brush)
-                    {
-                        Undo.RecordObject(pipe, "管道波次颜色");
-                        pipe.colors[i] = _brush;   // 替换为当前选中色
-                        EditorUtility.SetDirty(pipe);
-                    }
-                    ev.Use();
-                    Repaint();
-                }
+                GUILayout.Label("（空：点 + 追加第一个）", EditorStyles.miniLabel);
+            }
+            else
+            {
+                float w = firstCount * stride;
+                Rect row0 = GUILayoutUtility.GetRect(w, stride, GUILayout.Width(w), GUILayout.Height(stride));
+                for (int i = 0; i < firstCount; i++)
+                    HandleColorSwatch(new Rect(row0.x + i * stride, row0.y, SwatchSize, SwatchSize),
+                        colors, i, playing, hasBrush, apply);
             }
 
             GUILayout.FlexibleSpace();
 
-            using (new EditorGUI.DisabledScope(playing || pipe.colors.Count == 0))
+            using (new EditorGUI.DisabledScope(playing || colors.Count == 0))
             {
                 if (GUILayout.Button("−", GUILayout.Width(24f)))
-                    RemoveLastPipeColor(pipe);
+                {
+                    colors.RemoveAt(colors.Count - 1);
+                    apply();
+                }
             }
 
             using (new EditorGUI.DisabledScope(playing || !hasBrush))
             {
                 if (GUILayout.Button("+", GUILayout.Width(24f)))
-                    AppendPipeColor(pipe);
+                {
+                    colors.Add(_brush);
+                    apply();
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(playing || colors.Count == 0))
+            {
+                if (GUILayout.Button("清空", GUILayout.Width(44f)))
+                {
+                    colors.Clear();
+                    apply();
+                }
             }
 
             EditorGUILayout.EndHorizontal();
+
+            // 第二排起：整块一次性占位（换行的行不占固定宽度，所以用 ExpandWidth）
+            if (extraRows > 0)
+            {
+                Rect restArea = GUILayoutUtility.GetRect(0f, extraRows * stride, GUILayout.ExpandWidth(true));
+                for (int j = 0; j < rest; j++)
+                {
+                    var rect = new Rect(
+                        restArea.x + (j % restPerRow) * stride,
+                        restArea.y + (j / restPerRow) * stride,
+                        SwatchSize, SwatchSize);
+                    HandleColorSwatch(rect, colors, firstCount + j, playing, hasBrush, apply);
+                }
+            }
         }
 
-        /// <summary>在波次末端追加一个当前选中色。</summary>
-        private void AppendPipeColor(PipeItem pipe)
+        /// <summary>颜色块里一格色块：画出来 + 点中就用当前选中色替换（就地改工作副本，再落库）。</summary>
+        private void HandleColorSwatch(Rect rect, List<int> colors, int index, bool playing, bool hasBrush, System.Action apply)
         {
-            if (pipe == null || _brush < 0)
+            DrawSwatch(rect, Mathf.Clamp(colors[index], 0, _palette.Length - 1), false);
+            // 不画选中黄框：这里的色块是「内容」，不是笔刷
+
+            if (playing || !hasBrush)
                 return;
 
-            Undo.RecordObject(pipe, "管道波次颜色");
+            Event ev = Event.current;
+            if (ev.type != EventType.MouseDown || !rect.Contains(ev.mousePosition))
+                return;
+
+            if (colors[index] != _brush)
+            {
+                colors[index] = _brush;   // 替换为当前选中色
+                apply();
+            }
+            ev.Use();
+            Repaint();
+        }
+
+        /// <summary>管道面板的颜色行：波次颜色顺次排列（点一下 = 用当前选中色替换），下面 − / + / 清空。</summary>
+        private void DrawPipeColorRow(PipeItem pipe)
+        {
             if (pipe.colors == null)
                 pipe.colors = new List<int>();
-            pipe.colors.Add(_brush);
-            EditorUtility.SetDirty(pipe);
 
-            Repaint();
-            SceneView.RepaintAll();
-        }
-
-        /// <summary>删掉波次末端的那个颜色。</summary>
-        private void RemoveLastPipeColor(PipeItem pipe)
-        {
-            if (pipe == null || pipe.colors == null || pipe.colors.Count == 0)
-                return;
-
-            Undo.RecordObject(pipe, "管道波次颜色");
-            pipe.colors.RemoveAt(pipe.colors.Count - 1);
-            EditorUtility.SetDirty(pipe);
-
-            Repaint();
-            SceneView.RepaintAll();
+            var working = new List<int>(pipe.colors);   // 工作副本：改动只落在它身上
+            DrawColorListBlock(working, () =>
+            {
+                Undo.RecordObject(pipe, "管道波次颜色");   // 此刻 pipe.colors 还是旧值 → 撤销能回去
+                pipe.colors = working;                    // 换新实例：就地改真身会让撤销变空操作
+                EditorUtility.SetDirty(pipe);
+                Repaint();
+                SceneView.RepaintAll();
+            });
         }
 
         // ============================================================
