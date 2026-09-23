@@ -12,7 +12,7 @@ namespace CrowdMatch
     /// </summary>
     public static class ElevatorItemPrefabCreator
     {
-        [MenuItem("CrowdMatch/生成升降台预制体")]
+        [MenuItem("CrowdMatch/更多工具/生成升降台预制体", false, MenuPriority.More + MenuPriority.Seg2)]
         public static void CreateElevatorPrefab()
         {
             string dir = AssetDatabase.IsValidFolder("Assets/Prefabs") ? "Assets/Prefabs" : "Assets";
@@ -87,7 +87,7 @@ namespace CrowdMatch
 
             Selection.activeObject = prefab;
             Debug.Log("[ElevatorItemPrefabCreator] 已生成升降台预制体：" + path +
-                "。请把它拖到 PixelGroup 的 elevatorPrefab 字段（或通过菜单「用选中 Pixel 创建升降台」时自动使用）。", prefab);
+                "。请把它拖到 PixelGroup 的 elevatorPrefab 字段（或通过菜单「创建（场景视图 · 选中 Pixel）▸ 升降台」时自动使用）。", prefab);
         }
 
         /// <summary>按 unitSize=1 的默认值摆好各视觉子节点的 y 位置与 y 尺寸；运行时 Configure 不再重算 y。</summary>
@@ -200,7 +200,7 @@ namespace CrowdMatch
         }
 
         /// <summary>从场景里的 Block_BG 拷贝外观（纹理/颜色/裁剪阈值），生成一个配好的 GroundHole 材质球资产。</summary>
-        [MenuItem("CrowdMatch/生成挖洞地面材质球（从 Block_BG 拷贝外观）")]
+        [MenuItem("CrowdMatch/更多工具/生成挖洞地面材质球（从 Block_BG 拷贝外观）", false, MenuPriority.More + MenuPriority.Seg2 + 1)]
         public static void CreateGroundHoleMaterialFromBG()
         {
             Renderer bg = null;

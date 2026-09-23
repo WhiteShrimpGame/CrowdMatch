@@ -26,7 +26,7 @@ namespace CrowdMatch
     ///   交界两侧各画各的（各自完整描框，忽略叠加）。轨道格本身仍是普通颜色格 —— 那里确实有像素（开局阻挡）。
     /// · **倍乘门可加可删**：添加门 = 按下起点、拖到终点（必须**轴对齐**、≥2 格），松手即创建，**倍率固定 x2**
     ///   （画布不给改倍率的入口；要改去 GateItem 的 Inspector，那边改完会重建显示）。
-    ///   门格上的 Pixel 会被**清掉并记进 <c>GateItem.clearedPixels</c> 快照**（与「用选中 Pixel 创建倍乘门」同口径），
+    ///   门格上的 Pixel 会被**清掉并记进 <c>GateItem.clearedPixels</c> 快照**（与「创建 ▸ 倍乘门」同口径），
     ///   删除门时按快照**还原 Pixel** —— 这点与墙体 / 管道相反（那两者删除不回填）。
     /// · **箱子可加可删**：添加箱子 = 拖出 **2×2** 的矩形区域（画布只放开这一种；必须完全在网格内、且不含别的障碍），
     ///   松手即创建；创建时**吃掉区域内的 Pixel**（箱内像素改由 <c>colorIds</c> 提供，与 BoxCreator 同口径），
@@ -338,7 +338,7 @@ namespace CrowdMatch
         // 入口 / 生命周期
         // ============================================================
 
-        [MenuItem("CrowdMatch/像素颜色画布")]
+        [MenuItem("CrowdMatch/像素颜色画布", false, MenuPriority.Canvas)]
         private static void OpenWindow()
         {
             OpenFor(null);
@@ -2005,7 +2005,7 @@ namespace CrowdMatch
         /// <summary>
         /// 是否创建为闭环墙体：**只要求拖过的首尾格相邻**（曼哈顿距离 ≤ 1）。
         /// 距离 1 = 首尾相邻，闭合段正好补上那一格；距离 0 = 又拖回了起点格（线本身已经绕回来了）。
-        /// 其它情况一律建开放墙体 —— 与「用选中 Pixel 创建墙体」同口径，之后可在 Inspector 里手动闭环。
+        /// 其它情况一律建开放墙体 —— 与「创建 ▸ 墙体」同口径，之后可在 Inspector 里手动闭环。
         /// </summary>
         private bool ShouldCloseStroke()
         {

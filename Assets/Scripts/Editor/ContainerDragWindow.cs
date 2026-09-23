@@ -226,7 +226,7 @@ namespace CrowdMatch
         // 入口 / 生命周期
         // ============================================================
 
-        [MenuItem("CrowdMatch/容器拖移画布")]
+        [MenuItem("CrowdMatch/容器拖移画布", false, MenuPriority.Canvas + 1)]
         private static void OpenWindow()
         {
             OpenFor(null);

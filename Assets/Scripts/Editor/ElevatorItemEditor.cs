@@ -100,10 +100,10 @@ namespace CrowdMatch
     /// </summary>
     public static class ElevatorCreator
     {
-        [MenuItem("CrowdMatch/用选中 Pixel 创建升降台（左上、右下）", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/升降台（左上、右下）", true, MenuPriority.Create + MenuPriority.Seg1 + 3)]
         private static bool ValidateCreateElevatorFromSelection() => CollectSelectedPixels().Count == 2;
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建升降台（左上、右下）")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/升降台（左上、右下）", false, MenuPriority.Create + MenuPriority.Seg1 + 3)]
         private static void CreateElevatorFromSelection()
         {
             var pixels = CollectSelectedPixels();

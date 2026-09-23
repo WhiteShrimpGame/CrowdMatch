@@ -154,10 +154,10 @@ namespace CrowdMatch
     /// </summary>
     public static class CrateCreator
     {
-        [MenuItem("CrowdMatch/用选中 Pixel 创建木箱（左上、右下）", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/木箱（左上、右下）", true, MenuPriority.Create + MenuPriority.Seg2 + 1)]
         private static bool ValidateCreateCrateFromSelection() => CollectSelectedPixels().Count == 2;
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建木箱（左上、右下）")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/木箱（左上、右下）", false, MenuPriority.Create + MenuPriority.Seg2 + 1)]
         private static void CreateCrateFromSelection()
         {
             var pixels = CollectSelectedPixels();
