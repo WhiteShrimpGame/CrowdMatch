@@ -48,16 +48,17 @@ namespace CrowdMatch
     /// 整体拉回旧的对齐位置。现在基准随绘制就地更新，开窗 / 刷新（<see cref="ResetPads"/> + 滚到最下方
     /// <see cref="ScrollToFront"/>）之后对齐的就是**刷新后的那个画面**。
     ///
-    /// ## 绳组（显示 / 连绳 / 断绳）
+    /// ## 问号 / 绳组（工具行）
     /// 绳组的既有口径不变：<see cref="ContainerItem.ropeGroupId"/>（0 = 未连），同 id 的车按列升序串成链，
     /// 相邻两车之间一条绳。画布只是多了第三种编辑入口，规则与 Inspector 上的「标记选中车为连接」一致
     /// （≥2 辆、每列恰好 1 辆、列号连续、未连、端点已配、与已有绳组不交叉），并且同样顺手关掉洗牌。
     ///
-    /// 工具行（<see cref="CanvasTool"/>）三选一，与拖动互斥：
+    /// 工具行（<see cref="CanvasTool"/>）四选一，与拖动互斥：
     ///
     /// | 工具 | 手势 |
     /// |---|---|
     /// | 拖动 | 按住有车的格拖到别处松手（原有行为）；**带绳组的车跨列**会先问一次「换列必须断绳」 |
+    /// | 问号 | 点一辆车切换 <see cref="ContainerItem.isQuestion"/>（再点取消）。动作与 Inspector 的「标记为问号车」同口径：`ApplyMaterial` + `RefreshQuestionObject` + 记 Undo 时连 Renderer 与 questionObject 一起记 |
     /// | 连绳 | 逐格点击切换选中（再点取消；**同列只留 1 辆**，点该列第二辆就把原来那辆换掉），点「连成绳组」提交；不满足规则时按钮禁用并在提示行写明原因 |
     /// | 断绳 | **两步**：点一下把**整个绳组**高亮（不是只亮被点的那一格），点第二下**同一辆**才断（整组取消，与 Inspector 的「取消选中车的连接」同口径）；点空格 / 没连的车取消待确认 |
     ///
@@ -69,6 +70,9 @@ namespace CrowdMatch
     /// （一次「生成 / 导入 Containers」会连发很多条事件），到下一次 <see cref="SyncWithSceneIfDirty"/> 统一
     /// 重绑 + 重建占用表 + 按锚点把最前排钉住。拖动中与 Play 中不刷。
     /// 注意它只认**层级变化**：在 Inspector 里改 ropeGroupId / 颜色不会触发，那种情况仍按「刷新快照」按钮。
+    ///
+    /// 问号那一格的**显示**照抄像素画布：左半本色、右半黑，编号写成「14?」（问号格的字一律白色 ——
+    /// 字压在明暗两半上，跟亮度取色必然有一半看不见）。
     ///
     /// **显示**与工具无关、始终画：每个成员格 2px 组色描边，相邻两列的车心之间一条同色 2px 直线
     /// （穿过格体，所以两组交叉一眼可见）。组色按 id 用黄金比取 hue（<see cref="RopeColor"/>），
@@ -179,14 +183,15 @@ namespace CrowdMatch
 
         // ===== 工具与绳组 =====
 
-        /// <summary>画布当前工具；三者互斥，见类文档「绳组」一节。（不叫 Tool：那会遮蔽 <c>UnityEditor.Tool</c>）</summary>
-        private enum CanvasTool { Move, Rope, Unrope }
+        /// <summary>画布当前工具；四者互斥，见类文档「绳组」「问号」两节。（不叫 Tool：那会遮蔽 <c>UnityEditor.Tool</c>）</summary>
+        private enum CanvasTool { Move, Question, Rope, Unrope }
 
         private CanvasTool _tool = CanvasTool.Move;
 
         private static readonly GUIContent[] ToolContents =
         {
             new GUIContent("拖动", "按住有车的格拖到别处松手 → 车挪过去（原有行为）"),
+            new GUIContent("问号", "点一辆车切换问号标记（再点取消）"),
             new GUIContent("连绳", "逐格点击切换选中（再点取消），点「连成绳组」提交"),
             new GUIContent("断绳", "点一下把整个绳组高亮，再点同一辆才断 → 整组取消"),
         };
@@ -437,7 +442,7 @@ namespace CrowdMatch
             GUILayout.Label("工具", GUILayout.Width(90f));
             using (new EditorGUI.DisabledScope(playing))
             {
-                int picked = GUILayout.Toolbar((int)_tool, ToolContents, GUILayout.Width(228f));
+                int picked = GUILayout.Toolbar((int)_tool, ToolContents, GUILayout.Width(300f));
                 if (picked != (int)_tool)
                     SwitchTool((CanvasTool)picked);
             }
@@ -486,6 +491,8 @@ namespace CrowdMatch
                 "移动不止 1 格；目标列放不下时自动加行（改 rows）。画布只画到最后一个有车的排 + 1 排。\n" +
                 "车身颜色 / 容量 / 问号 / ropeGroupId 都跟着车走；带绳组的车「跨列」会先弹窗问「换列必须断绳」，\n" +
                 "确认后整个绳组断开再挪车（同一步 Undo）；同列内换行不影响绳连，不弹窗。\n" +
+                "【问号】点一辆车标记为问号车、再点取消（与 Inspector 的「标记为问号车」同一套动作）；\n" +
+                "问号格显示成「左半本色 + 右半黑 + 编号带 ?」，与像素画布一致。\n" +
                 "【连绳】逐格点击切换选中（再点取消；同一列只留 1 辆，点第二辆会把原来那辆换掉），点「连成绳组」提交：\n" +
                 "≥2 辆、每列恰好 1 辆、列号连续、均未连接、端点已配、与已有绳组不交叉，并且会顺手关掉洗牌。\n" +
                 "【断绳】点一下把整个绳组高亮，再点回同一辆才断（整组取消）；点空格 / 没连的车取消待确认。\n" +
@@ -719,15 +726,35 @@ namespace CrowdMatch
                 else
                 {
                     Color fill = ColorOf(item.colorId);
-                    EditorGUI.DrawRect(rect, fill);
+
+                    if (item.isQuestion)
+                    {
+                        // 问号车：左半本色、右半黑 —— 与像素画布同一套显示：一眼看出被标了问号，又保住颜色信息
+                        float half = Mathf.Floor(rect.width * 0.5f);
+                        EditorGUI.DrawRect(new Rect(rect.x, rect.y, half, rect.height), fill);
+                        EditorGUI.DrawRect(new Rect(rect.x + half, rect.y, rect.width - half, rect.height), Color.black);
+                    }
+                    else
+                    {
+                        EditorGUI.DrawRect(rect, fill);
+                    }
 
                     // 只写颜色 id（容量在本工作流里恒为 3，不必占地方；要核对容量就在状态行里悬停看）。
                     // 扁条的纵向空间只有宽的 1/3：字高跟着格高走，矮到放不下就不写字（免得糊成一团）。
                     if (cellH >= 9 && cellW >= 12)
                     {
                         var style = NumStyle(Mathf.Clamp(Mathf.Min(cellW / 3, cellH - 2), 7, 14));
-                        style.normal.textColor = Luminance(fill) > 0.55f ? Color.black : Color.white;
-                        EditorGUI.LabelField(rect, item.colorId.ToString(), style);
+                        if (item.isQuestion)
+                        {
+                            // 字压在「本色 + 黑」两半上，跟着亮度取色必然有一半看不见 —— 统一白字（同像素画布）
+                            style.normal.textColor = Color.white;
+                            EditorGUI.LabelField(rect, item.colorId + "?", style);
+                        }
+                        else
+                        {
+                            style.normal.textColor = Luminance(fill) > 0.55f ? Color.black : Color.white;
+                            EditorGUI.LabelField(rect, item.colorId.ToString(), style);
+                        }
                     }
                 }
 
@@ -838,9 +865,11 @@ namespace CrowdMatch
             {
                 text = _tool == CanvasTool.Move
                     ? "按住有车的格子拖到别处松手即可移动；松手在画布外 = 取消"
-                    : _tool == CanvasTool.Rope
-                        ? "连绳：点选相邻若干列各 1 辆车（再点取消，同列只留 1 辆），然后点「连成绳组」"
-                        : "断绳：点一下把整个绳组高亮，再点同一辆才断（整组取消）";
+                    : _tool == CanvasTool.Question
+                        ? "问号：点一下标记为问号车，再点取消（左半本色、右半黑，编号带 ?）"
+                        : _tool == CanvasTool.Rope
+                            ? "连绳：点选相邻若干列各 1 辆车（再点取消，同列只留 1 辆），然后点「连成绳组」"
+                            : "断绳：点一下把整个绳组高亮，再点同一辆才断（整组取消）";
             }
             else
             {
@@ -1098,6 +1127,8 @@ namespace CrowdMatch
             {
                 if (_tool == CanvasTool.Rope)
                     text = "绳组：" + _ropeReason;
+                else if (_tool == CanvasTool.Question)
+                    text = "问号：点一辆车标记为问号，再点取消；左半本色、右半黑，编号带 ?（与像素画布同一套显示）";
                 else if (_tool == CanvasTool.Unrope)
                     text = _unropeTargetId == 0
                         ? "断绳：点一下把整个绳组高亮，再点同一辆才断"
@@ -1143,9 +1174,11 @@ namespace CrowdMatch
 
             if (ev.type == EventType.MouseDown && rect.Contains(ev.mousePosition))
             {
-                // 三个工具的动作都在按下时发生（连绳 / 断绳没有拖动手势）
+                // 四个工具的动作都在按下时发生（问号 / 连绳 / 断绳没有拖动手势）
                 if (_tool == CanvasTool.Move)
                     BeginDrag(col, row);
+                else if (_tool == CanvasTool.Question)
+                    ToggleQuestion(col, row);
                 else if (_tool == CanvasTool.Rope)
                     ToggleRopePick(col, row);
                 else
@@ -1170,6 +1203,48 @@ namespace CrowdMatch
             ClearRopeInteraction();
             if (_tool != CanvasTool.Move && _group != null)
                 _group.RebuildGrid();   // 场景可能在窗口开着时被改过
+            Repaint();
+        }
+
+        /// <summary>
+        /// 问号模式：点一辆车切换它的问号标记（再点取消）。空格忽略。
+        ///
+        /// 动作与 Inspector 上的「标记为问号车 / 取消问号标记」完全一致：问号的视觉来自 questionMaterial 与车身上那个
+        /// 问号物体，所以记 Undo 时必须**连 Renderer 和 questionObject 一起记**，否则撤销会只回滚 flag、留下错材质。
+        /// </summary>
+        private void ToggleQuestion(int col, int row)
+        {
+            var item = _group.GetItem(col, row);
+            if (item == null)
+                return;   // 空格：没有车可标
+
+            bool question = !item.isQuestion;
+            string undoName = question ? "标记问号车" : "取消问号标记";
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+
+            Undo.RecordObject(item, undoName);
+            if (item.materialReplacements != null)
+            {
+                foreach (var rep in item.materialReplacements)
+                {
+                    if (rep != null && rep.renderer != null)
+                        Undo.RecordObject(rep.renderer, undoName);
+                }
+            }
+            if (item.questionObject != null)
+                Undo.RecordObject(item.questionObject, undoName);
+
+            item.isQuestion = question;
+            item.ApplyMaterial(_config);
+            item.RefreshQuestionObject();
+            EditorUtility.SetDirty(item);
+
+            Undo.CollapseUndoOperations(undoGroup);
+
+            SceneView.RepaintAll();
             Repaint();
         }
 
