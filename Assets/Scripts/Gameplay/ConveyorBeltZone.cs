@@ -302,7 +302,7 @@ namespace CrowdMatch
             // 关键事件点：有小人进入传送带 → 尝试失败判定
             var gc = GameController.Instance;
             if (gc != null)
-                gc.TryCheckFail();
+                gc.TryCheckFail(GameController.FailCheckpoint.SlotEntered);
         }
 
         /// <summary>
@@ -578,6 +578,23 @@ namespace CrowdMatch
                 belt.ClearSlot(i);
                 Destroy(pixel.gameObject);
             }
+        }
+
+        /// <summary>
+        /// 网格内像素已全部被点走：传送带开始逐渐加速到自己的上限（幂等）。
+        /// 触发点在「点击移出」之后，此时带上的存量还在绕圈等匹配，加速纯粹是为了收尾快一些。
+        /// </summary>
+        public void NotifyGridEmptied()
+        {
+            if (belt != null)
+                belt.BeginClearedSpeedUp();
+        }
+
+        /// <summary>回到常规速度（进入下一关 / 重载关卡时调用）。</summary>
+        public void ResetSpeed()
+        {
+            if (belt != null)
+                belt.ResetSpeed();
         }
 
         /// <summary>

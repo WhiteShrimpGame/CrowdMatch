@@ -144,7 +144,7 @@ MeshFilter:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2988127376108186560}
-  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  m_Mesh: {fileID: -3452759349741739411, guid: 0fa1524c9d88dea4d86fea8d5aa40741, type: 3}
 --- !u!23 &7176048730814000858
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -165,7 +165,8 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 2df8e6ee5f6f6c349a427e0b7eedd752, type: 2}
+  - {fileID: 2100000, guid: 6065745e758d2a844808b744334722ba, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -213,10 +214,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   colorId: 0
+  isQuestion: 0
+  questionObject: {fileID: 0}
   capacity: 1
   capacityText: {fileID: 5768384865316759867}
   gridX: 0
   gridZ: 0
+  ropeGroupId: 0
+  ropeAnchorLeft: {fileID: 0}
+  ropeAnchorRight: {fileID: 0}
+  frontAxle: {fileID: 0}
+  ropeExitAxle: {fileID: 0}
+  rearAxle: {fileID: 0}
+  reverseScaleAxle: {fileID: 0}
+  rollAxle: {fileID: 0}
+  elasticScaleAxle: {fileID: 0}
+  trailParent: {fileID: 0}
+  lidTransform: {fileID: 0}
+  posList: []
+  boardJumpPower: 0.6
+  boardJumpCount: 1
+  boardJumpDuration: 0.35
+  boardElasticTargetScale: {x: 1.15, y: 0.85, z: 1.15}
+  boardElasticScaleDuration: 0.1
+  boardElasticRecoverDuration: 0.15
+  refillRollMaxAngle: 10
+  refillRollOutDuration: 0.3
+  refillRollRecoverDuration: 0.4
+  materialReplacements: []
 --- !u!1 &5689616838624277948
 GameObject:
   m_ObjectHideFlags: 0

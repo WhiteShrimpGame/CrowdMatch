@@ -352,7 +352,7 @@ t=0.3  本体内 #0/#1 原地出现 → 开始站起；箱子同时 DisappearWit
 
 ### 11.1 选中两个 Pixel 创建箱子
 
-菜单 `CrowdMatch/创建箱子（选中左上、右下两个 Pixel）`：
+菜单 `CrowdMatch ▸ 创建（场景视图 · 选中 Pixel） ▸ 箱子（左上、右下）`：
 
 1. 从 `Selection` 中取**恰好 2 个** `PixelItem`（不足/多余则弹窗提示）。
 2. 取两者 `gridX/gridZ` 的 min/max 得到 `colMin/rowMin/colMax/rowMax`（顺序无关）。

@@ -5,13 +5,13 @@ using UnityEditor;
 namespace CrowdMatch
 {
     /// <summary>
-    /// 菜单栏「CrowdMatch」下的补 Pixel 工具（均支持 Undo，仅非运行模式可用，颜色取共享的填充颜色 ID）：
-    /// 「用 Pixel 填充全部空格」直接生效；「用 Pixel 填充矩形范围空格」弹窗输入矩形对角坐标。
+    /// 菜单「CrowdMatch ▸ Pixel 工具」下的补 Pixel 工具（均支持 Undo，仅非运行模式可用，颜色取共享的填充颜色 ID）：
+    /// 「填充全部空格」直接生效；「填充矩形范围空格」弹窗输入矩形对角坐标。
     /// 两者都只填空格（不含墙 / 管道 / 未开箱的箱子），范围内已有 Pixel 不受影响。
     /// </summary>
     public static class PixelFillMenu
     {
-        [MenuItem("CrowdMatch/用 Pixel 填充全部空格")]
+        [MenuItem("CrowdMatch/Pixel 工具/填充全部空格", false, MenuPriority.Pixel + MenuPriority.Seg1)]
         private static void FillAllEmptyCells()
         {
             var group = ResolveGroup();
@@ -28,7 +28,7 @@ namespace CrowdMatch
             GridFillUtility.FillEmptyCells(group, AllCells(group), GridFillUtility.FillColorId, "填充全部空格");
         }
 
-        [MenuItem("CrowdMatch/用 Pixel 填充矩形范围空格")]
+        [MenuItem("CrowdMatch/Pixel 工具/填充矩形范围空格", false, MenuPriority.Pixel + MenuPriority.Seg1 + 1)]
         private static void FillRectEmptyCells()
         {
             var group = ResolveGroup();

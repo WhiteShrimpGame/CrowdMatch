@@ -16,7 +16,7 @@ namespace CrowdMatch
         [Tooltip("圆片直径（世界单位）")]
         public float diameter = 1.2f;
 
-        [MenuItem("CrowdMatch/生成圆片 Mesh...")]
+        [MenuItem("CrowdMatch/更多工具/生成圆片 Mesh...", false, MenuPriority.More + MenuPriority.Seg2 + 2)]
         private static void CreateWizard()
         {
             DisplayWizard<DiscMeshWizard>("生成圆片 Mesh", "创建");

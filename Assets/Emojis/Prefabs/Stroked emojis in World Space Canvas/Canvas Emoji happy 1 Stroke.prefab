@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 2329794810570329066}
   - component: {fileID: 5513396167938096479}
   - component: {fileID: 8642117379944069748}
-  m_Layer: 5
+  m_Layer: 0
   m_Name: Canvas Emoji happy 1 Stroke
   m_TagString: Untagged
   m_Icon: {fileID: 0}

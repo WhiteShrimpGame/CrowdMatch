@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b067afeb558c8534a898d7e6cccdc17c, type: 3}
+  m_Name: TestBtnConfig
+  m_EditorClassIdentifier: 
+  items:
+  - btnName: "\u4E0A\u4E00\u5173"
+    cmdKey: PreLevel
+  - btnName: "\u76F4\u63A5\u8FC7\u5173"
+    cmdKey: WinCurrent
+  - btnName: "\u76F4\u63A5\u5931\u8D25"
+    cmdKey: ShowFailPanel
+  - btnName: "\u4E0B\u4E00\u5173"
+    cmdKey: GameWinReload
+  - btnName: "+1\u5929"
+    cmdKey: AddDay
+  - btnName: +1H
+    cmdKey: AddHour
+  - btnName: "\u91D1\u5E01+100"
+    cmdKey: AddGold100
+  - btnName: "\u65E0\u9650\u4F53\u529B+10m"
+    cmdKey: InfiniteStamina
+  - btnName: "\u6E05\u9664\u6570\u636E"
+    cmdKey: ClearAllData

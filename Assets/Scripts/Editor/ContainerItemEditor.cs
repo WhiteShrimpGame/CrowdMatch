@@ -230,8 +230,9 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>把该车所属 ContainerGroup 的洗牌开关关掉并标脏；返回是否找到并处理了 group。</summary>
-        private static bool MarkShuffleOff(ContainerItem item)
+        /// <summary>把该车所属 ContainerGroup 的洗牌开关关掉并标脏；返回是否找到并处理了 group。
+        /// `internal` 是给容器拖移画布的「连绳」复用（洗牌会打乱列位置，绳组关系随即失效）。</summary>
+        internal static bool MarkShuffleOff(ContainerItem item)
         {
             var group = item.GetComponentInParent<ContainerGroup>();
             if (group == null)
@@ -322,20 +323,22 @@ namespace CrowdMatch
                     return car.name + " 未配置 ropeAnchorLeft / ropeAnchorRight（车预制体上需有两个端点空物体），无法建绳。";
             }
 
-            return ValidateNoRopeCrossing(cars, group);
+            var newRows = new Dictionary<int, int>();   // 列 → 行
+            foreach (var car in cars)
+                newRows[car.gridX] = car.gridZ;
+            return ValidateNoRopeCrossing(newRows, group);
         }
 
         /// <summary>
         /// 交叉校验：两个绳组若在同一对相邻列上「行序相反」（一条从前往后、另一条从后往前），
         /// 两组的出库条件会互相等待——A 的车要等 B 的车离开某列，B 的车又要等 A 的车离开另一列 → 死锁。
         /// 逐对已有绳组检查。
+        ///
+        /// <paramref name="newRows"/> = 待建绳组的「列 → 行」；调用方保证入选的车此时
+        /// <c>ropeGroupId == 0</c>，故不会混进已有组里。`internal` 是给容器拖移画布的「连绳」复用。
         /// </summary>
-        private static string ValidateNoRopeCrossing(List<ContainerItem> cars, ContainerGroup group)
+        internal static string ValidateNoRopeCrossing(Dictionary<int, int> newRows, ContainerGroup group)
         {
-            var newRows = new Dictionary<int, int>();   // 列 → 行
-            foreach (var car in cars)
-                newRows[car.gridX] = car.gridZ;
-
             // 已有绳组：组 id → (列 → 行)。选中的车此时必然 ropeGroupId == 0（上面已拦），故不会混进来。
             var existing = new Dictionary<int, Dictionary<int, int>>();
             foreach (var car in group.GetComponentsInChildren<ContainerItem>())
@@ -449,8 +452,9 @@ namespace CrowdMatch
             Debug.Log("[ContainerItemEditor] 已取消绳组 " + id + "，共清除 " + cleared + " 辆车的连接。");
         }
 
-        /// <summary>取该 ContainerGroup 下现有绳组的最大 id + 1（id 只需在单关内唯一）。</summary>
-        private static int NextRopeGroupId(ContainerGroup group)
+        /// <summary>取该 ContainerGroup 下现有绳组的最大 id + 1（id 只需在单关内唯一）。
+        /// `internal` 是给容器拖移画布的「连绳」复用。</summary>
+        internal static int NextRopeGroupId(ContainerGroup group)
         {
             int max = 0;
             foreach (var car in group.GetComponentsInChildren<ContainerItem>())

@@ -120,8 +120,8 @@ namespace CrowdMatch
             }
 
             // Check master switches / 检查总开关
-            if (item.isBGM && !MusicEnabled) return;
-            if (!item.isBGM && !SoundEnabled) return;
+            if (item.isBGM && SettingData.MusicSet == 0) return;
+            if (!item.isBGM && SettingData.SoundSet == 0) return;
 
             var source = GetOrCreateSource(tag, item);
             if (source == null) return;

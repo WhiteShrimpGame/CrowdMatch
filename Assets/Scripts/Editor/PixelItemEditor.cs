@@ -189,13 +189,13 @@ namespace CrowdMatch
     {
         private const string Tag = "[PixelRectClearer]";
 
-        [MenuItem("CrowdMatch/清除选中矩形范围 Pixel %#x", true)]
+        [MenuItem("CrowdMatch/Pixel 工具/清除选中矩形范围 Pixel %#x", true, MenuPriority.Pixel + MenuPriority.Seg2)]
         private static bool ValidateClearRectFromSelection()
         {
             return CollectSelectedPixels().Count == 2;
         }
 
-        [MenuItem("CrowdMatch/清除选中矩形范围 Pixel %#x")]
+        [MenuItem("CrowdMatch/Pixel 工具/清除选中矩形范围 Pixel %#x", false, MenuPriority.Pixel + MenuPriority.Seg2)]
         private static void ClearRectFromSelection()
         {
             var pixels = CollectSelectedPixels();

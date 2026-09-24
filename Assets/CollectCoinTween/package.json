@@ -1,0 +1,18 @@
+{
+    "name": "com.puffer.cointween",
+    "author": "Warren",
+    "displayName": "_Coin Collection Tween",
+    "version": "2.0.7",
+    "unity": "2018.3",
+    "description": "金币收集动效",
+    "category": "Unity",
+    "keywords": 
+    [
+        "puffer",
+        "tween"
+    ],
+    "dependencies": 
+    {
+        "com.puffer.lutween":"1.0.1"
+    }
+}

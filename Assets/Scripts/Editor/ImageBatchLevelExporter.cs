@@ -28,7 +28,7 @@ namespace CrowdMatch
 
         private const string OutDir = "Assets/LevelData";
 
-        [MenuItem("CrowdMatch/批量图片转关卡")]
+        [MenuItem("CrowdMatch/关卡工具/批量图片转关卡", false, MenuPriority.LevelTools + MenuPriority.Seg1 + 1)]
         public static void BatchConvert()
         {
             // 1. 收集图片：优先 Project 窗口多选，否则选择文件夹

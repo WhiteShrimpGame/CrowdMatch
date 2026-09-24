@@ -62,6 +62,21 @@ namespace CrowdMatch
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
+        /// <summary>
+        /// 是否被冰组冻住（所在冰组的冰冻计数还没归 0）。冻住的像素**视为不暴露**：
+        /// 不暴露、不可点击、也不参与同色连通块（与未揭晓问号 Pixel 同待遇）。
+        /// 由 PixelGroup.RefreshIceState 统一写入。
+        /// </summary>
+        [System.NonSerialized] public bool IsFrozen;
+
+        /// <summary>
+        /// 是否被木箱盖住。被盖住的像素**不可见**（本体渲染器关闭）且**不能操作**
+        /// （GameController.HandleClick 的守卫直接返回、不给任何反馈），
+        /// 同时木箱格是障碍 → 它在暴露计算里天然为「不暴露」，不会出描边。
+        /// 由 PixelGroup.RefreshCrateState 统一写入。
+        /// </summary>
+        [System.NonSerialized] public bool IsCovered;
+
         /// <summary>管道放置中标记：期间 SetExposed 只记录状态、不激活 Animator，待放置完成后统一激活。</summary>
         [System.NonSerialized] public bool placing;
 
@@ -210,6 +225,67 @@ namespace CrowdMatch
             _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset, exposeMoveDuration));
         }
 
+        /// <summary>
+        /// 木箱被拆掉时，被它盖住的像素「浮现」：立刻把身体压到「原处 + <paramref name="yOffset"/>」，
+        /// 等 <paramref name="delay"/> 秒后用**先匀加速后匀减速**回到原处（波前错峰由调用方给的 delay 实现）。
+        ///
+        /// **走 exposeMoveTarget 而不是像素根物体**：根物体的 transform 由提取寻路（CrowdBufferZone）逐帧写
+        /// 世界坐标接管，两边同时写会互相打架。exposeMoveTarget 本来就是专门做 y 偏移的身体节点
+        /// （上车坐下 <see cref="SitDownExposeTarget"/> 用的也是它），并且与它**共用同一个 <c>_exposeMove</c>
+        /// 协程槽** → 上车坐下会自然取消还没播完的浮现，不会两条动画抢同一个 transform。
+        ///
+        /// 「原处」取开始那一刻的 localPosition.y，不写死 0 —— 预制体上美术调过基准 y 也不会跳一下。
+        /// </summary>
+        public void PlayCrateRestore(float delay, float yOffset, float duration)
+        {
+            if (exposeMoveTarget == null)
+                return;
+            if (_exposeMove != null)
+                StopCoroutine(_exposeMove);
+            _exposeMove = StartCoroutine(RestoreExposeTargetRoutine(delay, yOffset, duration));
+        }
+
+        /// <summary>
+        /// 浮现协程：压到「原处 + yOffset」→ 等 delay → 先匀加速后匀减速回到原处。
+        /// 缓动 k：t ≤ 0.5 时 2t²、其余 1−2(1−t)²（= DOTween 的 InOutQuad，速度两端为 0、中点为最大）。
+        /// </summary>
+        private IEnumerator RestoreExposeTargetRoutine(float delay, float yOffset, float duration)
+        {
+            Transform t = exposeMoveTarget;
+            if (t == null)
+                yield break;
+
+            Vector3 rest = t.localPosition;
+            t.localPosition = new Vector3(rest.x, rest.y + yOffset, rest.z);
+
+            if (delay > 0f)
+                yield return new WaitForSeconds(delay);
+
+            if (t == null)
+                yield break;
+
+            float dur = Mathf.Max(0f, duration);
+            if (dur <= 0.0001f)
+            {
+                t.localPosition = rest;   // 时长为 0：直接落回原处，别让它永远沉在下面
+                _exposeMove = null;
+                yield break;
+            }
+
+            float elapsed = 0f;
+            while (elapsed < dur)
+            {
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / dur);
+                float e = k < 0.5f ? 2f * k * k : 1f - 2f * (1f - k) * (1f - k);
+                t.localPosition = new Vector3(rest.x, rest.y + yOffset * (1f - e), rest.z);
+                yield return null;
+            }
+
+            t.localPosition = rest;
+            _exposeMove = null;
+        }
+
         /// <summary>设置颜色 ID 并立即应用材质</summary>
         public void SetColorId(int id)
         {
@@ -309,6 +385,57 @@ namespace CrowdMatch
             if (placing)
                 return;   // 管道放置中：只记录状态，不激活动画，放置完成后由 MarkPlaced / RefreshExposed 统一应用
             ApplyExposedState(exposed);
+        }
+
+        /// <summary>
+        /// 设置冰冻状态。
+        ///
+        /// **保留点击碰撞体**（不要 SetClickable(false)）：被冻住时仍然要被射线打到，
+        /// 这样 GameController.HandleClick 的冻结守卫才跑得起来，才能给出与「被别的像素堵住」
+        /// 一样的阻挡反馈（音效 / 震动 / 愤怒表情 / 阻挡位移）。
+        /// 关掉碰撞体的话射线会直接穿过去，守卫根本不会被调用 —— 表现就是「点击毫无反应」。
+        ///
+        /// 所以「不可点击」的门槛始终在 HandleClick 里，与未揭晓问号 Pixel 是同一个套路。
+        /// </summary>
+        public void SetFrozen(bool frozen)
+        {
+            IsFrozen = frozen;
+        }
+
+        /// <summary>
+        /// 木箱遮盖：关掉本体渲染器（不可见）与问号物体，恢复时再按「是否未揭晓问号」重算显隐。
+        ///
+        /// **不能改用 SetActive(false)**：那是箱子隐藏像素的做法，而 CountPixels 用
+        /// GetComponentsInChildren 默认扫不到 inactive 物体（箱子的隐藏像素靠 BoxItem.hiddenPixels
+        /// 额外累加才补回来）。木箱盖住的像素是**已经算进 TotalPixelCount** 的普通像素，
+        /// 被漏算一次就成了「不拆箱也能通关」。
+        ///
+        /// **保留点击碰撞体**（与冰冻同理）：射线必须还能打到它。区别在命中之后 ——
+        /// 冰的守卫给阻挡反馈，木箱的守卫什么都不做（那里本来就看着没有像素）。
+        /// 若把碰撞体关掉，射线会直接穿过去打中木箱更后面的像素，那才是真的错。
+        /// </summary>
+        public void SetCovered(bool covered)
+        {
+            if (IsCovered == covered)
+                return;
+            IsCovered = covered;
+
+            for (int i = 0; i < renderers.Count; i++)
+            {
+                var r = renderers[i];
+                if (r != null)
+                    r.enabled = !covered;
+            }
+
+            if (covered)
+            {
+                if (questionObject != null)
+                    questionObject.SetActive(false);
+            }
+            else
+            {
+                RefreshQuestionObject();   // 恢复显示：按「是否未揭晓问号」重算问号物体显隐
+            }
         }
 
         /// <summary>按暴露状态应用动画：仅切换描边与 Animator。起身/坐下逻辑已移除，全程保持站立位置，不做 y 位移。

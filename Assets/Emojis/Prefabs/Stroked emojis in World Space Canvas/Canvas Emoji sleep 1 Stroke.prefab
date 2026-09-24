@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 4225095993270738609}
   - component: {fileID: 4225095993270738611}
   - component: {fileID: 4225095993270738610}
-  m_Layer: 5
+  m_Layer: 0
   m_Name: Canvas Emoji sleep 1 Stroke
   m_TagString: Untagged
   m_Icon: {fileID: 0}

@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 4567265013644748939}
   - component: {fileID: 8252444432423557484}
   - component: {fileID: 5041520158306743002}
-  m_Layer: 5
+  m_Layer: 0
   m_Name: Canvas Emoji angry Stroke
   m_TagString: Untagged
   m_Icon: {fileID: 0}
