@@ -187,7 +187,7 @@ namespace CrowdMatch
             // 与 Record 模式按倍率补记的条数一致；少了倍乘额外，文件名里的 total 会小于实际记录条数）
             GameData.TotalPixelCount = CountPixels() + CountPipePixels() + CountGateExtraPixels();
             GameData.ClearedPixelCount = 0;
-
+            GameData.RemovePixelCount = 0;
             if (recordMode)
                 BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
         }
@@ -320,7 +320,10 @@ namespace CrowdMatch
                 _lastFailCheckLog = null;   // 真判了失败：清掉去重记忆，复活后的诊断不被旧行压掉
                 //GameState.GameFail();
                 //Invoke(nameof(DoRevive), 1.5f);
-                UIManager.Instance.showRevivePanel(true);
+                DOVirtual.DelayedCall(1.5f, () =>
+                {
+                    UIManager.Instance.showRevivePanel(true);
+                });
                 return;
             }
             LogFailCheck(checkpoint, reason);
@@ -987,6 +990,8 @@ namespace CrowdMatch
             {
                 item.clickSeq = clickSeq;
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
+                // 从网格移出即算「已点出」：一次点击计入整组像素数（不是点击数）
+                GameData.RemovePixelCount++;
                 item.SetExposed(false);
                 item.SetClickable(false);
                 if (!recordMode)

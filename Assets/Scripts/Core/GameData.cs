@@ -110,6 +110,8 @@ namespace CrowdMatch
 
         /// <summary>本关已被消费（移除）的像素数。</summary>
         public static int ClearedPixelCount { get; set; } = 0;
+        /// <summary>本关已被点出的像素数。</summary>
+        public static int RemovePixelCount { get; set; } = 0;
 
         /// <summary>重置单局计数。在每次重载关卡时调用。</summary>
         /// <param name="gaming">是否进入游玩模式</param>
@@ -118,6 +120,7 @@ namespace CrowdMatch
             IsGaming = gaming;
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
+            RemovePixelCount = 0;
         }
         // GameData.cs 里新增
         public static void ResetAll()
@@ -130,6 +133,7 @@ namespace CrowdMatch
             FailCount = 0;
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
+            RemovePixelCount = 0;
         }
         /// <summary>关卡难度 (0=普通, 1=困难, 2=超难) / Level difficulty</summary>
         //public static int LevelDiff = 0;
@@ -144,7 +148,7 @@ namespace CrowdMatch
                 Debug.Log(countLoop);*/
                 if (CurrentLevel <= count)
                 {
-                    Debug.Log(CurrentLevel-1);
+                    //Debug.Log(CurrentLevel-1);
                     return GameManager.Instance.levelDataConfig.levelDiff[CurrentLevel-1];
                 }
                 else if (countLoop > 0)

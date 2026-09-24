@@ -69,6 +69,7 @@ namespace WsGame.DailyBouns
             {
                 DestroyImmediate(gameObject);
             });
+            UIManager.Instance.mainPanel.GetComponentInChildren<DailyBonusBtn>().ShowTip();
         }
 
         private void Update()
@@ -170,6 +171,10 @@ namespace WsGame.DailyBouns
                 return;
 
             goldCountText.text = RewardEffect.FormatKMG(value);
+            if (UIManager.Instance.mainPanel!=null)
+            {
+                UIManager.Instance.mainPanel.GetComponent<MainPanel>().RefreshGoldCount();
+            }
         }
 
         public void UpdateDailyItemState()

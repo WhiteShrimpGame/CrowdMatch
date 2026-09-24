@@ -122,6 +122,21 @@ public class GameInnerUI : MonoBehaviour
     public void OnBackBtnClk()
     {
 
+
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        GameManager.Instance.CleanupSpawnPool();
+        //UIManager.Instance.Init();
+        UIManager.Instance.showGamePanel(false);
+        UIManager.Instance.ShowMenuPanel(true);
+        
+        //UIManager.Instance.showMainPanel(true);
+        /*{
+
+            //WS_TapAway_Cloud.LevelRecord.ClearLevelRecord();
+            
+            GameManager.Instance.ReloadLevel();
+            //SceneManager.LoadScene("GameScene");
+        }*/
         
     }
 
@@ -733,7 +748,6 @@ public class GameInnerUI : MonoBehaviour
         {
             return;
         }
-
         hardImgPos = hardTipHardImg.position;
         superHardImgPos = hardTipSuperHardImg.position;
         hardImgScale = hardTipHardImg.localScale;
@@ -743,7 +757,6 @@ public class GameInnerUI : MonoBehaviour
     public void ShowHardTip()
     {
         InitHardTip();
-        
         Transform img = null, endImg = null;
 
         if (GameData.LevelDiff == 1)
@@ -784,7 +797,7 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            SetOutlineHex(levelText,"#ffffff");
+            SetOutlineHex(levelText,"#000000");
             levelBgSuperHardImg.parent.gameObject.SetActive(false);
             levelBgHardImg.parent.gameObject.SetActive(false);
             levelBgHardImg.gameObject.SetActive(false);

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 #if WeChat
 using WeChatWASM;
@@ -44,6 +46,7 @@ namespace CrowdMatch
         public EmojiManager emojiManager;
 
         public StaminaConfig staminaConfig;
+        public NewFeatureConfig newFeatureConfig;
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -70,19 +73,25 @@ namespace CrowdMatch
                 spawnPool = new SpawnPool();
                 spawnPool.Init(spawnPoolConfig, spawnPoolRoot);
             }
+            
+        }
+
+        private void Start()
+        {
             if (staminaConfig != null)
             {
                 StaminaSystemData.InitData();
                 StaminaSystemTimer.Instance.InitData();
                 if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
                 {   
+                    GameData.IsGaming=false;
                     //刚进游戏时，体力不足回主页
-                    /*TriggerVibrate(1);
-                    ReloadScene(false);*/
+                    AudioManager.Instance.PlayButtonAudioAndVibrate();
+                    UIManager.Instance.showGamePanel(false);
+                    UIManager.Instance.ShowMenuPanel(true);
                 }
             }
         }
-
         // ========== Debug / 调试 ==========
 
 #if UNITY_EDITOR
@@ -157,6 +166,7 @@ namespace CrowdMatch
         /// <summary>重载当前关卡（原地重建，不重载场景）：重置计数后交由 GameController 重新初始化。</summary>
         public void ReloadLevel()
         {
+            DOTween.KillAll();
             CleanupSpawnPool();   // 关卡重建前回收对象池：在用对象全部归还并裁回 preloadCount
             GameData.Init(true);
             var gc = GameController.Instance;
@@ -172,7 +182,18 @@ namespace CrowdMatch
                 spawnPool.GC(true);
             }
         }
+        public void CheckShowFeature()
+        {
+            var matchData = newFeatureConfig.NewFeatureDatas
+                .Find(x => x.featureShowLevel == GameData.CurrentLevel);
 
+            if (matchData != null)
+            {
+                // 弹窗实例获取
+                UIManager.Instance.ShowFeaturePanel(true,matchData);
+            
+            }
+        }
         // ========== 震动 / Vibration ==========
 
         /// <summary>

@@ -70,7 +70,6 @@ public class CoinTweenPanel : MonoBehaviour
     public void ShowCoins(Vector3 startPos, Transform targetTrans, int coinAmount, int type,
         System.Action onComplete = null, float duration = 1, int showCoinAmount = 20)
     {
-        Debug.Log(1111);
         List<CoinTween> tweens = GetTweenList(showCoinAmount); //拿出20个金币
 
         int timeCoin = coinAmount / tweens.Count;

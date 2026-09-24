@@ -10,13 +10,13 @@ namespace WsGame.DailyBouns
     {
         [SerializeField] private GameObject dailyBoundPanelPrefab;
         private Button m_Btn;
-        //private Transform tipIcon;
+        private Transform tipIcon;
         private DailyBonusPanel m_DailyBonusPanel;
 
         private void Awake()
         {
             m_Btn = GetComponent<Button>();
-            //tipIcon = transform.Find("TipIcon");
+            tipIcon = transform.Find("TipIcon");
 
             m_Btn.onClick.AddListener(OnBtnClick);
             ShowTip();
@@ -24,7 +24,7 @@ namespace WsGame.DailyBouns
 
         private void OnBtnClick()
         {
-            //tipIcon.gameObject.SetActive(false);
+            tipIcon.gameObject.SetActive(false);
             ShowDailyBounsPanel();
         }
 
@@ -41,7 +41,7 @@ namespace WsGame.DailyBouns
         /// </summary>
         public void ShowTip()
         {
-            //tipIcon.gameObject.SetActive(DailyBounsData.TodayBounsRewardCanGet());
+            tipIcon.gameObject.SetActive(DailyBounsData.TodayBounsRewardCanGet());
         }
     }
 }
