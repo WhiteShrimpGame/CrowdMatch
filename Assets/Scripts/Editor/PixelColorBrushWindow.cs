@@ -112,6 +112,12 @@ namespace CrowdMatch
         /// <summary>自适应宽度时给滚动条与缩进留的余量，不留就会横向滚出画布。</summary>
         private const float CanvasMargin = 90f;
 
+        /// <summary>右上角竖排三个关卡级按钮的列宽。自适应宽度算格子像素时必须把它扣掉，否则画布会横向滚。</summary>
+        private const float SideColumnWidth = 96f;
+
+        /// <summary>底部 ÷3 校验里「余 N」行左侧标签列的宽度：色块从这个宽度之后开始排。</summary>
+        private const float Mod3LabelWidth = 76f;
+
         /// <summary>「内部颜色」面板里色块每行的上限：超过就换行（窗口更窄时按实际宽度算，会更早换）。</summary>
         private const int MaxColorsPerRow = 20;
 
@@ -123,6 +129,9 @@ namespace CrowdMatch
         private int _cellPx = 24;
         private Tool _tool = Tool.Free;
         private Mode _mode = Mode.Color;
+
+        /// <summary>底部 ÷3 校验行的文字样式（缓存的 miniLabel 副本，绘制前改 textColor）。</summary>
+        private GUIStyle _checkStyle;
 
         /// <summary>笔刷值：-1 = 橡皮（删除该格像素），&gt;= 0 = 要涂的 colorId。
         /// 问号模式**不看笔刷**：标 / 取消由「按下的那一格当前是不是问号」决定，切模式时笔刷原位不动。</summary>
@@ -362,7 +371,9 @@ namespace CrowdMatch
         public static void OpenFor(PixelGroup group)
         {
             var window = GetWindow<PixelColorBrushWindow>("像素颜色画布");
-            window.minSize = new Vector2(460f, 340f);
+            // 最小宽度要容得下「左侧工具栏（4 个模式按钮一行 ≈ 420px）+ 右侧竖排按钮列（SideColumnWidth）」；
+            // 最小高度要容得下工具栏 / 调色板 / 状态行 / 底部三行 ÷3 校验之后还留得下画布。
+            window.minSize = new Vector2(560f, 380f);
 
             if (group != null)
             {
@@ -751,6 +762,11 @@ namespace CrowdMatch
             // 别的工具动过场景（导入关卡 JSON / 清空 Group / 生成 Pixel…）：先重建快照，这一帧就画新的
             SyncWithSceneIfDirty();
 
+            // 左右分栏：左边 = 原有全部内容（工具栏 / 各二级面板 / 画布 / 状态行 / ÷3 校验），
+            // 右边 = 右上角竖排的三个关卡级按钮（固定宽 SideColumnWidth）。
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+
             DrawViewToolbar();
             DrawPalette();
             DrawPipeColorPanel();   // 二级面板：涂颜色模式下点了管道格才出现（选色复用上面的调色板）
@@ -758,9 +774,58 @@ namespace CrowdMatch
             DrawIceEditPanel();     // 编辑冰面板：编辑冰模式下点了冰格才出现
             DrawCanvas();
             DrawStatusLine();
+            DrawMod3Check();        // 涂颜色模式：窗口底部实时显示「÷3 校验」分组
+
+            EditorGUILayout.EndVertical();
+
+            DrawLevelSideColumn();
+
+            EditorGUILayout.EndHorizontal();
 
             // 手势收尾放在滚动视图之外：拖到画布外松手时格子上的 HandleCell 收不到 MouseUp
             HandleStrokeEnd();
+        }
+
+        /// <summary>
+        /// 右上角竖排的三个关卡级按钮：**与菜单栏同一条代码路径**（<see cref="LevelDataExporter"/> 的三个菜单入口），
+        /// 所以行为 / 撤销 / 弹窗 / 写盘完全一致，只是把入口挪到画布旁边。
+        /// 运行模式下整列禁用 —— 导出的菜单项本身在 Play 下就不可用，导入与清空在运行中对场景也没有意义。
+        /// </summary>
+        private void DrawLevelSideColumn()
+        {
+            EditorGUILayout.BeginVertical(GUILayout.Width(SideColumnWidth));
+
+            using (new EditorGUI.DisabledScope(Application.isPlaying))
+            {
+                if (GUILayout.Button(new GUIContent("导出 JSON",
+                        "与菜单 CrowdMatch/导出关卡 JSON 一致：把当前 PixelGroup + ContainerGroup 导出为关卡 JSON"),
+                        GUILayout.Height(24f)))
+                {
+                    LevelDataExporter.ExportCurrentLevel();
+                    RefreshSnapshot();       // 导出前会 RebuildGrid，顺手把快照对齐
+                    SceneView.RepaintAll();
+                }
+
+                if (GUILayout.Button(new GUIContent("从 JSON 导入",
+                        "与菜单 CrowdMatch/从 JSON 导入配置到当前场景 一致：选一个关卡 JSON 覆盖当前场景的两个 Group"),
+                        GUILayout.Height(24f)))
+                {
+                    LevelDataExporter.ImportLevelFromJson();
+                    RefreshSnapshot();       // 导入会重建子物体：立刻按新场景重画（不等 hierarchyChanged 那一拍）
+                    SceneView.RepaintAll();
+                }
+
+                if (GUILayout.Button(new GUIContent("清空 Group",
+                        "与菜单 CrowdMatch/清空当前场景两个 Group 的子物体 一致：清空两个 Group 的全部子物体，有确认弹窗、可 Undo"),
+                        GUILayout.Height(24f)))
+                {
+                    LevelDataExporter.ClearBothGroups();
+                    RefreshSnapshot();
+                    SceneView.RepaintAll();
+                }
+            }
+
+            EditorGUILayout.EndVertical();
         }
 
         /// <summary>
@@ -923,7 +988,7 @@ namespace CrowdMatch
                 return;
             }
 
-            float usable = Mathf.Max(SwatchSize, position.width - 16f);
+            float usable = Mathf.Max(SwatchSize, position.width - SideColumnWidth - 16f);
             int perRow = Mathf.Max(1, Mathf.FloorToInt(usable / (SwatchSize + SwatchPad)));
             int rows = Mathf.CeilToInt(count / (float)perRow);
 
@@ -962,7 +1027,7 @@ namespace CrowdMatch
             }
         }
 
-        private void DrawSwatch(Rect rect, int value, bool selection = true)
+        private void DrawSwatch(Rect rect, int value, bool selection = true, string tooltip = null)
         {
             if (Event.current.type != EventType.Repaint)
                 return;
@@ -983,7 +1048,7 @@ namespace CrowdMatch
                 // 字色按色块亮度反着来：浅底配黑字、深底配白字，否则白字压在浅黄上根本看不见。
                 var style = SwatchNumStyle();
                 style.normal.textColor = Luminance(_palette[value]) > 0.55f ? Color.black : Color.white;
-                EditorGUI.LabelField(rect, value.ToString(), style);
+                EditorGUI.LabelField(rect, new GUIContent(value.ToString(), tooltip), style);
             }
 
             // 边框与选中框只能在 Repaint 阶段画
@@ -1031,7 +1096,7 @@ namespace CrowdMatch
             int rows = _group.TotalRows;
 
             int px = _fitWidth
-                ? Mathf.Clamp(Mathf.FloorToInt((position.width - CanvasMargin) / Mathf.Max(1, columns)), 6, 64)
+                ? Mathf.Clamp(Mathf.FloorToInt((position.width - SideColumnWidth - CanvasMargin) / Mathf.Max(1, columns)), 6, 64)
                 : _cellPx;
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll, true, true, GUILayout.ExpandHeight(true));
@@ -1519,6 +1584,165 @@ namespace CrowdMatch
 
             EditorGUI.LabelField(rect, text, EditorStyles.miniLabel);
         }
+
+        /// <summary>
+        /// 底部「÷3 校验」（**只在涂颜色模式下占位**）：第一行给总数与是否被 3 整除，
+        /// 下面两行**按调色板样式列出余 1 / 余 2 的颜色**（色块底 + 编号，悬停看材质名与颗数）
+        /// —— 这些就是会让车凑不满的颜色；**点色块 = 选中该颜色**（与点调色板同效，方便直接去修）。
+        ///
+        /// 口径**与「生成 Containers / 统计颜色总数」同源**（<see cref="PixelGroup.CollectPlanningDetail"/>：
+        /// 网格像素 + 管道计划 + 箱子隐藏 + 升降台分组，倍乘门按像素所在格倍率展开），
+        /// 所以这里没有余数就说明按 3 拆车的容量规划不会因为这些颜色缺斤少两。
+        /// 每次绘制都重算（Layout 与 Repaint 都要一份 —— 色块行数是布局的一部分），
+        /// 换来的是**绝不显示过期数字**；几千颗像素的开销在编辑器里可忽略。
+        ///
+        /// 行数随「每组有多少个色块」变，但它挂在画布下方：布局是自顶向下的，高度变化只影响画布
+        /// **视口下沿**，上方每个格子的矩形一点不动 —— 所以涂色途中有颜色进出余数分组也不会换掉光标下的格子。
+        /// </summary>
+        private void DrawMod3Check()
+        {
+            if (_mode != Mode.Color)
+                return;   // 最后一个控件，按模式显隐不会动到上面任何控件的命中矩形
+
+            // 逐色像素数（口径同容器规划：含管道计划 / 箱子隐藏 / 升降台分组 / 倍乘门额外）
+            var counts = new Dictionary<int, int>();
+            var sources = _group.CollectPlanningDetail();
+            for (int i = 0; i < sources.Count; i++)
+            {
+                var s = sources[i];
+                int mult = Mathf.Max(1, _group.GateMultiplierAt(s.cell.x, s.cell.y));
+                counts.TryGetValue(s.color, out int n);
+                counts[s.color] = n + mult;
+            }
+
+            int total = 0;
+            var rem1 = new List<int>();
+            var rem2 = new List<int>();
+            foreach (var kv in counts)
+            {
+                total += kv.Value;
+                int rem = kv.Value % 3;
+                if (rem == 1)
+                    rem1.Add(kv.Key);
+                else if (rem == 2)
+                    rem2.Add(kv.Key);
+            }
+            rem1.Sort();
+            rem2.Sort();
+
+            // 概述行（固定 18px）
+            const float lineH = 18f;
+            var headRect = GUILayoutUtility.GetRect(0f, lineH, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint)
+            {
+                var style = CheckStyle();
+                style.alignment = TextAnchor.MiddleLeft;
+                int totalRem = total % 3;
+                style.normal.textColor = totalRem == 0 ? OkText : WarnText;
+                EditorGUI.LabelField(headRect,
+                    "÷3 校验：总数 " + total + " " + (totalRem == 0 ? "✓ 被 3 整除" : "✗ 余 " + totalRem) +
+                    "　｜　" + counts.Count + " 种颜色　｜　口径同「生成 Containers」（含管道 / 箱子 / 升降台 / 倍乘门）",
+                    style);
+            }
+
+            DrawMod3SwatchRow("余 1", rem1, counts);
+            DrawMod3SwatchRow("余 2", rem2, counts);
+        }
+
+        /// <summary>
+        /// 一个余数分组的色块行：左边「余 N（M 种）」标签，右边按调色板样式铺色块（放不下自动换行）。
+        /// 点色块 = <c>_brush = 该色</c>（与点调色板同效）；运行模式下只画不响应（与调色板一致）。
+        /// 空分组也占一行（标签 + 「无」），免得两行之间随分组生死跳动。
+        /// </summary>
+        private void DrawMod3SwatchRow(string label, List<int> colors, Dictionary<int, int> counts)
+        {
+            float usable = Mathf.Max(SwatchSize, position.width - SideColumnWidth - 16f);
+            float stride = SwatchSize + SwatchPad;
+            int perRow = Mathf.Max(1, Mathf.FloorToInt((usable - Mod3LabelWidth) / stride));
+            int rows = Mathf.Max(1, Mathf.CeilToInt(colors.Count / (float)perRow));
+
+            Rect area = GUILayoutUtility.GetRect(0f, rows * stride, GUILayout.ExpandWidth(true));
+
+            bool playing = Application.isPlaying;
+
+            if (Event.current.type == EventType.Repaint)
+            {
+                var style = CheckStyle();
+                style.alignment = TextAnchor.MiddleLeft;
+                style.normal.textColor = colors.Count > 0 ? WarnText : MutedText;
+                EditorGUI.LabelField(new Rect(area.x, area.y, Mod3LabelWidth, SwatchSize),
+                    label + "（" + colors.Count + " 种）" + (colors.Count == 0 ? "　无" : ""), style);
+            }
+
+            for (int i = 0; i < colors.Count; i++)
+            {
+                int id = colors[i];
+                var rect = new Rect(
+                    area.x + Mod3LabelWidth + (i % perRow) * stride,
+                    area.y + (i / perRow) * stride,
+                    SwatchSize, SwatchSize);
+
+                // colorId 可能超出 ColorConfig 的范围（换过配置 / 导入的 JSON 带了别的 id）：
+                // 那种色块不能走 DrawSwatch（它会按 _palette[value] 取色，越界会报错），单独画个占位。
+                bool inPalette = id >= 0 && id < _palette.Length;
+                if (inPalette)
+                    DrawSwatch(rect, id, true, DescribeSwatch(id, counts[id]));
+                else
+                    DrawOutOfRangeSwatch(rect, id, counts[id]);
+
+                if (playing)
+                    continue;
+
+                Event ev = Event.current;
+                if (ev.type == EventType.MouseDown && rect.Contains(ev.mousePosition))
+                {
+                    if (inPalette)
+                        _brush = id;   // 与点调色板同一个效果：之后的涂色就用这个颜色
+                    ev.Use();
+                    Repaint();
+                }
+            }
+        }
+
+        /// <summary>色块的悬停提示：颜色 id / 材质名 / 颗数 / 余数 + 「点一下就能选」的说明。</summary>
+        private string DescribeSwatch(int id, int count)
+        {
+            string text = "颜色 " + id;
+            var mat = _config != null ? _config.GetMaterial(id) : null;
+            if (mat != null && !string.IsNullOrEmpty(mat.name))
+                text += "（" + mat.name + "）";
+            return text + "：" + count + " 颗，÷3 余 " + (count % 3) + "　——　点击选中该颜色";
+        }
+
+        /// <summary>colorId 越出 ColorConfig 范围时的占位色块（点不动，也不会去索引调色板）。</summary>
+        private void DrawOutOfRangeSwatch(Rect rect, int id, int count)
+        {
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            EditorGUI.DrawRect(rect, new Color(0.45f, 0.12f, 0.36f));
+            var style = SwatchNumStyle();
+            style.normal.textColor = Color.white;
+            EditorGUI.LabelField(rect, new GUIContent(id.ToString(), "颜色 " + id + "：" + count +
+                " 颗，但 ColorConfig 里没有这个 id（超出范围），点选无效"), style);
+        }
+
+        /// <summary>校验行的样式（缓存的 miniLabel 副本，绘制前改 textColor / alignment）。</summary>
+        private GUIStyle CheckStyle()
+        {
+            if (_checkStyle == null)
+                _checkStyle = new GUIStyle(EditorStyles.miniLabel);
+            return _checkStyle;
+        }
+
+        private static Color OkText => EditorGUIUtility.isProSkin
+            ? new Color(0.5f, 0.9f, 0.5f) : new Color(0.04f, 0.45f, 0.04f);
+
+        private static Color WarnText => EditorGUIUtility.isProSkin
+            ? new Color(1f, 0.76f, 0.28f) : new Color(0.62f, 0.36f, 0f);
+
+        private static Color MutedText => EditorGUIUtility.isProSkin
+            ? new Color(0.62f, 0.62f, 0.62f) : new Color(0.42f, 0.42f, 0.42f);
 
         private static string DescribeOf(CellKind kind)
         {
@@ -3933,7 +4157,7 @@ namespace CrowdMatch
             bool hasBrush = _brush >= 0;   // 橡皮选中时没有「要填的颜色」
 
             float stride = SwatchSize + SwatchPad;
-            float usable = Mathf.Max(SwatchSize, position.width - 16f);
+            float usable = Mathf.Max(SwatchSize, position.width - SideColumnWidth - 16f);
 
             // 第一排要给右侧那三个按钮留位置（它们**永远和第一排同排**），所以排得比后面几排少
             const float ButtonsWidth = 108f;

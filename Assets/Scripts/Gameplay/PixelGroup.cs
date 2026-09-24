@@ -84,50 +84,9 @@ namespace CrowdMatch
         [Tooltip("冰冻组预制体模板（需自带 IceItem 组件，并含单元模板子物体与计数 Text 子物体）。每个冰组实例化一份")]
         public GameObject icePrefab;
 
-        [Tooltip("木箱角格预制体（占一格；木箱可单独覆盖这三个字段，留空就用这里的）")]
-        public GameObject crateCornerPrefab;
-
-        [Tooltip("木箱边格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateEdgePrefab;
-
-        [Tooltip("木箱中心格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateCenterPrefab;
-
-        [Tooltip("木箱封条预制体：**长度轴为局部 +X**（做在 +Z 就把 crateSealYawOffset 填 90），" +
-                 "长度按 **1 世界单位**制作。脚本**只动 x 缩放**（乘上「钉子间距 + crateSealExtend」的世界长度），" +
-                 "y / z 缩放与局部 y 位置都保留预制体原值")]
-        public GameObject crateSealPrefab;
-
-        [Tooltip("木箱钉子预制体：每条封条两端各钉一颗；不缩放、朝向不动，" +
-                 "局部 y 位置保留预制体原值（只由脚本定 x / z）")]
-        public GameObject crateNailPrefab;
-
-        [Tooltip("封条内偏移（xz，**Pixel 单位** = unitSize 的倍数）：以木箱矩形的四角为参考向箱内偏移，" +
-                 "偏移到的位置就是钉子位置")]
-        public Vector2 crateSealInset = new Vector2(0.5f, 0.5f);
-
-        [Tooltip("封条固定延长值（Pixel 单位）：封条长度 = 钉子间距 + 此值，于是两端各露出一截")]
-        public float crateSealExtend = 0.25f;
-
-        [Tooltip("封条与钉子整体离地高度（Pixel 单位）；预制体自己已经把高度做进去了就留 0")]
-        public float crateSealHeight = 0f;
-
-        [Tooltip("**先摘掉**的那条封条额外抬高的 Y（Pixel 单位），避免两条在交叉点重叠打架")]
-        public float crateSealFirstLift = 0.05f;
-
-        [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
-        public float crateSealYawOffset = 0f;
-
-        [Tooltip("木箱被拆掉时，**被它盖住的**像素的起始 Y 偏移（世界单位，默认 -0.5 = 先沉下去半个像素），" +
-                 "随后按从左下至右上的斜向波前恢复回原位")]
-        public float crateRestoreYOffset = -0.5f;
-
-        [Tooltip("波前相邻两档之间的间隔（秒）：波前号 = (col - colMin) + (rowMax - row)，" +
-                 "左下角为 0、右上角最大，于是波从木箱左下角推到右上角。填 0 = 整块同时恢复")]
-        public float crateRestoreWaveInterval = 0.04f;
-
-        [Tooltip("单个像素恢复的时长（秒），运动为**先匀加速后匀减速**（等价 DOTween 的 InOutQuad）")]
-        public float crateRestoreDuration = 0.25f;
+        [Tooltip("木箱预制体模板（需自带 CrateItem 组件）。木箱的**全部视觉与表现参数**（角 / 边 / 中心格块、" +
+                 "封条与钉子预制体及偏移、消失动画、被盖像素的恢复动画）都配在这个预制体的 CrateItem 上")]
+        public GameObject cratePrefab;
 
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
@@ -814,6 +773,7 @@ namespace CrowdMatch
         /// **只按 destroyed 计算，不重置计数**：计数只由 <see cref="CrateItem.RegisterAdjacentMoveOut"/>
         /// 推进；复位只发生在 <see cref="SpawnCrate"/>（新关卡导入）与 RebuildGrid 重新登记之后
         /// （新建的 CrateItem 计数天然是 0）。
+        /// destroyed 的木箱在消失动画的**放大阶段**内仍计入掩码（见 <see cref="CrateItem.IsHidingForVanish"/>）。
         /// </summary>
         public void RefreshCrateState()
         {
@@ -829,7 +789,9 @@ namespace CrowdMatch
                 for (int i = 0; i < crates.Count; i++)
                 {
                     var crate = crates[i];
-                    if (crate == null || crate.destroyed)
+                    // destroyed 的木箱在**消失动画的「放大」阶段**内仍算盖住自己的格子（见 CrateItem.IsHidingForVanish）：
+                    // 于是那段时间像素不露头、也照旧点不到，缩小一开始才由 CrateItem 撤销这个窗口并重算。
+                    if (crate == null || (crate.destroyed && !crate.IsHidingForVanish))
                         continue;
 
                     foreach (var cell in crate.Cells)
@@ -1556,11 +1518,28 @@ namespace CrowdMatch
                     (rmax - rmin + 1) + "），仍然创建，但请检查关卡数据。");
             }
 
-            var go = new GameObject("Crate_" + rmin + "_" + cmin);
-            go.transform.SetParent(transform, false);
-            go.transform.localPosition = Vector3.zero;
+            if (cratePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] cratePrefab 为空，无法生成木箱（请指定自带 CrateItem 组件的预制体）。");
+                return null;
+            }
 
-            var crate = go.AddComponent<CrateItem>();
+            var go = PrefabSpawner.Instantiate(cratePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = "Crate_" + rmin + "_" + cmin;
+
+            var crate = go.GetComponent<CrateItem>();
+            if (crate == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + cratePrefab.name + " 缺少 CrateItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
             crate.colMin = cmin;
             crate.rowMin = rmin;
             crate.colMax = cmax;
@@ -1812,7 +1791,7 @@ namespace CrowdMatch
         /// </summary>
         public List<(int layer, int color)> CollectPlanningPixels()
         {
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             var pixels = new List<(int, int)>(sources.Count);
@@ -1827,8 +1806,36 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时通关判定把总数算全
-        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就永远无法通关）。
+        /// 规划源的**明细**（带机制标签），与 <see cref="CollectPlanningPixels"/> 是**同一次枚举**，
+        /// 供「统计颜色总数」按机制分列显示 —— 于是「统计 / 生成 Containers」两处永不发散。
+        /// 倍乘门倍率**不在**这里乘：调用方按 <c>cell</c> 查 <see cref="GateMultiplierAt"/> 自行展开（与规划同一算法）。
+        /// </summary>
+        public List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> CollectPlanningDetail()
+        {
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
+            CollectPlanningSources(sources);
+            return sources;
+        }
+
+        /// <summary>规划源的类别（只用于把统计结果按机制分列）。</summary>
+        public enum PlanningSourceKind
+        {
+            /// <summary>网格上的像素（含管道轨道格上的开局阻挡像素）。</summary>
+            Grid,
+
+            /// <summary>管道将生成的像素（轨道格数 × 波次数）。</summary>
+            Pipe,
+
+            /// <summary>箱子隐藏像素。</summary>
+            Box,
+
+            /// <summary>升降台分组像素。</summary>
+            Elevator,
+        }
+
+        /// <summary>
+        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时把像素总数算全
+        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就与实际交付量对不上）。
         /// 与 <see cref="CollectPlanningPixels"/> 同源，口径不会发散。
         /// </summary>
         public int CountGateExtraPixels()
@@ -1836,7 +1843,7 @@ namespace CrowdMatch
             if (gates == null || gates.Count == 0)
                 return 0;
 
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             int extra = 0;
@@ -1851,10 +1858,14 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// **只枚举一次**的 (层, 颜色, 所在格) 源列表，是「统计颜色总数 / 容器规划 / 通关判定」三处共同的底座，
-        /// 保证三处口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        /// **只枚举一次**的规划源列表，是「统计颜色总数 / 生成 Containers / 检查并修复容器颜色」三处共同的底座，
+        /// 保证这些口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        ///
+        /// 运行时的 <c>GameData.TotalPixelCount</c> 另按**实际生成的物体**统计（CountPixels + CountPipePixels +
+        /// CountGateExtraPixels），正常情形与本底座逐项相等；不等只可能来自「这里声明了、运行时没生成」的源
+        /// （如越界的升降台分组格、缺 prefab 的 SpawnPixel）。
         /// </summary>
-        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell)> outList)
+        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> outList)
         {
             outList.Clear();
 
@@ -1865,7 +1876,7 @@ namespace CrowdMatch
             {
                 if (it == null || !IsInRange(it.gridX, it.gridZ))
                     continue;
-                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ)));
+                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ), PlanningSourceKind.Grid));
             }
 
             foreach (var pipe in GetComponentsInChildren<PipeItem>())
@@ -1880,7 +1891,7 @@ namespace CrowdMatch
                 int layer = Mathf.Clamp(pipeCell.y, 0, TotalRows - 1);
                 foreach (int c in pipe.colors)
                     for (int k = 0; k < trackCells.Count; k++)
-                        outList.Add((layer, c, trackCells[k]));
+                        outList.Add((layer, c, trackCells[k], PlanningSourceKind.Pipe));
             }
 
             // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入。
@@ -1894,7 +1905,7 @@ namespace CrowdMatch
                 int count = Mathf.Min(box.capacity, box.colorIds.Length);
                 var anchor = new Vector2Int(box.colMin, box.rowMin);
                 for (int i = 0; i < count; i++)
-                    outList.Add((layer, box.colorIds[i], anchor));
+                    outList.Add((layer, box.colorIds[i], anchor, PlanningSourceKind.Box));
             }
 
             // 升降台分组像素：layer 取升降台 rowMin，颜色与所在格按每组 cells 的三元组取（编辑器与运行时通用）
@@ -1908,7 +1919,7 @@ namespace CrowdMatch
                     if (g == null || g.cells == null)
                         continue;
                     for (int i = 0; i + 2 < g.cells.Length; i += 3)
-                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1])));
+                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1]), PlanningSourceKind.Elevator));
                 }
             }
         }

@@ -183,7 +183,9 @@ namespace CrowdMatch
 #endif
 
             GameData.Init(true);
-            GameData.TotalPixelCount = CountPixels() + CountPipePixels();
+            // 总数 = 网格像素 + 箱子隐藏 + 升降台地下 + 管道计划 + 倍乘门额外（= PixelGroup 的规划底座口径，
+            // 与 Record 模式按倍率补记的条数一致；少了倍乘额外，文件名里的 total 会小于实际记录条数）
+            GameData.TotalPixelCount = CountPixels() + CountPipePixels() + CountGateExtraPixels();
             GameData.ClearedPixelCount = 0;
 
             if (recordMode)
@@ -251,8 +253,11 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 统计倍乘门额外产生的像素总数（= Σ(所在格倍率 − 1)），计入胜利判定。
-        /// 与容器规划同源（PixelGroup.CollectPlanningPixels 的同一份底座），口径不会发散。
+        /// 统计倍乘门额外产生的像素总数（= Σ(所在格倍率 − 1)），供 <see cref="InitLevel"/> 把
+        /// <c>GameData.TotalPixelCount</c> 算全 —— 倍乘出来的像素是真实像素、会被真实消费，
+        /// Record 模式也按倍率补记了同样多份，总数少算文件名里的 total 就会与 rec 对不上。
+        /// （判胜不看这个数：胜利是容器侧事件驱动的，见 <see cref="CheckWin"/>。）
+        /// 与容器规划同源（PixelGroup 的同一份底座），口径不会发散。
         /// </summary>
         private int CountGateExtraPixels()
         {
@@ -665,7 +670,7 @@ namespace CrowdMatch
             if (gatherCountText != null)
             {
                 if (conveyorZone != null)
-                    gatherCountText.text = conveyorZone.OccupiedSlots + " / " + conveyorZone.TotalSlots;
+                    gatherCountText.text = conveyorZone.OccupiedSlots + "/" + conveyorZone.TotalSlots;
                 else
                     gatherCountText.text = gatheredItems.Count.ToString();
             }
