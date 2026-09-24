@@ -45,6 +45,7 @@ public class MainPanel : MonoBehaviour
         levelNum.text = "第 " + GameData.CurrentLevel + " 关";
 
         //if (GameData.IsWinStreakActive && GameData.WinStreak > 0)
+        if (GameData.WinStreak > 0)
         {
             var streak = transform.Find("WinStreak");
             streak.gameObject.SetActive(true);

@@ -31,16 +31,19 @@ namespace WsGame.DailyBouns
             switch (dailyBonusState)
             {
                 case DailyBonusState.Finished:
+                    todayBg.gameObject.SetActive(false);
                     icon_CheckImg.gameObject.SetActive(true);
                     maskImg.gameObject.SetActive(true);
                     m_Btn.interactable = false;
                     break;
                 case DailyBonusState.Today:
+                    todayBg.gameObject.SetActive(true);
                     icon_CheckImg.gameObject.SetActive(false);
                     maskImg.gameObject.SetActive(false);
                     m_Btn.interactable = true;
                     break;
                 case DailyBonusState.UnFinished:
+                    todayBg.gameObject.SetActive(false);
                     icon_CheckImg.gameObject.SetActive(false);
                     maskImg.gameObject.SetActive(false);
                     m_Btn.interactable = false;

@@ -189,7 +189,7 @@ public class SettingPanel : MonoBehaviour
         int max = configList.Count;
         for (int i = 0, j = 0; i < max; i++)
         {
-            if (i > 7 && i< 32)
+            if (i > 7 && i< 24)
             {
                 // 创建空物体，父物体设置为 gmBtnRoot
                 GameObject spaceObj = new GameObject("SpaceItem");

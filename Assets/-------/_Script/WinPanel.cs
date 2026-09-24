@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
@@ -24,6 +25,10 @@ public class WinPanel : MonoBehaviour
     [SerializeField] private RectTransform coinAniStartPosTran2;
     [SerializeField] private RewardEffect rewardEffect;
     [SerializeField] private Text jdText;
+    [SerializeField] private Image featureIconImg;
+    [SerializeField] private GameObject unknowFeatureText;
+    [SerializeField] private Image featureFillImg;
+    [SerializeField] private Text featureProgressText;
     private RectTransform coinAniStartPosTran;
     private Transform coinTweenStartRoot;
     private RewardData rewardData;
@@ -60,6 +65,7 @@ public class WinPanel : MonoBehaviour
         //CheckShowRecommend();
 
         ShowWinStreak();
+        ShowNewFeature();
         //UIManager.Instance.HideBanner();
     }
 
@@ -229,7 +235,63 @@ public class WinPanel : MonoBehaviour
         }
     }*/
 
+private void ShowNewFeature()
+    {
+        int level = GameData.CurrentLevel-1;
+        var newFeatureDatas = GameManager.Instance.newFeatureConfig.NewFeatureDatas.ToList();
 
+        newFeatureDatas = newFeatureDatas.OrderBy(v => v.featureShowLevel).ToList();
+ 
+        var nextFeature = newFeatureDatas.Where(v =>
+            v.featureShowLevel > level).OrderBy(s => s.featureShowLevel).FirstOrDefault();
+
+        if (nextFeature != null)
+        {
+            var nextLevel = nextFeature.featureShowLevel;
+            featureIconImg.sprite = nextFeature.featureMinIcon;
+            featureIconImg.rectTransform.sizeDelta =
+                new Vector2(nextFeature.featureMinIcon.rect.width, nextFeature.featureMinIcon.rect.height);
+            var lastFeature = newFeatureDatas.Where(v =>
+                v.featureShowLevel <= level).OrderByDescending(s => s.featureShowLevel).FirstOrDefault();
+
+            int lastLevel = 0;
+            if (lastFeature != null)
+                lastLevel = lastFeature.featureShowLevel;
+            else
+                lastLevel = 1;
+
+            int totalLevel = nextLevel - lastLevel;
+            int passLevel = level + 1 - lastLevel;
+
+            float lastProgress = (passLevel - 1) / (float)totalLevel;
+            float currentProgress = passLevel / (float)totalLevel;
+            featureFillImg.fillAmount = lastProgress;
+            //featureProgressText.text = $"{Mathf.Round(lastProgress * 100f)}%";
+            featureProgressText.text = $"{passLevel-1}/{totalLevel}";
+            DOVirtual.Float(lastProgress, currentProgress, 1.5f, (v) =>
+                {
+                    featureFillImg.fillAmount = v;
+                    //featureProgressText.text = $"{(int)((1 - v) * 100f)}%";
+                    //featureProgressText.text = $"{Mathf.Round((1 - v) * 100f)}%";
+                })
+                .SetAutoKill(true).OnComplete(delegate
+                {
+                    featureProgressText.text = $"{passLevel}/{totalLevel}";
+                    /*if (passLevel == totalLevel)
+                    {
+                        featureProgressText.DOFade(0f, 0.3f);
+                    }*/
+                });
+        }
+        else
+        {
+            featureFillImg.fillAmount=0f;
+            featureProgressText.text = "敬请期待";
+            featureIconImg.gameObject.SetActive(false);
+            unknowFeatureText.SetActive(true);
+        }
+
+    }
 
     private void OnDisable()
     {

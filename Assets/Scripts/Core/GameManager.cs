@@ -46,6 +46,7 @@ namespace CrowdMatch
         public EmojiManager emojiManager;
 
         public StaminaConfig staminaConfig;
+        public NewFeatureConfig newFeatureConfig;
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -181,7 +182,18 @@ namespace CrowdMatch
                 spawnPool.GC(true);
             }
         }
+        public void CheckShowFeature()
+        {
+            var matchData = newFeatureConfig.NewFeatureDatas
+                .Find(x => x.featureShowLevel == GameData.CurrentLevel);
 
+            if (matchData != null)
+            {
+                // 弹窗实例获取
+                UIManager.Instance.ShowFeaturePanel(true,matchData);
+            
+            }
+        }
         // ========== 震动 / Vibration ==========
 
         /// <summary>

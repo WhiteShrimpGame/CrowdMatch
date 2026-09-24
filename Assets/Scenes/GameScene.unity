@@ -857,6 +857,7 @@ MonoBehaviour:
   unlimitedStaminaPanel: {fileID: 0}
   propGetTipPanel: {fileID: 0}
   menuPanel: {fileID: 0}
+  featurePanel: {fileID: 0}
   mainPanelPrefab: {fileID: 6279902547704463589, guid: 231e231ff7019df48a0d406f1b2b3efe, type: 3}
   settingPanelPrefab: {fileID: 8783159860097895648, guid: 9a6c4150c3da64542a64200564cc5523, type: 3}
   winPartPanelPrefab: {fileID: 654648174833964306, guid: edb5d615879fa5e4c907bcd2808209e9, type: 3}
@@ -870,6 +871,7 @@ MonoBehaviour:
   getStaminaPanelPrefab: {fileID: 2504530522051090434, guid: 2b5dd1308d3267043b3c20d2aa2457d4, type: 3}
   unlimitedStaminaPanelPrefab: {fileID: 2504530522051090434, guid: 5362b7bec8bd3d44d8cc1886c43202fa, type: 3}
   menuPanelPrefab: {fileID: 5987610650457024942, guid: 5b33686f7db07674c853242c3eeb6ec8, type: 3}
+  featurePanelPrefab: {fileID: 50078561173315393, guid: 6ace791c25cfedc499d33f1846fd681f, type: 3}
   tipsTransform: {fileID: 0}
 --- !u!1 &963194225
 GameObject:
@@ -1193,7 +1195,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
       propertyPath: m_RootOrder
-      value: 4
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
       propertyPath: m_AnchorMax.x
@@ -1855,6 +1857,7 @@ MonoBehaviour:
   spawnPoolRoot: {fileID: 230187025}
   emojiManager: {fileID: 1287049119}
   staminaConfig: {fileID: 11400000, guid: 67e6055727302cc4296f0ce4981add9c, type: 2}
+  newFeatureConfig: {fileID: 11400000, guid: aa1bfd311f5a14d4aab5fd1b79a701d4, type: 2}
 --- !u!4 &1940794605
 Transform:
   m_ObjectHideFlags: 0

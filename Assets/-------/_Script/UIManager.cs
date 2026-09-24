@@ -29,6 +29,7 @@ public class UIManager : MonoBehaviour
     [HideInInspector] public Transform unlimitedStaminaPanel;
     [HideInInspector] public Transform propGetTipPanel;
     [HideInInspector] public Transform menuPanel;
+    [HideInInspector] public Transform featurePanel;
     
     public GameObject mainPanelPrefab;
     public GameObject settingPanelPrefab;
@@ -43,6 +44,7 @@ public class UIManager : MonoBehaviour
     public GameObject getStaminaPanelPrefab;
     public GameObject unlimitedStaminaPanelPrefab;
     public GameObject menuPanelPrefab;
+    public GameObject featurePanelPrefab;
     
     public Transform tipsTransform;
     public static bool IsPanelShow = false;
@@ -113,7 +115,9 @@ public class UIManager : MonoBehaviour
         showRevivePanel(false);
         showFailPanel(false);
         showWinPanel(false);
-        //ShowShareBoxPanel(false);
+        ShowFeaturePanel(false);
+        featurePanel = null; 
+        GameManager.Instance.CheckShowFeature();
     }
 
     //private void OnEnable()
@@ -384,7 +388,24 @@ public class UIManager : MonoBehaviour
             }
         }
     }
-
+    public void ShowFeaturePanel(bool isShow,NewFeatureData data = null)
+    {
+        if (isShow && featurePanel == null && featurePanelPrefab != null)
+        {
+            featurePanel = Instantiate(featurePanelPrefab, transform).transform;
+        }
+        if (featurePanel != null)
+        {
+            if (isShow)
+            {
+                ShowPanel(featurePanel);
+                FeaturePanel panel = featurePanel.GetComponent<FeaturePanel>();
+                panel.ShowPanel(data);
+            }
+            else
+                featurePanel.gameObject.SetActive(false);
+        }
+    }
 
     public void ShowPanel(Transform panel)
     {
