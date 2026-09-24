@@ -665,7 +665,7 @@ namespace CrowdMatch
             if (gatherCountText != null)
             {
                 if (conveyorZone != null)
-                    gatherCountText.text = conveyorZone.OccupiedSlots + " / " + conveyorZone.TotalSlots;
+                    gatherCountText.text = conveyorZone.OccupiedSlots + "/" + conveyorZone.TotalSlots;
                 else
                     gatherCountText.text = gatheredItems.Count.ToString();
             }
