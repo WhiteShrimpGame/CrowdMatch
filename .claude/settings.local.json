@@ -91,7 +91,12 @@
       "Read(//dev/**)",
       "Bash(grep -m1 '\\\\\\\\r')",
       "Bash(git --no-pager diff --stat)",
-      "Bash(git --no-pager diff -U1 -- Assets/Scenes/GameScene.unity)"
+      "Bash(git --no-pager diff -U1 -- Assets/Scenes/GameScene.unity)",
+      "Bash(git --no-pager log --oneline -4)",
+      "Bash(git --no-pager show --stat --oneline HEAD)",
+      "Bash(git --no-pager diff -U2 Assets/Scripts/Gameplay/GameController.cs)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Gameplay/PixelGroup.cs)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelGroupEditor.cs)"
     ]
   }
 }
