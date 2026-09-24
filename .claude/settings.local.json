@@ -96,7 +96,12 @@
       "Bash(git --no-pager show --stat --oneline HEAD)",
       "Bash(git --no-pager diff -U2 Assets/Scripts/Gameplay/GameController.cs)",
       "Bash(git --no-pager diff -U1 Assets/Scripts/Gameplay/PixelGroup.cs)",
-      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelGroupEditor.cs)"
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelGroupEditor.cs)",
+      "Bash(awk 'NR>=4060 && NR<=4094' Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
+      "Bash(grep -n \"private\\\\|///\")",
+      "Bash(git --no-pager log --oneline -3)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
+      "Bash(git --no-pager diff --stat Assets/Scripts/Editor/PixelColorBrushWindow.cs)"
     ]
   }
 }
