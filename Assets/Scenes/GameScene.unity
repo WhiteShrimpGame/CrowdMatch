@@ -1226,19 +1226,7 @@ MonoBehaviour:
   boxWholePrefab: {fileID: 6898552183250439212, guid: b5f5dc90e80d5794bacd2ae72e13020a, type: 3}
   elevatorPrefab: {fileID: 2551135059901201391, guid: 9f53810ad24b66c4581e815e9e9ef7ac, type: 3}
   icePrefab: {fileID: 4587829874173678951, guid: fed2247fa3deff24c809041741cac32f, type: 3}
-  crateCornerPrefab: {fileID: 4488746321237894919, guid: 54c30786f5f71274f96da6bb4f9cbf89, type: 3}
-  crateEdgePrefab: {fileID: 3233401219397590539, guid: dfbe1c5c9ef64304c8aa91613cc23c62, type: 3}
-  crateCenterPrefab: {fileID: 2196358846936830575, guid: 86b770999f3279a43907c10271bf2c2a, type: 3}
-  crateSealPrefab: {fileID: 6609499673052173810, guid: a240a7d387941de418733934c8514e5f, type: 3}
-  crateNailPrefab: {fileID: 3341524908737008507, guid: d656daae28cf81642844a8196fd7a284, type: 3}
-  crateSealInset: {x: 0.3, y: 0.3}
-  crateSealExtend: 0.4
-  crateSealHeight: 0
-  crateSealFirstLift: 0.05
-  crateSealYawOffset: 0
-  crateRestoreYOffset: -1
-  crateRestoreWaveInterval: 0.05
-  crateRestoreDuration: 0.25
+  cratePrefab: {fileID: 4815162342000001, guid: 2664f59a4c5542c6b71b257281d30262, type: 3}
   defaultGroundMaterial: {fileID: 2100000, guid: 167bbe0942e8d9846a622a014ad22a57, type: 2}
 --- !u!4 &882082745
 Transform:

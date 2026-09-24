@@ -16,13 +16,17 @@ namespace CrowdMatch
     ///
     /// 拆箱靠**外部点击**：每成功点击移出一次，与本次移出的像素上下左右（4 邻）相接的木箱各计 1 次；
     /// 同一次点击移出的是同一组，组内有多颗挨着木箱也只算 1 次。计满
-    /// <see cref="destroyAfterMoves"/> 次即销毁（**视觉立即消失**），底下像素随之恢复可见、按正常规则
-    /// 重新判定暴露、恢复可点 —— 恢复时带一段「从左下至右上」的斜向波浪浮现（见 <see cref="StartRestoreWave"/>）。
+    /// <see cref="destroyAfterMoves"/> 次即销毁：逻辑上立刻不再占格、不再盖像素（掩码那一侧要多撑一段，
+    /// 见下），**视觉分三段**——先只放大（不上升、像素也不露头）→ 缩小开始才匀速升起 + 像素露头 →
+    /// 缩到 0 销毁本体与剩下的封条（见 <see cref="PlayBreakDisappear"/>）；底下像素在**缩小开始**那一刻
+    /// 恢复可见、按正常规则重新判定暴露、恢复可点，并带一段「从左下至右上」的斜向波浪浮现
+    /// （见 <see cref="StartRestoreWave"/>）。
     ///
     /// 计数表现：箱体上钉两条**交叉封条**，每条封条两端各一颗钉子，钉子位置 = 木箱矩形的四角
-    /// 各向箱内偏移 <c>crateSealInset</c>。每减一次数摘掉一条封条，**最后一次减次数连箱体一起拆掉** ——
+    /// 各向箱内偏移 <c>sealInset</c>。每减一次数摘掉一条封条，**最后一次减次数连箱体一起拆掉** ——
     /// 所以次数 3 = 两条封条 + 本体，正好是这套表现的标准形（见 <see cref="SealCount"/>）。
-    /// 两个预制体与偏移 / 延长 / 抬高等参数都配在 <see cref="PixelGroup"/> 上（与冰组、升降台预制体同一处）。
+    /// 视觉与表现的**全部参数**（三个格块预制体、封条与钉子预制体、偏移 / 延长 / 抬高、消失与恢复动画）
+    /// 都配在**本组件**上 —— 也就是跟着 Crate 预制体走（与冰、升降台那些预制体同一套路）。
     ///
     /// 木箱**不产生**像素、不改 TotalPixelCount：被盖住的像素是先算进像素总数、再被盖住的，
     /// 所以必须先拆箱、再点出去，关卡才可能通。
@@ -37,7 +41,7 @@ namespace CrowdMatch
         [Min(1)]
         public int destroyAfterMoves = 3;
 
-        [Header("视觉（3 个预制体，各占一格；留空则取 PixelGroup 上的木箱预制体）")]
+        [Header("视觉（3 个预制体，各占一格）")]
         [Tooltip("四个角格用的木箱预制体")]
         public GameObject cornerPrefab;
 
@@ -47,6 +51,62 @@ namespace CrowdMatch
         [Tooltip("中心格（非边缘）用的木箱预制体")]
         public GameObject centerPrefab;
 
+        [Header("封条表现（预制体 + 参数）")]
+        [Tooltip("封条预制体：**长度轴为局部 +X**（做在 +Z 就把 sealYawOffset 填 90），" +
+                 "长度按 **1 世界单位**制作。脚本**只动 x 缩放**（乘上「钉子间距 + sealExtend」的世界长度），" +
+                 "y / z 缩放与局部 y 位置都保留预制体原值")]
+        public GameObject sealPrefab;
+
+        [Tooltip("钉子预制体：每条封条两端各钉一颗；不缩放、朝向不动，" +
+                 "局部 y 位置保留预制体原值（只由脚本定 x / z）")]
+        public GameObject nailPrefab;
+
+        [Tooltip("封条内偏移（xz，**Pixel 单位** = unitSize 的倍数）：以木箱矩形的四角为参考向箱内偏移，" +
+                 "偏移到的位置就是钉子位置")]
+        public Vector2 sealInset = new Vector2(0.3f, 0.3f);
+
+        [Tooltip("封条固定延长值（Pixel 单位）：封条长度 = 钉子间距 + 此值，于是两端各露出一截")]
+        public float sealExtend = 0.4f;
+
+        [Tooltip("封条与钉子整体离地高度（Pixel 单位）；预制体自己已经把高度做进去了就留 0")]
+        public float sealHeight = 0f;
+
+        [Tooltip("**先摘掉**的那条封条额外抬高的 Y（Pixel 单位），避免两条在交叉点重叠打架")]
+        public float sealFirstLift = 0.05f;
+
+        [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
+        public float sealYawOffset = 0f;
+
+        [Header("消失表现（拆箱那一刻）")]
+        [Tooltip("**放大**阶段时长（秒）：此间木箱只弹大 1.1 倍 —— **不上升，被盖住的像素也不露头**")]
+        [Min(0.01f)]
+        public float vanishPopDuration = 0.2f;
+
+        [Tooltip("**缩小**阶段时长（秒）：木箱匀速升起 vanishRiseHeight 的同时缩到 0，缩到 0 才销毁本体与封条；" +
+                 "被盖住的像素也在这一刻露头并开始起身")]
+        [Min(0.01f)]
+        public float vanishShrinkDuration = 0.35f;
+
+        [Tooltip("消失时木箱**整体匀速升起**的高度（世界单位），时长 = 缩小阶段；0 = 不升起")]
+        [Min(0f)]
+        public float vanishRiseHeight = 3f;
+
+        [Header("被盖像素的恢复")]
+        [Tooltip("木箱**开始缩小**之后，被它盖住的像素才开始「起身」的延时（秒）；填 0 = 缩小时即刻起身")]
+        [Min(0f)]
+        public float restoreDelay = 0f;
+
+        [Tooltip("被盖住的像素的起始 Y 偏移（世界单位，默认 -1 = 先沉下去一个像素），" +
+                 "随后按从左下至右上的斜向波前恢复回原位")]
+        public float restoreYOffset = -1f;
+
+        [Tooltip("波前相邻两档之间的间隔（秒）：波前号 = (col - colMin) + (rowMax - row)，" +
+                 "左下角为 0、右上角最大，于是波从木箱左下角推到右上角。填 0 = 整块同时恢复")]
+        public float restoreWaveInterval = 0.05f;
+
+        [Tooltip("单个像素恢复的时长（秒），运动为**先匀加速后匀减速**（等价 DOTween 的 InOutQuad）")]
+        public float restoreDuration = 0.25f;
+
         [Header("音效")]
         [Tooltip("拆箱计数**扣减但还没拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
         public string hitSoundTag = "BoxHit";
@@ -54,9 +114,14 @@ namespace CrowdMatch
         [Tooltip("拆箱计数扣减到 0、木箱**被拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
         public string breakSoundTag = "BoxBreak";
 
-        /// <summary>消失动画两段的时长（秒），与 BoxItem 保持一致。</summary>
-        private const float PopDuration = 0.2f;
-        private const float ShrinkDuration = 0.2f;
+        /// <summary>消失弹缩「先放大」的时长（秒），下限保护。</summary>
+        private float PopDuration => Mathf.Max(0.01f, vanishPopDuration);
+
+        /// <summary>消失弹缩「后缩小」的时长（秒），下限保护。</summary>
+        private float ShrinkDuration => Mathf.Max(0.01f, vanishShrinkDuration);
+
+        /// <summary>拆箱时整体匀速升起的高度（世界单位）。</summary>
+        private float VanishRiseHeight => Mathf.Max(0f, vanishRiseHeight);
 
         /// <summary>所属 PixelGroup（由 PixelGroup.RebuildGrid / SpawnCrate 赋值，不序列化）。</summary>
         [System.NonSerialized] public PixelGroup group;
@@ -66,6 +131,18 @@ namespace CrowdMatch
 
         /// <summary>是否已拆掉。拆掉后不再占格、不再盖像素、不再计数。</summary>
         [System.NonSerialized] public bool destroyed;
+
+        /// <summary>
+        /// 消失动画「放大」阶段结束的时刻（<see cref="Time.time"/> 口径；0 = 不在消失动画里）。
+        /// 这段时间内本箱**仍算盖住自己的格子**（<see cref="PixelGroup.RefreshCrateState"/> 会看
+        /// <see cref="IsHidingForVanish"/>），于是像素先不露头、也照旧点不到；
+        /// 缩小一开始（<see cref="RevealCoveredPixels"/>）就把这个窗口撤掉。
+        /// 用「时刻」而不是协程/计时器：任何一次掩码重算都能问出当前该不该遮挡，不依赖调用顺序。
+        /// </summary>
+        [System.NonSerialized] private float _vanishRevealTime;
+
+        /// <summary>是否正处在消失动画的「放大」阶段（此间本箱仍遮挡自己的格子）。</summary>
+        public bool IsHidingForVanish => _vanishRevealTime > 0f && Time.time < _vanishRevealTime;
 
         /// <summary>拼接出的木箱视觉块（消失动画 + 重建显示用）。</summary>
         private readonly List<GameObject> _visualPieces = new List<GameObject>();
@@ -259,8 +336,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 拼计数表现的封条组。两条封条沿木箱的两条**对角线**交叉：
-        /// 钉子位置 = 木箱矩形的四角各向箱内偏移 <c>crateSealInset</c>（Pixel 单位），
-        /// 封条就架在对角的那两颗钉子上，长度 = 钉子间距 + <c>crateSealExtend</c>。
+        /// 钉子位置 = 木箱矩形的四角各向箱内偏移 <c>sealInset</c>（Pixel 单位），
+        /// 封条就架在对角的那两颗钉子上，长度 = 钉子间距 + <c>sealExtend</c>。
         ///
         /// 偏移 / 延长 / 高度 / 抬高都按 Pixel 单位（<c>unitSize</c> 的倍数）换算 —— 与角/边/中心拼块同一口径，
         /// 换 unitSize 的关卡不用重调。两个预制体本身不按 unitSize 缩放（钉子完全不动，封条只动 x）。
@@ -274,19 +351,19 @@ namespace CrowdMatch
             if (count <= 0)
                 return;
 
-            if (pg.crateSealPrefab == null || pg.crateNailPrefab == null)
+            if (sealPrefab == null || nailPrefab == null)
             {
                 Debug.LogWarning("[CrateItem] 缺少封条 / 钉子预制体，木箱不拼封条表现。" +
-                    "请在 PixelGroup 上补 crateSealPrefab / crateNailPrefab。", this);
+                    "请在本组件上补 sealPrefab / nailPrefab。", this);
                 return;
             }
 
             float unit = pg.unitSize;
-            float insetX = Mathf.Max(0f, pg.crateSealInset.x) * unit;
-            float insetZ = Mathf.Max(0f, pg.crateSealInset.y) * unit;
-            float extend = Mathf.Max(0f, pg.crateSealExtend) * unit;
-            float height = pg.crateSealHeight * unit;
-            float lift = pg.crateSealFirstLift * unit;
+            float insetX = Mathf.Max(0f, sealInset.x) * unit;
+            float insetZ = Mathf.Max(0f, sealInset.y) * unit;
+            float extend = Mathf.Max(0f, sealExtend) * unit;
+            float height = sealHeight * unit;
+            float lift = sealFirstLift * unit;
 
             // 木箱矩形（含半格）：左前格中心 z 最大、右后格中心 z 最小
             Vector3 front = pg.GetLocalPosition(colMin, rowMin);
@@ -314,7 +391,7 @@ namespace CrowdMatch
         /// <summary>
         /// 拼一组「封条 + 两端各一颗钉子」。钉子挂在封条组下，所以摘封条时一起消失。
         ///
-        /// 封条朝向：预制体长度轴（默认局部 +X，用 <c>crateSealYawOffset</c> 改）对齐钉子连线，只绕 Y 转；
+        /// 封条朝向：预制体长度轴（默认局部 +X，用 <c>sealYawOffset</c> 改）对齐钉子连线，只绕 Y 转；
         /// **只动 x 缩放** —— 在预制体原始 x 缩放上乘「钉子间距 + 延长值」，y / z 原样保留。
         /// <paramref name="extraY"/> 把整组（封条与两颗钉子）抬高一点 —— 给两条封条分个上下，
         /// 免得交叉点重合打架。
@@ -340,9 +417,9 @@ namespace CrowdMatch
             root.transform.SetParent(transform, false);
             root.transform.position = (a + b) * 0.5f;
             root.transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up) *
-                Quaternion.Euler(0f, -90f + pg.crateSealYawOffset, 0f);
+                Quaternion.Euler(0f, -90f + sealYawOffset, 0f);
 
-            var strip = PrefabSpawner.Instantiate(pg.crateSealPrefab, root.transform);
+            var strip = PrefabSpawner.Instantiate(sealPrefab, root.transform);
             if (strip != null)
             {
                 strip.name = "SealStrip_" + index;
@@ -370,7 +447,7 @@ namespace CrowdMatch
         /// </summary>
         private void AddNail(PixelGroup pg, Transform parent, string name, Vector3 worldPos)
         {
-            var nail = PrefabSpawner.Instantiate(pg.crateNailPrefab, parent);
+            var nail = PrefabSpawner.Instantiate(nailPrefab, parent);
             if (nail == null)
                 return;
 
@@ -395,7 +472,7 @@ namespace CrowdMatch
             _sealGroups.Clear();
         }
 
-        /// <summary>该格用哪个视觉预制体（角/边/中心）；本物体上没配就回退到 PixelGroup 上的木箱预制体。</summary>
+        /// <summary>该格用哪个视觉预制体（角/边/中心）。</summary>
         private GameObject PiecePrefab(int c, int r)
         {
             bool isLeft = c == colMin;
@@ -404,18 +481,20 @@ namespace CrowdMatch
             bool isBottom = r == rowMax;
 
             if ((isLeft || isRight) && (isTop || isBottom))
-                return cornerPrefab != null ? cornerPrefab : (group != null ? group.crateCornerPrefab : null);
+                return cornerPrefab;
             if (isLeft || isRight || isTop || isBottom)
-                return edgePrefab != null ? edgePrefab : (group != null ? group.crateEdgePrefab : null);
-            return centerPrefab != null ? centerPrefab : (group != null ? group.crateCenterPrefab : null);
+                return edgePrefab;
+            return centerPrefab;
         }
 
         /// <summary>
         /// 记一次「相邻像素移出」（一次点击调用一次，重复计数由调用方保证 —— 同一组只算 1 次）。
         /// 没计满就按计数表现摘掉一条封条（从先摘的那条开始）；
-        /// 计满则本箱转为已拆：立刻不再占格 / 不再盖像素（掩码由 PixelGroup.RefreshCrateState 重建），
-        /// 视觉**立即消失**（本体与还剩着的封条一起销毁，不再弹缩），被盖住的像素随后按斜向波前浮现
-        /// （见 <see cref="StartRestoreWave"/>）。返回**本次是否刚拆掉**。
+        /// 计满则本箱转为已拆：**放大阶段内仍算盖住自己的格子**（像素不露头、也点不到，见
+        /// <see cref="IsHidingForVanish"/>），视觉**整体匀速升起 + 「先放大后缩小」**（见
+        /// <see cref="PlayBreakDisappear"/>，缩到 0 才销毁本体与还剩着的封条），
+        /// 缩小一开始才撤占格、恢复像素显示，并让其按斜向波前起身（见 <see cref="RevealCoveredPixels"/>）。
+        /// 返回**本次是否刚拆掉**。
         ///
         /// 音效：**扣减后不为 0 → <see cref="hitSoundTag"/>；扣减后为 0（拆掉）→ <see cref="breakSoundTag"/>**。
         /// 两者互斥 —— 拆掉那一次只播破碎音，不会再叠一声命中音。
@@ -437,8 +516,15 @@ namespace CrowdMatch
 
             PlayTag(breakSoundTag);     // 扣减到 0：拆掉本体
             destroyed = true;
-            ClearVisual();              // 木箱**立即消失**（不再弹一下再缩小），封条一并销毁
-            StartRestoreWave();         // 被盖住的像素按「左下 → 右上」的斜向波前浮现
+
+            // 消失表现分三段（见 PlayBreakDisappear）：先**只放大**（不升起、像素也不露头）→ 缩小开始才
+            // 升起 + 像素露头 + 起「起身」波前 → 缩到 0 销毁本体与剩下的封条。
+            // 编辑器里不跑动画（DOTween / 协程都不适合），退回「立即消失」。
+            if (Application.isPlaying)
+                PlayBreakDisappear();
+            else
+                ClearVisual();
+
             return true;
         }
 
@@ -453,6 +539,89 @@ namespace CrowdMatch
                 return;
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play(tag);
+        }
+
+        /// <summary>
+        /// 木箱被拆掉时的消失表现，**分三段**（时长与高度都配在 PixelGroup 上，本组件只负责读）：
+        ///
+        /// | 阶段 | 木箱 | 被盖住的像素 |
+        /// |---|---|---|
+        /// | 放大（<c>vanishPopDuration</c>） | 只弹大 1.1 倍，**不上升** | **不露头**（本箱仍算遮挡，见 <see cref="IsHidingForVanish"/>） |
+        /// | 缩小（<c>vanishShrinkDuration</c>） | **匀速升起** <c>vanishRiseHeight</c>，同时缩到 0 | 这一刻才露头，并按 <see cref="StartRestoreWave"/> 的延时起身 |
+        /// | 缩到 0 | 销毁本体与还剩着的封条（<see cref="ClearVisual"/>） | 照旧起身 |
+        ///
+        /// 两条实现口径：
+        /// · 缩放作用在**木箱根节点**上（它的位置就是矩形中心，见 <see cref="BuildVisual"/>），
+        ///   所以整箱以中心为轴一起弹缩，而不是每块各自原地缩；封条是根的子物体，自然跟着一起。
+        /// · **手写 Sequence** 而不用 <see cref="TransformDisappearExtensions.DisappearWithPop"/>：
+        ///   需要在「放大 → 缩小」的交界处插一段并行动作（升起 + 揭示像素），而那个扩展入口会
+        ///   <c>DOKill()</c> 掉同一 Transform 上的其它 Tween，没法在交界处接东西。
+        ///   升起另用 <c>DOVirtual.Float</c>（它的目标不是这个 Transform，不会被 DOKill 误杀），
+        ///   <c>Ease.Linear</c> 就是「匀速」；<c>SetLink</c> 保证木箱中途被销毁时它自己收掉。
+        /// </summary>
+        private void PlayBreakDisappear()
+        {
+            Transform root = transform;
+            Vector3 baseScale = root.localScale;   // 正常是 1
+            Vector3 fromPos = root.position;
+            float pop = PopDuration;
+            float shrink = ShrinkDuration;
+            float rise = VanishRiseHeight;
+
+            // 「放大」阶段内本箱仍算盖住自己的格子 → 像素不露头、也照旧点不到（见 IsHidingForVanish）
+            _vanishRevealTime = Time.time + pop;
+
+            root.DOKill();   // 防重叠（与 DisappearWithPop 入口同口径）
+
+            // 三段式：只放大 →（缩小开始的交界处）升起 + 像素露头 → 缩到 0 销毁本体与剩下的封条。
+            // 这里**手写链**而不用 DisappearWithPop：需要在「放大 → 缩小」的交界处插一段并行动作
+            // （升起 + 揭示像素），而那个扩展入口会 DOKill 掉同一 Transform 上的其它 Tween，
+            // 没法在交界处接东西（扩展自己的注释里也写了「要并行得手写链」）。
+            var seq = DOTween.Sequence();
+            seq.Append(root.DOScale(baseScale * 1.1f, pop).SetEase(Ease.OutQuad));
+            seq.AppendCallback(() =>
+            {
+                if (root == null)
+                    return;   // 动画途中随关卡重建被销毁：后面什么都不做
+
+                // 缩小开始：整箱匀速升起，时长与缩小同步（缩到 0 之后升起也没意义了）
+                if (rise > 0f)
+                {
+                    DOVirtual.Float(0f, rise, shrink, v => root.position = fromPos + Vector3.up * v)
+                        .SetEase(Ease.Linear)
+                        .SetLink(root.gameObject)
+                        .OnComplete(() => root.position = fromPos);   // 收尾把壳挪回起点（视觉已经没了，看不见）
+                }
+
+                RevealCoveredPixels();   // 像素露头 + 重算暴露 + 起「起身」波前
+            });
+            seq.Append(root.DOScale(Vector3.zero, shrink).SetEase(Ease.InQuad));
+            seq.OnComplete(() =>
+            {
+                if (root == null)
+                    return;
+                root.localScale = baseScale;   // 还原，否则重载后复用的木箱会带着 0 缩放
+                ClearVisual();
+            });
+        }
+
+        /// <summary>
+        /// 缩小开始那一刻：撤掉「消失动画期间仍算遮挡」的窗口，然后让 PixelGroup 重算 ——
+        /// 被盖住的像素恢复可见、暴露与连通重新判定，最后按斜向波前「起身」。
+        ///
+        /// **顺序不能换**：先撤窗口，再 <see cref="PixelGroup.RefreshExposed"/>（它内部先
+        /// <see cref="PixelGroup.RefreshCrateState"/> 撤占格 + 恢复渲染，再重算暴露），
+        /// 最后才起波前 —— 波前要用刷新后的像素状态。
+        /// </summary>
+        private void RevealCoveredPixels()
+        {
+            _vanishRevealTime = 0f;   // 本箱不再遮挡（无论下面能不能刷新，这个窗口都得撤）
+
+            if (group == null)
+                return;
+
+            group.RefreshExposed();
+            StartRestoreWave();
         }
 
         /// <summary>
@@ -491,28 +660,30 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 木箱被拆掉那一刻：把**被它盖住的**像素按「从左下至右上」的斜向波前依次浮现
-        /// （单个动画见 <see cref="PixelItem.PlayCrateRestore"/>）。
+        /// 木箱**开始缩小**那一刻（见 <see cref="RevealCoveredPixels"/>）：把**被它盖住的**像素按
+        /// 「从左下至右上」的斜向波前依次起身（单个动画见 <see cref="PixelItem.PlayCrateRestore"/>）。
         ///
         /// 波前号 = <c>(col - colMin) + (rowMax - row)</c>：左下角 (colMin, rowMax) 为 0、右上角
         /// (colMax, rowMin) 最大 —— 等值线是一条沿反对角线推进的波，波从木箱左下角推到右上角。
-        /// delay = 波前号 × <see cref="PixelGroup.crateRestoreWaveInterval"/>。
+        /// delay = <see cref="restoreDelay"/>（整体延后）+ 波前号 × <see cref="restoreWaveInterval"/>。
         ///
-        /// 三个参数（起始 y 偏移 / 波前间隔 / 单个时长）配在 <see cref="PixelGroup"/> 上，
-        /// 与其它木箱预制体参数同一处 —— 它们是全局表现参数，不进关卡 JSON。
+        /// 四个参数（起身延时 / 起始 y 偏移 / 波前间隔 / 单个时长）都配在**本组件**上（随 Crate 预制体走），
+        /// 它们是纯表现参数，不进关卡 JSON。
         ///
         /// **只在 Play 模式触发**：编辑器里重建显示时协程没法跑（非 Play 下 StartCoroutine 会报错）。
-        /// 此刻像素其实还被标着「被盖住」（渲染器关着），同一帧稍后 <see cref="PixelGroup.RefreshCrateState"/>
-        /// 才把它们放出来 —— 于是玩家看到的是「箱子没了、像素从下方浮起」，而不是先亮一下再沉下去。
+        /// 调用时 <see cref="RevealCoveredPixels"/> 已经先 <see cref="PixelGroup.RefreshExposed"/> 过，
+        /// 像素此刻刚恢复显示 —— 于是玩家看到的是「箱子缩没、像素沉在下面等一会儿再浮起」，
+        /// 而不是先亮一下再沉下去。
         /// </summary>
         private void StartRestoreWave()
         {
             if (!Application.isPlaying || group == null || group.grid == null)
                 return;
 
-            float yOffset = group.crateRestoreYOffset;
-            float interval = Mathf.Max(0f, group.crateRestoreWaveInterval);
-            float duration = Mathf.Max(0f, group.crateRestoreDuration);
+            float yOffset = restoreYOffset;
+            float interval = Mathf.Max(0f, restoreWaveInterval);
+            float duration = Mathf.Max(0f, restoreDuration);
+            float delay = Mathf.Max(0f, restoreDelay);   // 木箱开始缩小后，像素才起身的延时
 
             foreach (var cell in Cells)
             {
@@ -524,7 +695,7 @@ namespace CrowdMatch
                     continue;
 
                 int wave = (cell.x - colMin) + (rowMax - cell.y);
-                pixel.PlayCrateRestore(wave * interval, yOffset, duration);
+                pixel.PlayCrateRestore(delay + wave * interval, yOffset, duration);
             }
         }
 
