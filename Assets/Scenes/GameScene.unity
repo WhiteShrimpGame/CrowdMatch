@@ -1897,7 +1897,7 @@ MonoBehaviour:
   rows: 40
   xSpacing: 2
   zSpacing: 1.2
-  shuffleContainers: 1
+  shuffleContainers: 0
   pixelGroup: {fileID: 882082744}
   minCapacity: 3
   maxCapacity: 3
