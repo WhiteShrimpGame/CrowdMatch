@@ -78,10 +78,10 @@ namespace CrowdMatch
     /// <summary>用选中的两个 PixelItem 作为左上、右下创建箱子（与选中顺序无关，取 min/max 归一化）。</summary>
     public static class BoxCreator
     {
-        [MenuItem("CrowdMatch/用选中 Pixel 创建箱子（左上、右下）", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/箱子（左上、右下）", true, MenuPriority.Create + MenuPriority.Seg2)]
         private static bool ValidateCreateBoxFromSelection() => CollectSelectedPixels().Count == 2;
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建箱子（左上、右下）")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/箱子（左上、右下）", false, MenuPriority.Create + MenuPriority.Seg2)]
         private static void CreateBoxFromSelection()
         {
             var pixels = CollectSelectedPixels();

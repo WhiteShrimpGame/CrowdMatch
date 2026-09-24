@@ -504,7 +504,6 @@ namespace CrowdMatch
                 Debug.Log("[Elevator] " + name + " 区域清空，开门并升起第 " + _nextGroupIndex + " 组。", this);
 
             _animating = true;
-            group.OnElevatorAdvanceStarted(this);
             StartCoroutine(OpenAndRiseRoutine());
             return true;
         }
@@ -530,8 +529,6 @@ namespace CrowdMatch
             }
 
             _animating = false;
-            if (group != null)
-                group.OnElevatorAdvanceFinished(this);
         }
 
         private IEnumerator RiseGroupRoutine()

@@ -1,10 +1,10 @@
 # CrowdMatch「失败判定漏判」排查文档
 
-> 状态：**仅分析，未修改任何代码**。本文记录「失败条件已满足、却不触发失败（复活）」的排查结论：
-> 全部判定入口、全部「判定为非失败」的门禁、每个门禁解除时是否有复查点，以及确认漏判的成因清单。
-> 具体处理待定（见 §6 的口径问题）。
+> 状态：**门禁 8 / 9 已按 §6 (b) 定案删除**（2026-09-23），其余结论仍为「仅分析」。本文记录
+> 「失败条件已满足、却不触发失败（复活）」的排查结论：全部判定入口、全部「判定为非失败」的门禁、
+> 每个门禁解除时是否有复查点，以及确认漏判的成因清单。
 >
-> 排查日期：2026-09-22
+> 排查日期：2026-09-22（口径 (b) 定案并落地：2026-09-23）
 > 范围：`GameController` / `ContainerGroup` / `ContainerItem` / `ConveyorBeltZone` / `ConveyorBelt` /
 > `CrowdBufferZone` / `PixelGroup` / `BoxItem` / `ElevatorItem` / `GameManager` / `GameState`
 >
@@ -35,8 +35,10 @@ TryCheckFail()                        GameController.cs:281
 **注意：`GameManager.GameFail()`（`GameManager.cs:127`，重置当前关 + 连败 +1）目前是死代码** ——
 全工程没有任何调用方，失败的实际表现就是上面这条「原地复活、继续本关」。
 
-胜利是另一条独立路径：`GameController.Update()` 里 `if (GameState.IsGameStart) CheckWin();`，
-失败判定已完全事件驱动，**不再每帧检测**（`GameController.cs:534` 的注释即此意）。
+胜负判定**都已事件驱动、不再每帧轮询**：失败见 `TryCheckFail`（本文主题），
+胜利见 `ContainerGroup.TryCheckWin`——只在「某辆车完成匹配（最后一颗像素开始上车）」与「某辆车离开盘面（开始倒车）」
+两个时点调用，口径已从**像素侧计数**（`ClearedPixelCount >= TotalPixelCount`）改为**载体侧**的
+「板上不存在『未完成匹配』的车」（顺带修掉了倍乘门额外像素漏加总数导致的提前判胜）。
 
 ---
 
@@ -66,22 +68,25 @@ if (hadGridPixels && !HasGridPathfindingPixels)   // 本帧结束
 
 ---
 
-## 3. `IsFail()` 的九道门禁
+## 3. `IsFail()` 的八道门禁
 
-`GameController.cs:296`。门禁 1~4 是前置门槛，5~9 是「静止门槛」（还有进度就不判失败），最后逐槽遍历。
+`GameController.cs:312`。门禁 1~4 是前置门槛，5~7 是「静止门槛」（还有进度就不判失败），最后逐槽遍历。
+**原门禁 8 / 9（木箱释放中 / 升降台推进中）已于 2026-09-23 删除，原门禁 10（逐槽遍历）顺位改为门禁 8** ——
+日志里的编号与本节一致。
 
 | # | 门禁 | 「判定为非失败」的条件 | 代码 | 解除那一刻是否有检查点 |
 |---|---|---|---|---|
-| 1 | `conveyorZone == null \|\| belt == null` | 没有传送带 | :298 | 不适用（配置问题） |
-| 2 | `TotalSlots <= 0` | 容量为 0 | :300 | 不适用（配置问题） |
-| 3 | `OccupiedSlots < TotalSlots` | **传送带未满** | :302 | ✅ 只有「上带」能变满 → 检查点 1 |
-| 4 | `containerGroup == null` | 没有容器组 | :304 | 不适用（配置问题） |
-| 5 | `crowdBuffer.HasGridPathfindingPixels` | 网格里还有像素在寻路 | :311 | ✅ 检查点 4（边沿事件） |
-| 6 | `containerGroup.HasPendingFrontTransition()` | 有车在补位 / 后排车已开盖且前方已放行 | :315 | ⚠️ 仅 `isRefilling` 路径 → 检查点 3；见 M2 / M5 |
-| 7 | `containerGroup.consumingCount > 0` | 有像素正在上车 | :319 | ✅ 检查点 2 |
-| 8 | `pixelGroup.releasingBoxesCount > 0` | 有木箱正在释放 | :323 | ❌ **无任何复查点** → M1 |
-| 9 | `pixelGroup.advancingElevatorsCount > 0` | 有升降台正在推进 | :327 | ❌ **无任何复查点** → M1 |
-| — | 逐槽遍历：任一像素有同色可匹配容器 | 至少一个能出得去 | :331-338 | ✅ 容器被消耗 → 检查点 2 / 3 |
+| 1 | `conveyorZone == null \|\| belt == null` | 没有传送带 | :317 | 不适用（配置问题） |
+| 2 | `TotalSlots <= 0` | 容量为 0 | :322 | 不适用（配置问题） |
+| 3 | `OccupiedSlots < TotalSlots` | **传送带未满** | :327 | ✅ 只有「上带」能变满 → 检查点 1 |
+| 4 | `containerGroup == null` | 没有容器组 | :332 | 不适用（配置问题） |
+| 5 | `crowdBuffer.HasGridPathfindingPixels` | 网格里还有像素在寻路 | :342 | ✅ 检查点 4（边沿事件） |
+| 6 | `containerGroup.HasPendingFrontTransition()` | 有车在补位 / 后排车已开盖且前方已放行 | :349 | ⚠️ 仅 `isRefilling` 路径 → 检查点 3；见 M2 / M5 |
+| 7 | `containerGroup.consumingCount > 0` | 有像素正在上车 | :356 | ✅ 检查点 2 |
+| 8 | 逐槽遍历：任一像素有同色可匹配容器 | 至少一个能出得去 | :362-373 | ✅ 容器被消耗 → 检查点 2 / 3 |
+
+> **已删除（2026-09-23）**：原门禁 8「有木箱正在释放」（`releasingBoxesCount`）、
+> 原门禁 9「有升降台正在推进」（`advancingElevatorsCount`）。删除理由见 §4 M1，口径见 §6 (b)。
 
 ### 3.1 门禁 6 的两个分支
 
@@ -119,38 +124,30 @@ if (row >= 1 && it.lidOpened && IsFrontCleared(col, row))   // 分支 B：后排
 
 ## 4. 确认的漏判成因
 
-按可能性排序。M1 最像实际遇到的现场。
+按可能性排序。M1（最像实际遇到的现场）已处理；其余仍未改。
 
-### M1 · 木箱 / 升降台计数归零后无人复查（结构性缺失）
+### M1 · 木箱 / 升降台挡住判定 —— **已处理：整个门禁与计数管线删除**（2026-09-23）
 
-`PixelGroup.cs:1644` / `:1656`：
+原门禁 8 / 9 由 `PixelGroup.releasingBoxesCount` / `advancingElevatorsCount` 驱动，
+而这两个计数归零时**没有任何人调用 `TryCheckFail`**（`OnBoxReleaseFinished` / `OnElevatorAdvanceFinished`
+只做自减），于是「挡一下」变成「永久挡住」：只有玩家再点一颗能走动的像素（凑出检查点 4）才自愈。
 
-```csharp
-public void OnBoxReleaseFinished(BoxItem box)
-{
-    releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);   // 没有 TryCheckFail
-}
+定案时确认了更根本的一点，也是**删除而非补复查点**的理由：
 
-public void OnElevatorAdvanceFinished(ElevatorItem elev)
-{
-    advancingElevatorsCount = Mathf.Max(0, advancingElevatorsCount - 1);   // 没有 TryCheckFail
-}
-```
+- **判决只取决于两件事**——门禁 3（带满）与门禁 8（带上每个槽位像素在同色容器里找不到可匹配的）。
+- 木箱释放 / 升降台推进**既不碰传送带、也不碰容器**：`HasMatchableContainerOfColor`
+  （`ContainerGroup.cs:809`）只读容器；而带满了就没有像素能再上带，容器集合也不会再变。
+- 所以那一刻判决**已经终局**：这两条门禁挡不住「误判失败」，只是把一个**正确**的判决往后推。
 
-**成因链**：
+因此直接删除：门禁 8 / 9、两个计数、`OnBoxReleaseFinished` / `OnElevatorAdvanceFinished` /
+`OnElevatorAdvanceStarted` 三个方法与各自调用点（`BoxItem.cs` / `ElevatorItem.cs`）。
+原门禁 10（逐槽遍历）顺位为门禁 8。删掉后 M1 的僵死路径不复存在。
 
-1. 门禁 8 / 9 只在「有箱子正在释放 / 有升降台正在推进」期间挡住判定；
-2. 若「带满 + 带上无同色可匹配」成立的那一刻恰好有箱子在释放（或升降台在推进），
-   `IsFail()` 返回 false，判定被跳过；
-3. 动画播完、计数归零时，**没有任何人再调用 `TryCheckFail`**；
-4. 之后只有玩家**再点一颗能走动的像素**（引发网格寻路排空 → 检查点 4）才会自愈。
-
-**为什么是「有时」**：木箱释放现在是按 Jump 节奏串行播放的，窗口有好几秒（`BoxItem.OpenRoutine`）；
-箱子越多的关卡，撞上这个窗口的概率越高。玩家停手观望 → 永远不复活。
-
-**无害的相邻情形**（记录以免误判）：箱子**无内容**时 `BoxItem.cs:348-351` 在同一帧
-`OnBoxOpened`（+1）→ `DisappearVisual` → `OnBoxReleaseFinished`（-1），计数立刻归零，
-本身不会挡住判定。
+**残留因素（不阻塞判定，但需要实测观感）**：木箱 / 升降台在揭示动画期间仍会**当场把像素写进 `grid`**
+（`BoxItem.cs:406`、`ElevatorItem.cs:551`），只是 `placing = true` + 不可点、`RefreshExposed()` 要等
+动画收尾。若动画中途判失败弹复活面板，揭示动画会继续跑完并落在一个正在复活的盘面上。
+`Revive()` 只重排「带上 + 缓冲区」的像素（动画中的像素既不在带上也不在缓冲区），所以**计数不会错**，
+但「复活与揭示同时进行」的观感需要你实际看一眼是否可接受。
 
 ### M2 · `OnPixelConsumed` 里检查点早于状态变更（顺序问题）
 
@@ -249,22 +246,24 @@ if (dist[nx, nz] <= myDist)
 
 ---
 
-## 6. 处理方向（待定，等口径确认）
+## 6. 处理方向
 
-| 编号 | 方向 | 备注 |
+| 编号 | 方向 | 状态 |
 |---|---|---|
-| M1 | 在 `OnBoxReleaseFinished` / `OnElevatorAdvanceFinished` 末尾各补一次 `TryCheckFail()` | 最小改动、覆盖最可能的成因 |
-| M2 | 把 `TryCheckFail()` 移到两条状态变更分支**之后**，或分支结束后补一次 | |
-| M3 | 若「带未满的死锁」也要算失败：加「无可推进像素」判定或带未满的静止看门狗 | **需先定口径** |
-| M4 | 把「已点击但无法推进的提取」与「正在推进的提取」区分开（前者不应挡住判失败）；或给提取加放弃 / 回滚路径 | |
+| M1 | ~~在 `OnBoxReleaseFinished` / `OnElevatorAdvanceFinished` 末尾各补一次 `TryCheckFail()`~~ | ✅ **口径 (b) 选了「不保留」：门禁 8 / 9 与两个计数整体删除**（2026-09-23） |
+| M2 | 把 `TryCheckFail()` 移到两条状态变更分支**之后**，或分支结束后补一次 | 待处理 |
+| M3 | 若「带未满的死锁」也要算失败：加「无可推进像素」判定或带未满的静止看门狗 | **待口径 (a)** |
+| M4 | 把「已点击但无法推进的提取」与「正在推进的提取」区分开（前者不应挡住判失败）；或给提取加放弃 / 回滚路径 | 待处理 |
 | M5 | `HasPendingFrontTransition` 只认 `isRefilling`；或补位落定时清 `lidOpened`；或给 `isRefilling` 加超时兜底 | 先确认分支 A 的漏洞是否可达 |
 
-### 需要拍板的两个口径
+### 两个口径
 
-- **(a) 传送带未满、但已彻底死锁（剩余像素都到不了带），算不算失败？**
+- **(a) 传送带未满、但已彻底死锁（剩余像素都到不了带），算不算失败？** —— **仍未定**
   算 → 必须做 M3；不算 → M3 仅记录。
-- **(b) 木箱 / 升降台释放动画期间的「不判失败」还要不要保留？**
-  保留 → 必须补检查点（M1 的方案）；不保留 → 直接删掉门禁 8 / 9。
+- **(b) 木箱 / 升降台释放动画期间的「不判失败」还要不要保留？** —— **已定：不保留**
+  理由见 §4 M1 —— 这两条门禁改变不了判决本身（判决只看带满 + 带上像素有无同色可匹配容器，
+  而木箱 / 升降台既不碰带也不碰容器），只是把正确的判决往后推；推完又没人复查 → 僵死。
+  2026-09-23 已删除。
 
 ---
 
@@ -277,7 +276,7 @@ if (dist[nx, nz] <= myDist)
 | 检查点 2 / 3 | `Assets/Scripts/Gameplay/ContainerGroup.cs` | `OnPixelConsumed`（:364）/ `OnCarArrivedFront`（:378） |
 | 检查点 4 | `Assets/Scripts/Gameplay/CrowdBufferZone.cs` | `StepExtracting`（:558）/ 事件 `OnGridPathfindingFinished`（:215） |
 | 门禁 6 判定 | `Assets/Scripts/Gameplay/ContainerGroup.cs` | `HasPendingFrontTransition`（:830）/ `IsFrontCleared`（:851）/ `IsRowReleased`（:170）/ `IsWaitingRopeCar`（:540） |
-| 门禁 8 / 9 计数 | `Assets/Scripts/Gameplay/PixelGroup.cs` | `OnBoxReleaseFinished`（:1644）/ `OnElevatorAdvanceFinished`（:1656） |
+| 门禁 8 / 9 计数 | `Assets/Scripts/Gameplay/PixelGroup.cs` | 已删除（原 `OnBoxReleaseFinished` / `OnElevatorAdvanceFinished`，见 §4 M1） |
 | 匹配口径（共用） | `Assets/Scripts/Gameplay/ContainerGroup.cs` | `FindMatchableInColumn`（:246）/ `HasMatchableContainerOfColor`（:809）/ `IsOpen`（:148） |
 | 传送带离开判定 | `Assets/Scripts/Gameplay/ConveyorBeltZone.cs` | `ShouldLeave`（:412）/ `OnLeave`（:460） |
 | 槽位记账 | `Assets/Scripts/Gameplay/Conveyor/ConveyorBelt.cs` | `TryEnter`（:390）/ `VacateSlot`（:624）/ `OccupiedCount`（:443） |
