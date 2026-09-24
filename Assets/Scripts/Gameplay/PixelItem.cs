@@ -225,6 +225,67 @@ namespace CrowdMatch
             _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset, exposeMoveDuration));
         }
 
+        /// <summary>
+        /// 木箱被拆掉时，被它盖住的像素「浮现」：立刻把身体压到「原处 + <paramref name="yOffset"/>」，
+        /// 等 <paramref name="delay"/> 秒后用**先匀加速后匀减速**回到原处（波前错峰由调用方给的 delay 实现）。
+        ///
+        /// **走 exposeMoveTarget 而不是像素根物体**：根物体的 transform 由提取寻路（CrowdBufferZone）逐帧写
+        /// 世界坐标接管，两边同时写会互相打架。exposeMoveTarget 本来就是专门做 y 偏移的身体节点
+        /// （上车坐下 <see cref="SitDownExposeTarget"/> 用的也是它），并且与它**共用同一个 <c>_exposeMove</c>
+        /// 协程槽** → 上车坐下会自然取消还没播完的浮现，不会两条动画抢同一个 transform。
+        ///
+        /// 「原处」取开始那一刻的 localPosition.y，不写死 0 —— 预制体上美术调过基准 y 也不会跳一下。
+        /// </summary>
+        public void PlayCrateRestore(float delay, float yOffset, float duration)
+        {
+            if (exposeMoveTarget == null)
+                return;
+            if (_exposeMove != null)
+                StopCoroutine(_exposeMove);
+            _exposeMove = StartCoroutine(RestoreExposeTargetRoutine(delay, yOffset, duration));
+        }
+
+        /// <summary>
+        /// 浮现协程：压到「原处 + yOffset」→ 等 delay → 先匀加速后匀减速回到原处。
+        /// 缓动 k：t ≤ 0.5 时 2t²、其余 1−2(1−t)²（= DOTween 的 InOutQuad，速度两端为 0、中点为最大）。
+        /// </summary>
+        private IEnumerator RestoreExposeTargetRoutine(float delay, float yOffset, float duration)
+        {
+            Transform t = exposeMoveTarget;
+            if (t == null)
+                yield break;
+
+            Vector3 rest = t.localPosition;
+            t.localPosition = new Vector3(rest.x, rest.y + yOffset, rest.z);
+
+            if (delay > 0f)
+                yield return new WaitForSeconds(delay);
+
+            if (t == null)
+                yield break;
+
+            float dur = Mathf.Max(0f, duration);
+            if (dur <= 0.0001f)
+            {
+                t.localPosition = rest;   // 时长为 0：直接落回原处，别让它永远沉在下面
+                _exposeMove = null;
+                yield break;
+            }
+
+            float elapsed = 0f;
+            while (elapsed < dur)
+            {
+                elapsed += Time.deltaTime;
+                float k = Mathf.Clamp01(elapsed / dur);
+                float e = k < 0.5f ? 2f * k * k : 1f - 2f * (1f - k) * (1f - k);
+                t.localPosition = new Vector3(rest.x, rest.y + yOffset * (1f - e), rest.z);
+                yield return null;
+            }
+
+            t.localPosition = rest;
+            _exposeMove = null;
+        }
+
         /// <summary>设置颜色 ID 并立即应用材质</summary>
         public void SetColorId(int id)
         {

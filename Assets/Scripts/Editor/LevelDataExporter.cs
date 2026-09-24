@@ -20,17 +20,17 @@ namespace CrowdMatch
         /// <summary>导入关卡 JSON 共用的「上次路径」EditorPrefs 键。</summary>
         private const string ImportPathKey = "CrowdMatch.LevelDataExporter.LastImportPath";
 
-        [MenuItem("CrowdMatch/导出关卡 JSON")]
+        [MenuItem("CrowdMatch/导出关卡 JSON", false, MenuPriority.Level)]
         public static void ExportCurrentLevel() => ExportCurrentLevel(locked: false);
 
-        [MenuItem("CrowdMatch/导出关卡 JSON", true)]
+        [MenuItem("CrowdMatch/导出关卡 JSON", true, MenuPriority.Level)]
         private static bool ValidateExportCurrentLevel() => !EditorApplication.isPlaying;
 
         /// <summary>Play 模式下的锁定导出：导出关卡初始化时的状态，并把 lockContainer 置为 true。</summary>
-        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）")]
+        [MenuItem("CrowdMatch/关卡工具/导出关卡 JSON（锁定）", false, MenuPriority.LevelTools + MenuPriority.Seg1)]
         public static void ExportCurrentLevelLocked() => ExportCurrentLevel(locked: true);
 
-        [MenuItem("CrowdMatch/导出关卡 JSON（锁定）", true)]
+        [MenuItem("CrowdMatch/关卡工具/导出关卡 JSON（锁定）", true, MenuPriority.LevelTools + MenuPriority.Seg1)]
         private static bool ValidateExportCurrentLevelLocked() => EditorApplication.isPlaying;
 
         private static void ExportCurrentLevel(bool locked)
@@ -93,7 +93,7 @@ namespace CrowdMatch
         }
 
         /// <summary>从 JSON 文件导入关卡配置到当前场景的 PixelGroup + ContainerGroup。</summary>
-        [MenuItem("CrowdMatch/从 JSON 导入配置到当前场景")]
+        [MenuItem("CrowdMatch/从 JSON 导入配置到当前场景", false, MenuPriority.Level + 1)]
         public static void ImportLevelFromJson()
         {
             var pixelGroup = Object.FindObjectOfType<PixelGroup>();
@@ -161,7 +161,7 @@ namespace CrowdMatch
         }
 
         /// <summary>清空当前场景中 PixelGroup 与 ContainerGroup 的全部子物体（不改变布局字段）。</summary>
-        [MenuItem("CrowdMatch/清空当前场景两个 Group 的子物体")]
+        [MenuItem("CrowdMatch/清空当前场景两个 Group 的子物体", false, MenuPriority.Level + 2)]
         public static void ClearBothGroups()
         {
             var pixelGroup = Object.FindObjectOfType<PixelGroup>();
@@ -267,6 +267,15 @@ namespace CrowdMatch
                 }
             }
             data.container.items = items.ToArray();
+
+            // 列内留洞：胜利判定的兜底依赖「每列从第 0 排起压紧」，留洞的关卡会漏判胜利（见 ContainerGroup.DescribeColumnHoles），
+            // 导出时先提示一次（只提示，不拦——是否先修由你定）。
+            string holes = cg.DescribeColumnHoles();
+            if (holes != null)
+                EditorUtility.DisplayDialog("导出关卡 JSON",
+                    "容器列内有洞：" + holes +
+                    "\n\n每列的车必须从第 0 排起压紧连续，否则运行时可能漏判胜利（关卡加载时也会报错）。",
+                    "继续导出");
 
             // 墙体：扫描 PixelGroup 下的 WallItem，每个墙存一组端点
             var walls = new List<LevelData.WallData>();

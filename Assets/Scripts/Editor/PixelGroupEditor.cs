@@ -62,8 +62,9 @@ namespace CrowdMatch
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "「统计颜色总数」输出当前网格每种颜色的总数（含管道计划生成与倍乘门额外产生的像素），" +
-                "并检查是否被 3 整除（不能整除则显示余数）。",
+                "「统计颜色总数」输出每种颜色的总数（网格像素 + 管道计划 + 箱子隐藏像素 + 升降台分组像素，" +
+                "含倍乘门额外产生的像素），并检查是否被 3 整除（不能整除则显示余数）。\n" +
+                "口径与「生成 Containers」「检查并修复容器颜色」**完全同源**（PixelGroup.CollectPlanningDetail）。",
                 MessageType.Info);
 
             if (GUILayout.Button("统计颜色总数 (Debug.Log)"))
@@ -99,6 +100,12 @@ namespace CrowdMatch
                 ImportColors(group);
             }
             EditorGUILayout.EndHorizontal();
+
+            // 新增的手工编辑方式：格子画布 + 颜色/橡皮笔刷（原有上面两个 PNG 按钮全部保留）
+            if (GUILayout.Button("打开像素颜色画布（笔刷涂色）"))
+            {
+                PixelColorBrushWindow.OpenFor(group);
+            }
         }
 
         private void GenerateGrid(PixelGroup group)
@@ -627,68 +634,58 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 先统计总数是否被 3 整除，再统计每种颜色的总数（实际像素 + 管道计划生成 + 倍乘门额外产生）
-        /// 及各自是否被 3 整除（不能整除则显示余数）。
-        /// 倍乘部分按每颗像素**所在格**的倍率（所属各门倍数之积）计入，与容器规划同一份口径。
+        /// 先统计总数是否被 3 整除，再统计每种颜色的总数及各自是否被 3 整除（不能整除则显示余数）。
+        ///
+        /// **口径 = <see cref="PixelGroup.CollectPlanningDetail"/>，与「生成 Containers / 检查并修复容器颜色」同一份底座**
+        /// （网格像素 + 管道计划 + 箱子隐藏像素 + 升降台分组像素），所以机制一个都不会被漏算或重算，
+        /// 倍乘门额外像素按每颗**所在格**的倍率（所属各门倍数之积）展开 —— 与容器规划同一算法。
         /// </summary>
         private void LogColorCounts(PixelGroup group)
         {
-            // 实际像素颜色（倍乘门区域内按倍率多算）
-            var actual = new Dictionary<int, int>();
-            foreach (var it in group.GetComponentsInChildren<PixelItem>())
-            {
-                if (it == null) continue;
-                int mult = group.GateMultiplierAt(it.gridX, it.gridZ);
-                actual.TryGetValue(it.colorId, out int c);
-                actual[it.colorId] = c + Mathf.Max(1, mult);
-            }
+            var sources = group.CollectPlanningDetail();
 
-            // 管道计划生成的颜色数量（每波颜色 × 轨道格数；轨道格各自按所在格倍率计入）
-            var planned = new Dictionary<int, int>();
-            foreach (var pipe in group.GetComponentsInChildren<PipeItem>())
+            // 逐色合计 + 逐色 × 逐机制明细（同一次枚举，两条曲线不会分叉）
+            var totals = new Dictionary<int, int>();
+            var byKind = new Dictionary<int, int[]>();
+            for (int i = 0; i < sources.Count; i++)
             {
-                if (pipe == null || pipe.points == null || pipe.points.Count < 2 || pipe.colors == null)
-                    continue;
-                var trackCells = pipe.TrackCells();
-                if (trackCells.Count == 0)
-                    continue;
-                int weighted = 0;
-                for (int k = 0; k < trackCells.Count; k++)
-                    weighted += Mathf.Max(1, group.GateMultiplierAt(trackCells[k].x, trackCells[k].y));
-                foreach (int color in pipe.colors)
+                var s = sources[i];
+                int mult = Mathf.Max(1, group.GateMultiplierAt(s.cell.x, s.cell.y));
+
+                totals.TryGetValue(s.color, out int t);
+                totals[s.color] = t + mult;
+
+                if (!byKind.TryGetValue(s.color, out int[] kinds))
                 {
-                    planned.TryGetValue(color, out int n);
-                    planned[color] = n + weighted;
+                    kinds = new int[4];
+                    byKind[s.color] = kinds;
                 }
+                kinds[(int)s.kind] += mult;
             }
 
-            var ids = new SortedSet<int>(actual.Keys);
-            ids.UnionWith(planned.Keys);
-
-            if (ids.Count == 0)
+            if (totals.Count == 0)
             {
-                Debug.Log("[PixelGroup] 没有找到任何 PixelItem 或管道计划颜色，请先「生成网格」或配置管道 colors。");
+                Debug.Log("[PixelGroup] 没有找到任何像素（网格 / 管道计划 / 箱子隐藏 / 升降台分组都为空），" +
+                    "请先「生成网格」或配置管道 colors。");
                 return;
             }
 
-            // 先统计总数（实际像素 + 管道计划）是否被 3 整除
             int grandTotal = 0;
-            foreach (var kv in actual)
-                grandTotal += kv.Value;
-            foreach (var kv in planned)
+            foreach (var kv in totals)
                 grandTotal += kv.Value;
             int grandRem = grandTotal % 3;
-            Debug.Log("[PixelGroup] 总数 " + grandTotal + " 个（含管道计划与倍乘门额外像素），" +
+            Debug.Log("[PixelGroup] 总数 " + grandTotal + " 个（网格 + 管道计划 + 箱子 + 升降台，已含倍乘门额外像素），" +
                 (grandRem == 0 ? "✓ 被 3 整除" : "✗ 余 " + grandRem));
 
             var config = ColorConfigLocator.Find();
+            var kindNames = new[] { "网格", "管道", "箱子", "升降台" };
 
             int notDivisible = 0;
+            var ids = new List<int>(totals.Keys);
+            ids.Sort();
             foreach (int id in ids)
             {
-                actual.TryGetValue(id, out int a);
-                planned.TryGetValue(id, out int p);
-                int total = a + p;
+                int total = totals[id];
                 int rem = total % 3;
 
                 string label = "颜色 " + id;
@@ -699,7 +696,18 @@ namespace CrowdMatch
                         label += "（" + mat.name + "）";
                 }
 
-                string parts = "实际 " + a + " + 管道计划 " + p;
+                // 只列非 0 的机制，避免绝大多数关卡每行都拖四个 0
+                var parts = new System.Text.StringBuilder();
+                int[] kinds = byKind[id];
+                for (int k = 0; k < kinds.Length; k++)
+                {
+                    if (kinds[k] <= 0)
+                        continue;
+                    if (parts.Length > 0)
+                        parts.Append(" + ");
+                    parts.Append(kindNames[k]).Append(' ').Append(kinds[k]);
+                }
+
                 string verdict = rem == 0 ? "✓ 被 3 整除" : "✗ 余 " + rem;
                 if (rem != 0) notDivisible++;
 

@@ -105,6 +105,12 @@ namespace CrowdMatch
         /// <summary>正在上车（jump 或回退 lerp）尚未落定的像素计数。失败判定用它做「静止门槛」。</summary>
         [System.NonSerialized] public int consumingCount;
 
+        /// <summary>
+        /// 板上「未完成匹配」的车数（= 车上还有容量没被填满的车数）。胜利判定用它做 O(1) 过滤：
+        /// 归零才值得做一次全盘复核。<see cref="RebuildGrid"/> 按盘面重算，其余时候由 <see cref="ConsumeCar"/> 递减。
+        /// </summary>
+        [System.NonSerialized] private int _unfinishedCars;
+
         private void Start()
         {
             RebuildGrid();
@@ -123,6 +129,45 @@ namespace CrowdMatch
                         item.HideLid();   // 初始就在第一排：盖子直接隐藏
                 }
             }
+            _unfinishedCars = CountUnfinishedCars();   // 换盘后按盘面重算（生成 / 导入 / 洗牌 / 重载都走这里）
+        }
+
+        /// <summary>
+        /// 列内留洞检查：每列的车必须从 row 0 起**压紧连续**（生成 / 导入 / 拖移窗口都保证这一点）。
+        ///
+        /// 为什么必须压紧：胜利判定的兜底依赖「深排车原地消失 ⇒ 同列还有浅排车 ⇒ 那些车迟早走前排出库（倒车）」，
+        /// 列里夹空格会让这个前提不成立，兜底就可能漏掉一次判胜。
+        /// 判定 = 某列存在「空格的下方还有车」（占用行不是 0..k-1 的前缀）。
+        /// 返回描述（无洞返回 null），调用方自行弹窗 / 报错。
+        /// </summary>
+        public string DescribeColumnHoles(int maxColumns = 4)
+        {
+            if (grid == null)
+                return null;
+
+            string msg = null;
+            int found = 0;
+            for (int c = 0; c < columns && found < maxColumns; c++)
+            {
+                int firstEmpty = -1;
+                for (int r = 0; r < rows; r++)
+                {
+                    if (grid[c, r] == null)
+                    {
+                        if (firstEmpty < 0)
+                            firstEmpty = r;
+                        continue;
+                    }
+                    if (firstEmpty < 0)
+                        continue;   // 车还是连续的
+                    // 洞之后又有车：列内有洞
+                    string one = "列 " + c + "（row " + firstEmpty + " 空，row " + r + " 有车）";
+                    msg = msg == null ? one : msg + "；" + one;
+                    found++;
+                    break;
+                }
+            }
+            return msg;
         }
 
         public bool IsInRange(int col, int row)
@@ -267,7 +312,7 @@ namespace CrowdMatch
             if (pixel == null || container == null || container.IsEmpty)
                 return;
 
-            bool isLast = container.Consume();
+            bool isLast = ConsumeCar(container);
             if (isLast)
             {
                 OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
@@ -275,6 +320,64 @@ namespace CrowdMatch
             }
             consumingCount++;
             StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
+        }
+
+        /// <summary>
+        /// 扣容量并登记「完成匹配」：<c>Consume()</c> 返回 true（本像素是这辆车的最后一颗）即视为该车完成匹配。
+        /// **全工程只有这一个「完成匹配」登记点**——传送带路径与复活路径都从这里过。
+        /// </summary>
+        private bool ConsumeCar(ContainerItem container)
+        {
+            bool isLast = container.Consume();
+            if (isLast)
+            {
+                _unfinishedCars--;
+                TryCheckWin(GameController.WinCheckpoint.CarMatched);
+            }
+            return isLast;
+        }
+
+        /// <summary>
+        /// 胜利检查（**事件驱动**）：口径 = 板上不存在「未完成匹配」的车。
+        ///
+        /// 先用 <see cref="_unfinishedCars"/> 做 O(1) 过滤——绝大多数事件发生时它都 &gt; 0，一步返回、不做遍历；
+        /// 只有过滤通过（= 计数已归零）才做一次全盘复核，并把计数**重算回真值**：**偏小**时这一步会把它纠回来
+        /// （否则会误判胜）；**偏大**由 <see cref="RebuildGrid"/> 每关重算兜底——「完成匹配」只有
+        /// <see cref="ConsumeCar"/> 一个登记点，正常运行不会偏大。判定本身交给 <see cref="GameController.CheckWin"/>。
+        /// </summary>
+        public void TryCheckWin(string checkpoint)
+        {
+            if (grid == null)
+                return;                       // 盘面还没建起来，不判胜
+            if (_unfinishedCars > 0)
+                return;                       // 过滤：还有车没匹配完，不用遍历
+
+            int actual = CountUnfinishedCars();
+            if (actual != _unfinishedCars)
+                _unfinishedCars = actual;      // 复核并纠正漂移
+            if (actual > 0)
+                return;
+
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.CheckWin(checkpoint);
+        }
+
+        /// <summary>扫描盘面统计「未完成匹配」的车数（未出库、还有容量没填满的车）。</summary>
+        private int CountUnfinishedCars()
+        {
+            if (grid == null)
+                return 0;
+
+            int n = 0;
+            for (int c = 0; c < columns; c++)
+                for (int r = 0; r < rows; r++)
+                {
+                    var item = grid[c, r];
+                    if (item != null && !item.IsEmpty)
+                        n++;
+                }
+            return n;
         }
 
         /// <summary>
@@ -302,7 +405,7 @@ namespace CrowdMatch
             if (pixel == null || container == null || container.IsEmpty)
                 return;
 
-            bool isLast = container.Consume();
+            bool isLast = ConsumeCar(container);
             // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车要再收紧一层，见 RopeCarBlocksInstantDestroy。
             bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !RopeCarBlocksInstantDestroy(container);
             if (isLast)
@@ -389,6 +492,12 @@ namespace CrowdMatch
         private void StartContainerExit(ContainerItem gone, int col, bool ropeRearExit = false)
         {
             grid[col, 0] = null;
+
+            // 第二次检查点（复查）：兜住「最后一辆车在完成匹配那一刻没被判到」的情况
+            // （例如它是由复活路径直接匹配完成的，那个时点的判胜会被 _transitioning 挡下）。
+            // 原地销毁（DestroyContainerInPlace）不在这里补——盘面清空的最后一步必然是某辆车走前排出库，
+            // 因为深排车消失蕴含同列还有浅排车（列内压紧，见 DescribeColumnHoles）。
+            TryCheckWin(GameController.WinCheckpoint.CarLeft);
 
             var driver = gone.GetComponent<ContainerExitDriver>();
             if (driver == null)
@@ -760,6 +869,7 @@ namespace CrowdMatch
         public void ClearContainers()
         {
             consumingCount = 0;
+            _unfinishedCars = 0;
             ClearRopes();   // 绳根引用着车，必须随车一起清掉
             var items = GetComponentsInChildren<ContainerItem>();
             for (int i = items.Length - 1; i >= 0; i--)

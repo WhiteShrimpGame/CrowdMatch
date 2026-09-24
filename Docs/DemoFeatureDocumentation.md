@@ -283,7 +283,7 @@ Assets/
 ### 6.1 ColorConfigEditor（`Editor/ColorConfigEditor.cs`）
 
 - Inspector 上「生成 / 刷新 24 种颜色材质」按钮。
-- 菜单 `CrowdMatch → Create Color Config (24 种颜色)`：在 `Assets/CrowdMatch/` 创建 `ColorConfig.asset` 与 24 个材质。
+- 菜单 `CrowdMatch → 更多工具 → Create Color Config (24 种颜色)`：在 `Assets/CrowdMatch/` 创建 `ColorConfig.asset` 与 24 个材质。
 - `GenerateDistinctColors()`：HSV 生成 24 色；`WarpHue()`：色相敏感度映射。
 
 ### 6.2 ColorConfigLocator（`Editor/ColorConfigLocator.cs`）
@@ -395,7 +395,7 @@ DisappearAndRefill → 销毁容器 + 后排前移
 
 ## 8. 从零搭建步骤
 
-1. **创建颜色配置**：菜单 `CrowdMatch → Create Color Config`，生成 `ColorConfig.asset` + 24 材质。
+1. **创建颜色配置**：菜单 `CrowdMatch → 更多工具 → Create Color Config`，生成 `ColorConfig.asset` + 24 材质。
 2. **搭建场景对象**：
    - `GameManager`：挂一个空物体，引用 `ColorConfig`。
    - `PixelGroup`：挂一个空物体，配置 `columns/rows/colorIds/minRunLength/maxRunLength`。

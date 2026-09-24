@@ -83,7 +83,26 @@
       "Bash(git -C /f/CrowdMatch diff Assets/Scripts/Gameplay/PixelGroup.cs Assets/Scripts/Core/LevelLoader.cs Assets/Scripts/Core/LevelData.cs Assets/Scripts/Editor/LevelDataExporter.cs)",
       "Bash(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md)",
       "Bash(echo \"fences: $\\(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md\\)\")",
-      "Bash(grep -E \"错误|error|警告$|个警告\")"
+      "Bash(grep -E \"错误|error|警告$|个警告\")",
+      "Bash(grep -n \"Scripts\\\\\\\\\\\\\\\\Editor\\\\\\\\\\\\\\\\M\" Assembly-CSharp-Editor.csproj)",
+      "Bash(python -c \"import uuid; print\\(uuid.uuid4\\(\\).hex\\)\")",
+      "Bash(python3 -c \"import uuid; print\\(uuid.uuid4\\(\\).hex\\)\")",
+      "Bash(openssl rand *)",
+      "Read(//dev/**)",
+      "Bash(grep -m1 '\\\\\\\\r')",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff -U1 -- Assets/Scenes/GameScene.unity)",
+      "Bash(git --no-pager log --oneline -4)",
+      "Bash(git --no-pager show --stat --oneline HEAD)",
+      "Bash(git --no-pager diff -U2 Assets/Scripts/Gameplay/GameController.cs)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Gameplay/PixelGroup.cs)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelGroupEditor.cs)",
+      "Bash(awk 'NR>=4060 && NR<=4094' Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
+      "Bash(grep -n \"private\\\\|///\")",
+      "Bash(git --no-pager log --oneline -3)",
+      "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
+      "Bash(git --no-pager diff --stat Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
+      "Bash(git --no-pager diff -U2 Assets/Scripts/Editor/LevelColorReplacer.cs)"
     ]
   }
 }

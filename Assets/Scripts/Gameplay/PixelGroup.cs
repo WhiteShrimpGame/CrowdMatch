@@ -84,39 +84,9 @@ namespace CrowdMatch
         [Tooltip("冰冻组预制体模板（需自带 IceItem 组件，并含单元模板子物体与计数 Text 子物体）。每个冰组实例化一份")]
         public GameObject icePrefab;
 
-        [Tooltip("木箱角格预制体（占一格；木箱可单独覆盖这三个字段，留空就用这里的）")]
-        public GameObject crateCornerPrefab;
-
-        [Tooltip("木箱边格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateEdgePrefab;
-
-        [Tooltip("木箱中心格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateCenterPrefab;
-
-        [Tooltip("木箱封条预制体：**长度轴为局部 +X**（做在 +Z 就把 crateSealYawOffset 填 90），" +
-                 "长度按 **1 世界单位**制作。脚本**只动 x 缩放**（乘上「钉子间距 + crateSealExtend」的世界长度），" +
-                 "y / z 缩放与局部 y 位置都保留预制体原值")]
-        public GameObject crateSealPrefab;
-
-        [Tooltip("木箱钉子预制体：每条封条两端各钉一颗；不缩放、朝向不动，" +
-                 "局部 y 位置保留预制体原值（只由脚本定 x / z）")]
-        public GameObject crateNailPrefab;
-
-        [Tooltip("封条内偏移（xz，**Pixel 单位** = unitSize 的倍数）：以木箱矩形的四角为参考向箱内偏移，" +
-                 "偏移到的位置就是钉子位置")]
-        public Vector2 crateSealInset = new Vector2(0.5f, 0.5f);
-
-        [Tooltip("封条固定延长值（Pixel 单位）：封条长度 = 钉子间距 + 此值，于是两端各露出一截")]
-        public float crateSealExtend = 0.25f;
-
-        [Tooltip("封条与钉子整体离地高度（Pixel 单位）；预制体自己已经把高度做进去了就留 0")]
-        public float crateSealHeight = 0f;
-
-        [Tooltip("**先摘掉**的那条封条额外抬高的 Y（Pixel 单位），避免两条在交叉点重叠打架")]
-        public float crateSealFirstLift = 0.05f;
-
-        [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
-        public float crateSealYawOffset = 0f;
+        [Tooltip("木箱预制体模板（需自带 CrateItem 组件）。木箱的**全部视觉与表现参数**（角 / 边 / 中心格块、" +
+                 "封条与钉子预制体及偏移、消失动画、被盖像素的恢复动画）都配在这个预制体的 CrateItem 上")]
+        public GameObject cratePrefab;
 
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
@@ -131,7 +101,8 @@ namespace CrowdMatch
         [System.NonSerialized] public bool[,] pipeGrid;
 
         /// <summary>倍乘门门格表 [column, row]：该格属于哪道门（不在任何门上为 null）。
-        /// 注意门格**不是**障碍——门是区域的唯一出口，寻路与暴露都必须能穿过它。</summary>
+        /// **门格对闭合区域外的像素是障碍、对区域内的像素是唯一出口**（见 <see cref="IsGateBlockedFor"/>）：
+        /// 区域内的像素必须穿门格才出得去，所以暴露 BFS 与寻路都必须为它们放行。</summary>
         [System.NonSerialized] public GateItem[,] gateGrid;
 
         /// <summary>该格是否落在某道门的闭合区域内（供「区域内像素必须走到门格才允许离场」的守卫用）。</summary>
@@ -169,12 +140,6 @@ namespace CrowdMatch
 
         /// <summary>运行时收集到的所有木箱（重建 grid 时刷新；含已拆掉的，用 destroyed 区分）。</summary>
         [System.NonSerialized] public List<CrateItem> crates = new List<CrateItem>();
-
-        /// <summary>正在释放中的箱子数量（开箱动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int releasingBoxesCount;
-
-        /// <summary>正在推进中的升降台数量（开门/升起动画期间 > 0，供失败判定阻塞）。</summary>
-        [System.NonSerialized] public int advancingElevatorsCount;
 
         /// <summary>相邻两格中心点的横向（X）距离</summary>
         public float CellSizeX => unitSize + spacingX;
@@ -474,6 +439,28 @@ namespace CrowdMatch
             return !IsActivePipeBlocked(col, row);
         }
 
+        /// <summary>
+        /// 暴露判定里，相邻格 (nc,nr) 能否算作「连通首排的空格」供 (c,r) 借光。
+        ///
+        /// 与旧逻辑（直接读 reachableEmpty）的唯一区别：**门格只对「该门闭合区域内」的格子作数**。
+        /// 门对区域外的像素等同墙，所以门框外侧紧邻的像素不再因为贴着门格而点亮；
+        /// 区域内的像素照旧靠门格连到首排（否则整个闭环区域都不可点）。
+        /// 口径与 <see cref="IsGateBlockedFor"/> 一致。
+        ///
+        /// 注：`reachableEmpty` 本身仍允许流经门格（区域内部的格必须靠它才连得上首排），
+        /// 而「区域外的格能不能借门格的光」由这里挡住 —— 两件事分开判，互不干扰。
+        /// </summary>
+        private bool NeighbourReachableForExposure(int c, int r, int nc, int nr, bool[,] reachableEmpty)
+        {
+            if (!reachableEmpty[nc, nr])
+                return false;
+
+            var gate = GateAt(nc, nr);
+            if (gate == null)
+                return true;                                    // 不是门格：与旧逻辑一致
+            return gate.regionMask != null && gate.regionMask[c, r];
+        }
+
         /// <summary>该格是否是某道倍乘门的门格。</summary>
         public bool IsGateCell(int col, int row)
         {
@@ -532,6 +519,55 @@ namespace CrowdMatch
             return false;
         }
 
+        /// <summary>
+        /// 这批像素「允许穿过」的门集合 = 像素所在格落在该门**闭合区域内**的那些门。
+        ///
+        /// 口径（已与用户核对）：**倍乘门对闭合区域外的像素等同墙** —— 区域外的像素不许走门格、
+        /// 不许靠门格连到首排，也因此不会从门格上蹭到倍乘（`TakeGateBudget` 只看门格、不校验来路，
+        /// 所以「不许进门格」才是拦点）。区域内的像素必须穿过门格才能出去，所以必须拿得到这份通行证。
+        ///
+        /// 为什么按**整组**判定而不是逐颗：一次点击移出的是同一组同色连通像素、一个提取批次也是整组一起走，
+        /// 而门两侧不可能同色连通（门格上没有像素），所以整组必然同侧。组内只要有一颗在区域内，
+        /// 整组就都拿这道门的通行证 —— 否则组里先走出去的那几颗会让剩下的卡在门里。
+        /// </summary>
+        public HashSet<GateItem> CollectPassGates(IEnumerable<PixelItem> pixels)
+        {
+            var pass = new HashSet<GateItem>();
+            if (pixels == null || gates == null || gates.Count == 0)
+                return pass;
+
+            foreach (var p in pixels)
+            {
+                if (p == null || !IsInRange(p.gridX, p.gridZ))
+                    continue;
+
+                for (int i = 0; i < gates.Count; i++)
+                {
+                    var g = gates[i];
+                    if (g == null || g.regionMask == null)
+                        continue;
+                    if (g.regionMask[p.gridX, p.gridZ])
+                        pass.Add(g);
+                }
+            }
+            return pass;
+        }
+
+        /// <summary>
+        /// 该格对「持有 <paramref name="passGates"/> 通行证的像素」是否被倍乘门挡住。
+        /// 不是门格 → 不挡；是门格且该门在通行证里 → 不挡；其余（含区域外像素遇到门格）→ 挡。
+        /// <paramref name="passGates"/> 传 null 表示「调用方不区分来路」，一律不挡（= 旧行为）。
+        /// </summary>
+        public bool IsGateBlockedFor(int col, int row, HashSet<GateItem> passGates)
+        {
+            var gate = GateAt(col, row);
+            if (gate == null)
+                return false;                                   // 不是门格
+            if (passGates == null)
+                return false;                                   // 无门上下文：保持旧行为
+            return !passGates.Contains(gate);
+        }
+
         /// <summary>落在该门闭合区域内的静态网格像素数（供 Inspector 显示与校验提示）。</summary>
         public int CountPixelsInRegion(GateItem gate)
         {
@@ -546,7 +582,8 @@ namespace CrowdMatch
             return n;
         }
 
-        /// <summary>网格上是否已经没有任何像素（箱子隐藏像素 / 升降台地下像素不算：它们还没落到格子上）。</summary>
+        /// <summary>网格上是否已经没有任何像素（箱子隐藏像素 / 升降台地下像素不算：它们还没落到格子上）。
+        /// 想判断「场上是否还有像素**要来了**」请配 <see cref="HasPendingProducers"/> —— 传送带的空场加速就是两者一起判。</summary>
         public bool IsGridEmpty()
         {
             if (grid == null)
@@ -557,6 +594,34 @@ namespace CrowdMatch
                     if (grid[c, r] != null)
                         return false;
             return true;
+        }
+
+        /// <summary>
+        /// 场上是否还有**待产出**的像素：管道还有波次、木箱还有未释放的隐藏像素、升降台还有未升起的组。
+        ///
+        /// 与 <see cref="IsGridEmpty"/> 的区别：这三类像素在产出之前都不在 <c>grid</c> 里（管道在生成时才写 grid，
+        /// 木箱隐藏像素 active=false，升降台地下像素是哨兵坐标 (-1,-1)），所以「grid 空了」并不等于「场上没有像素要来了」。
+        /// 传送带空场加速用它兜住「刚点掉封路像素、生产者还没补位」的那一帧——否则会在关卡中段提前进入加速，
+        /// 而加速是本关内不回退的闩锁。倍乘门不算：分身不写 grid，且其本体离开网格后玩家已无后续操作。
+        /// </summary>
+        public bool HasPendingProducers()
+        {
+            if (pipes != null)
+                for (int i = 0; i < pipes.Count; i++)
+                    if (pipes[i] != null && pipes[i].HasRemainingWaves)
+                        return true;
+
+            if (boxes != null)
+                for (int i = 0; i < boxes.Count; i++)
+                    if (boxes[i] != null && boxes[i].hiddenPixels != null && boxes[i].hiddenPixels.Count > 0)
+                        return true;
+
+            if (elevators != null)
+                for (int i = 0; i < elevators.Count; i++)
+                    if (elevators[i] != null && !elevators[i].IsDone)
+                        return true;
+
+            return false;
         }
 
         // ===== 冰冻组 =====
@@ -708,6 +773,7 @@ namespace CrowdMatch
         /// **只按 destroyed 计算，不重置计数**：计数只由 <see cref="CrateItem.RegisterAdjacentMoveOut"/>
         /// 推进；复位只发生在 <see cref="SpawnCrate"/>（新关卡导入）与 RebuildGrid 重新登记之后
         /// （新建的 CrateItem 计数天然是 0）。
+        /// destroyed 的木箱在消失动画的**放大阶段**内仍计入掩码（见 <see cref="CrateItem.IsHidingForVanish"/>）。
         /// </summary>
         public void RefreshCrateState()
         {
@@ -723,7 +789,9 @@ namespace CrowdMatch
                 for (int i = 0; i < crates.Count; i++)
                 {
                     var crate = crates[i];
-                    if (crate == null || crate.destroyed)
+                    // destroyed 的木箱在**消失动画的「放大」阶段**内仍算盖住自己的格子（见 CrateItem.IsHidingForVanish）：
+                    // 于是那段时间像素不露头、也照旧点不到，缩小一开始才由 CrateItem 撤销这个窗口并重算。
+                    if (crate == null || (crate.destroyed && !crate.IsHidingForVanish))
                         continue;
 
                     foreach (var cell in crate.Cells)
@@ -924,7 +992,9 @@ namespace CrowdMatch
                 }
             }
 
-            // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）
+            // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）。
+            //    门格另有一条：只对**该门闭合区域内**的格子作数 —— 区域外的像素把门格当墙，
+            //    于是「门框外侧紧邻的像素」不再因为贴着门格而点亮（口径见 IsGateBlockedFor）。
             var directlyExposed = new bool[cols, totalRows];
             for (int c = 0; c < cols; c++)
             {
@@ -934,10 +1004,10 @@ namespace CrowdMatch
                         continue;
                     directlyExposed[c, r] =
                         r == 0 ||                                            // 前方：出口（第一排）
-                        (r - 1 >= 0 && reachableEmpty[c, r - 1]) ||          // 前方空（连通首排）
-                        (r + 1 < totalRows && reachableEmpty[c, r + 1]) ||   // 后方空（连通首排）
-                        (c - 1 >= 0 && reachableEmpty[c - 1, r]) ||          // 左方空（连通首排）
-                        (c + 1 < cols && reachableEmpty[c + 1, r]);          // 右方空（连通首排）
+                        (r - 1 >= 0 && NeighbourReachableForExposure(c, r, c, r - 1, reachableEmpty)) ||
+                        (r + 1 < totalRows && NeighbourReachableForExposure(c, r, c, r + 1, reachableEmpty)) ||
+                        (c - 1 >= 0 && NeighbourReachableForExposure(c, r, c - 1, r, reachableEmpty)) ||
+                        (c + 1 < cols && NeighbourReachableForExposure(c, r, c + 1, r, reachableEmpty));
                 }
             }
 
@@ -1200,7 +1270,6 @@ namespace CrowdMatch
             }
             boxGrid = new bool[columns, TotalRows];
             boxes = new List<BoxItem>();
-            releasingBoxesCount = 0;
         }
 
         /// <summary>
@@ -1222,7 +1291,6 @@ namespace CrowdMatch
                     DestroyImmediate(e.gameObject);
             }
             elevators = new List<ElevatorItem>();
-            advancingElevatorsCount = 0;
         }
 
         /// <summary>
@@ -1450,11 +1518,28 @@ namespace CrowdMatch
                     (rmax - rmin + 1) + "），仍然创建，但请检查关卡数据。");
             }
 
-            var go = new GameObject("Crate_" + rmin + "_" + cmin);
-            go.transform.SetParent(transform, false);
-            go.transform.localPosition = Vector3.zero;
+            if (cratePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] cratePrefab 为空，无法生成木箱（请指定自带 CrateItem 组件的预制体）。");
+                return null;
+            }
 
-            var crate = go.AddComponent<CrateItem>();
+            var go = PrefabSpawner.Instantiate(cratePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = "Crate_" + rmin + "_" + cmin;
+
+            var crate = go.GetComponent<CrateItem>();
+            if (crate == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + cratePrefab.name + " 缺少 CrateItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
             crate.colMin = cmin;
             crate.rowMin = rmin;
             crate.colMax = cmax;
@@ -1628,7 +1713,7 @@ namespace CrowdMatch
             return elev;
         }
 
-        /// <summary>箱子开箱：清除其本体格占用，并登记「释放中」计数（由 BoxItem.TryOpen 调用）。</summary>
+        /// <summary>箱子开箱：清除其本体格占用（由 BoxItem.TryOpen 调用）。</summary>
         public void OnBoxOpened(BoxItem box)
         {
             if (box == null)
@@ -1637,25 +1722,6 @@ namespace CrowdMatch
                 for (int c = box.colMin; c <= box.colMax; c++)
                     if (IsInRange(c, r))
                         boxGrid[c, r] = false;
-            releasingBoxesCount++;
-        }
-
-        /// <summary>箱子释放完成（动画结束）：解除「释放中」计数（由 BoxItem 开箱动画收尾调用）。</summary>
-        public void OnBoxReleaseFinished(BoxItem box)
-        {
-            releasingBoxesCount = Mathf.Max(0, releasingBoxesCount - 1);
-        }
-
-        /// <summary>升降台开始推进（开门/升起动画）：登记「推进中」计数（由 ElevatorItem.TryAdvance 调用）。</summary>
-        public void OnElevatorAdvanceStarted(ElevatorItem elev)
-        {
-            advancingElevatorsCount++;
-        }
-
-        /// <summary>升降台推进完成（动画结束）：解除「推进中」计数（由 ElevatorItem 收尾调用）。</summary>
-        public void OnElevatorAdvanceFinished(ElevatorItem elev)
-        {
-            advancingElevatorsCount = Mathf.Max(0, advancingElevatorsCount - 1);
         }
 
         /// <summary>
@@ -1725,7 +1791,7 @@ namespace CrowdMatch
         /// </summary>
         public List<(int layer, int color)> CollectPlanningPixels()
         {
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             var pixels = new List<(int, int)>(sources.Count);
@@ -1740,8 +1806,36 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时通关判定把总数算全
-        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就永远无法通关）。
+        /// 规划源的**明细**（带机制标签），与 <see cref="CollectPlanningPixels"/> 是**同一次枚举**，
+        /// 供「统计颜色总数」按机制分列显示 —— 于是「统计 / 生成 Containers」两处永不发散。
+        /// 倍乘门倍率**不在**这里乘：调用方按 <c>cell</c> 查 <see cref="GateMultiplierAt"/> 自行展开（与规划同一算法）。
+        /// </summary>
+        public List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> CollectPlanningDetail()
+        {
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
+            CollectPlanningSources(sources);
+            return sources;
+        }
+
+        /// <summary>规划源的类别（只用于把统计结果按机制分列）。</summary>
+        public enum PlanningSourceKind
+        {
+            /// <summary>网格上的像素（含管道轨道格上的开局阻挡像素）。</summary>
+            Grid,
+
+            /// <summary>管道将生成的像素（轨道格数 × 波次数）。</summary>
+            Pipe,
+
+            /// <summary>箱子隐藏像素。</summary>
+            Box,
+
+            /// <summary>升降台分组像素。</summary>
+            Elevator,
+        }
+
+        /// <summary>
+        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时把像素总数算全
+        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就与实际交付量对不上）。
         /// 与 <see cref="CollectPlanningPixels"/> 同源，口径不会发散。
         /// </summary>
         public int CountGateExtraPixels()
@@ -1749,7 +1843,7 @@ namespace CrowdMatch
             if (gates == null || gates.Count == 0)
                 return 0;
 
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             int extra = 0;
@@ -1764,10 +1858,14 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// **只枚举一次**的 (层, 颜色, 所在格) 源列表，是「统计颜色总数 / 容器规划 / 通关判定」三处共同的底座，
-        /// 保证三处口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        /// **只枚举一次**的规划源列表，是「统计颜色总数 / 生成 Containers / 检查并修复容器颜色」三处共同的底座，
+        /// 保证这些口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        ///
+        /// 运行时的 <c>GameData.TotalPixelCount</c> 另按**实际生成的物体**统计（CountPixels + CountPipePixels +
+        /// CountGateExtraPixels），正常情形与本底座逐项相等；不等只可能来自「这里声明了、运行时没生成」的源
+        /// （如越界的升降台分组格、缺 prefab 的 SpawnPixel）。
         /// </summary>
-        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell)> outList)
+        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> outList)
         {
             outList.Clear();
 
@@ -1778,7 +1876,7 @@ namespace CrowdMatch
             {
                 if (it == null || !IsInRange(it.gridX, it.gridZ))
                     continue;
-                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ)));
+                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ), PlanningSourceKind.Grid));
             }
 
             foreach (var pipe in GetComponentsInChildren<PipeItem>())
@@ -1793,7 +1891,7 @@ namespace CrowdMatch
                 int layer = Mathf.Clamp(pipeCell.y, 0, TotalRows - 1);
                 foreach (int c in pipe.colors)
                     for (int k = 0; k < trackCells.Count; k++)
-                        outList.Add((layer, c, trackCells[k]));
+                        outList.Add((layer, c, trackCells[k], PlanningSourceKind.Pipe));
             }
 
             // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入。
@@ -1807,7 +1905,7 @@ namespace CrowdMatch
                 int count = Mathf.Min(box.capacity, box.colorIds.Length);
                 var anchor = new Vector2Int(box.colMin, box.rowMin);
                 for (int i = 0; i < count; i++)
-                    outList.Add((layer, box.colorIds[i], anchor));
+                    outList.Add((layer, box.colorIds[i], anchor, PlanningSourceKind.Box));
             }
 
             // 升降台分组像素：layer 取升降台 rowMin，颜色与所在格按每组 cells 的三元组取（编辑器与运行时通用）
@@ -1821,7 +1919,7 @@ namespace CrowdMatch
                     if (g == null || g.cells == null)
                         continue;
                     for (int i = 0; i + 2 < g.cells.Length; i += 3)
-                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1])));
+                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1]), PlanningSourceKind.Elevator));
                 }
             }
         }

@@ -276,7 +276,7 @@ public class SettingPanel : MonoBehaviour
                 {
                     GameData.ClearedPixelCount = GameData.TotalPixelCount;
                     gameObject.SetActive(false);
-                    GameController.Instance.CheckWin();
+                    GameController.Instance.ForceWin();
                 }
             },
             {

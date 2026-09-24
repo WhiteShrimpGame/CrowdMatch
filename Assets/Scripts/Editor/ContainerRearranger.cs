@@ -508,7 +508,7 @@ namespace CrowdMatch
         private int seed = 0;
         private int columnOverride = 0;
 
-        [MenuItem("CrowdMatch/按 Record 重排容器")]
+        [MenuItem("CrowdMatch/按 Record 重排容器", false, MenuPriority.Level + 3)]
         public static void Open() => GetWindow<ContainerRearrangerWindow>("按 Record 重排容器");
 
         private void OnGUI()

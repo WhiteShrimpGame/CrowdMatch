@@ -79,9 +79,9 @@ namespace CrowdMatch
             EditorGUILayout.LabelField("封条数", sealCount + "（次数 " + moves + " − 1，上限 2）");
 
             if (!crate.destroyed && sealCount > 0 &&
-                (pg.crateSealPrefab == null || pg.crateNailPrefab == null))
+                (crate.sealPrefab == null || crate.nailPrefab == null))
             {
-                EditorGUILayout.HelpBox("PixelGroup 上未配 crateSealPrefab / crateNailPrefab，" +
+                EditorGUILayout.HelpBox("本木箱（或它所在的 Crate 预制体）未配 sealPrefab / nailPrefab，" +
                     "木箱不会拼封条与钉子（拆箱逻辑不受影响）。", MessageType.Warning);
             }
             else if (!crate.destroyed && moves - 1 > sealCount)
@@ -154,10 +154,10 @@ namespace CrowdMatch
     /// </summary>
     public static class CrateCreator
     {
-        [MenuItem("CrowdMatch/用选中 Pixel 创建木箱（左上、右下）", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/木箱（左上、右下）", true, MenuPriority.Create + MenuPriority.Seg2 + 1)]
         private static bool ValidateCreateCrateFromSelection() => CollectSelectedPixels().Count == 2;
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建木箱（左上、右下）")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/木箱（左上、右下）", false, MenuPriority.Create + MenuPriority.Seg2 + 1)]
         private static void CreateCrateFromSelection()
         {
             var pixels = CollectSelectedPixels();
@@ -196,14 +196,32 @@ namespace CrowdMatch
                 return;
             }
 
+            if (group.cratePrefab == null)
+            {
+                EditorUtility.DisplayDialog("创建木箱",
+                    "请先在 PixelGroup 上指定木箱预制体（cratePrefab，需自带 CrateItem 组件）。", "确定");
+                return;
+            }
+
             Undo.SetCurrentGroupName("创建木箱");
             int undoGroup = Undo.GetCurrentGroup();
 
-            var go = new GameObject("Crate_" + rmin + "_" + cmin);
-            go.transform.SetParent(group.transform, false);
-            go.transform.localPosition = Vector3.zero;
+            // 与关卡 JSON 导入同一条路径：从 cratePrefab 实例化
+            //（三个格块预制体、封条与钉子、消失与恢复参数都在这个预制体的 CrateItem 上）
+            var go = PrefabSpawner.Instantiate(group.cratePrefab, group.transform);
+            if (go == null)
+                return;
+            go.name = "Crate_" + rmin + "_" + cmin;
 
-            var crate = go.AddComponent<CrateItem>();
+            var crate = go.GetComponent<CrateItem>();
+            if (crate == null)
+            {
+                EditorUtility.DisplayDialog("创建木箱",
+                    "预制体 " + group.cratePrefab.name + " 缺少 CrateItem 组件。", "确定");
+                Object.DestroyImmediate(go);
+                return;
+            }
+
             crate.colMin = cmin;
             crate.rowMin = rmin;
             crate.colMax = cmax;

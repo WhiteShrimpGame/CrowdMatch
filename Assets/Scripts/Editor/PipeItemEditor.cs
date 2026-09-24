@@ -67,13 +67,13 @@ namespace CrowdMatch
     {
         private const string Tag = "[PipeCreator]";
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建管道", true)]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/管道", true, MenuPriority.Create + MenuPriority.Seg1 + 1)]
         private static bool ValidateCreatePipeFromSelection()
         {
             return CollectSelectedPixels().Count >= 2;
         }
 
-        [MenuItem("CrowdMatch/用选中 Pixel 创建管道")]
+        [MenuItem("CrowdMatch/创建（场景视图 · 选中 Pixel）/管道", false, MenuPriority.Create + MenuPriority.Seg1 + 1)]
         private static void CreatePipeFromSelection()
         {
             var pixels = CollectSelectedPixels();
