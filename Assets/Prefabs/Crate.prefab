@@ -42,8 +42,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d25ff365a5dc768428128ad8df7394ca, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   colMin: 0
   rowMin: 0
   colMax: 0
@@ -54,10 +54,10 @@ MonoBehaviour:
   centerPrefab: {fileID: 2196358846936830575, guid: 86b770999f3279a43907c10271bf2c2a, type: 3}
   sealPrefab: {fileID: 6609499673052173810, guid: a240a7d387941de418733934c8514e5f, type: 3}
   nailPrefab: {fileID: 3341524908737008507, guid: d656daae28cf81642844a8196fd7a284, type: 3}
-  sealInset: {x: 0.3, y: 0.3}
-  sealExtend: 0.4
+  sealInset: {x: 0.5, y: 0.5}
+  sealExtend: 0.5
   sealHeight: 0
-  sealFirstLift: 0.05
+  sealFirstLift: 0.1
   sealYawOffset: 0
   vanishPopDuration: 0.2
   vanishShrinkDuration: 0.35
