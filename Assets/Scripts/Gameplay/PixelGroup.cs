@@ -118,6 +118,23 @@ namespace CrowdMatch
         [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
         public float crateSealYawOffset = 0f;
 
+        [Tooltip("木箱被拆掉时根节点**匀速升起**的高度（世界单位）：在「先放大后缩小」那段动画的时长内线性走完；0 = 不升起")]
+        [Min(0f)]
+        public float crateVanishRiseHeight = 1.5f;
+
+        [Tooltip("木箱消失动画「先放大」那一段的时长（秒）")]
+        [Min(0.01f)]
+        public float crateVanishPopDuration = 0.1f;
+
+        [Tooltip("木箱消失动画「后缩小」那一段的时长（秒）：缩到 0 才真正销毁本体与剩下的封条")]
+        [Min(0.01f)]
+        public float crateVanishShrinkDuration = 0.2f;
+
+        [Tooltip("木箱**开始消失**之后，被它盖住的像素才开始「起身」的延时（秒）：0.3 ≈ 消失动画的时长，" +
+                 "于是箱体先飘走、像素再浮起；填 0 = 与消失同时开始")]
+        [Min(0f)]
+        public float crateRestoreDelay = 0.3f;
+
         [Tooltip("木箱被拆掉时，**被它盖住的**像素的起始 Y 偏移（世界单位，默认 -0.5 = 先沉下去半个像素），" +
                  "随后按从左下至右上的斜向波前恢复回原位")]
         public float crateRestoreYOffset = -0.5f;
@@ -814,6 +831,7 @@ namespace CrowdMatch
         /// **只按 destroyed 计算，不重置计数**：计数只由 <see cref="CrateItem.RegisterAdjacentMoveOut"/>
         /// 推进；复位只发生在 <see cref="SpawnCrate"/>（新关卡导入）与 RebuildGrid 重新登记之后
         /// （新建的 CrateItem 计数天然是 0）。
+        /// destroyed 的木箱在消失动画的**放大阶段**内仍计入掩码（见 <see cref="CrateItem.IsHidingForVanish"/>）。
         /// </summary>
         public void RefreshCrateState()
         {
@@ -829,7 +847,9 @@ namespace CrowdMatch
                 for (int i = 0; i < crates.Count; i++)
                 {
                     var crate = crates[i];
-                    if (crate == null || crate.destroyed)
+                    // destroyed 的木箱在**消失动画的「放大」阶段**内仍算盖住自己的格子（见 CrateItem.IsHidingForVanish）：
+                    // 于是那段时间像素不露头、也照旧点不到，缩小一开始才由 CrateItem 撤销这个窗口并重算。
+                    if (crate == null || (crate.destroyed && !crate.IsHidingForVanish))
                         continue;
 
                     foreach (var cell in crate.Cells)

@@ -16,8 +16,11 @@ namespace CrowdMatch
     ///
     /// 拆箱靠**外部点击**：每成功点击移出一次，与本次移出的像素上下左右（4 邻）相接的木箱各计 1 次；
     /// 同一次点击移出的是同一组，组内有多颗挨着木箱也只算 1 次。计满
-    /// <see cref="destroyAfterMoves"/> 次即销毁（**视觉立即消失**），底下像素随之恢复可见、按正常规则
-    /// 重新判定暴露、恢复可点 —— 恢复时带一段「从左下至右上」的斜向波浪浮现（见 <see cref="StartRestoreWave"/>）。
+    /// <see cref="destroyAfterMoves"/> 次即销毁：逻辑上立刻不再占格、不再盖像素（掩码那一侧要多撑一段，
+    /// 见下），**视觉分三段**——先只放大（不上升、像素也不露头）→ 缩小开始才匀速升起 + 像素露头 →
+    /// 缩到 0 销毁本体与剩下的封条（见 <see cref="PlayBreakDisappear"/>）；底下像素在**缩小开始**那一刻
+    /// 恢复可见、按正常规则重新判定暴露、恢复可点，并带一段「从左下至右上」的斜向波浪浮现
+    /// （见 <see cref="StartRestoreWave"/>）。
     ///
     /// 计数表现：箱体上钉两条**交叉封条**，每条封条两端各一颗钉子，钉子位置 = 木箱矩形的四角
     /// 各向箱内偏移 <c>crateSealInset</c>。每减一次数摘掉一条封条，**最后一次减次数连箱体一起拆掉** ——
@@ -54,9 +57,15 @@ namespace CrowdMatch
         [Tooltip("拆箱计数扣减到 0、木箱**被拆掉**时播放的音效 tag（须在 AudioConfig 里配好；留空则不播）")]
         public string breakSoundTag = "BoxBreak";
 
-        /// <summary>消失动画两段的时长（秒），与 BoxItem 保持一致。</summary>
-        private const float PopDuration = 0.2f;
-        private const float ShrinkDuration = 0.2f;
+        /// <summary>消失弹缩「先放大」的时长（秒）：**配在 PixelGroup 上**（与木箱预制体、恢复波前参数同一处），
+        /// 没绑 group 时退回 0.1。</summary>
+        private float PopDuration => group != null ? Mathf.Max(0.01f, group.crateVanishPopDuration) : 0.1f;
+
+        /// <summary>消失弹缩「后缩小」的时长（秒）：同上，没绑 group 时退回 0.2。</summary>
+        private float ShrinkDuration => group != null ? Mathf.Max(0.01f, group.crateVanishShrinkDuration) : 0.2f;
+
+        /// <summary>拆箱时整体匀速升起的高度（世界单位）：同上，没绑 group 时为 0（只弹缩、不升起）。</summary>
+        private float VanishRiseHeight => group != null ? Mathf.Max(0f, group.crateVanishRiseHeight) : 0f;
 
         /// <summary>所属 PixelGroup（由 PixelGroup.RebuildGrid / SpawnCrate 赋值，不序列化）。</summary>
         [System.NonSerialized] public PixelGroup group;
@@ -66,6 +75,18 @@ namespace CrowdMatch
 
         /// <summary>是否已拆掉。拆掉后不再占格、不再盖像素、不再计数。</summary>
         [System.NonSerialized] public bool destroyed;
+
+        /// <summary>
+        /// 消失动画「放大」阶段结束的时刻（<see cref="Time.time"/> 口径；0 = 不在消失动画里）。
+        /// 这段时间内本箱**仍算盖住自己的格子**（<see cref="PixelGroup.RefreshCrateState"/> 会看
+        /// <see cref="IsHidingForVanish"/>），于是像素先不露头、也照旧点不到；
+        /// 缩小一开始（<see cref="RevealCoveredPixels"/>）就把这个窗口撤掉。
+        /// 用「时刻」而不是协程/计时器：任何一次掩码重算都能问出当前该不该遮挡，不依赖调用顺序。
+        /// </summary>
+        [System.NonSerialized] private float _vanishRevealTime;
+
+        /// <summary>是否正处在消失动画的「放大」阶段（此间本箱仍遮挡自己的格子）。</summary>
+        public bool IsHidingForVanish => _vanishRevealTime > 0f && Time.time < _vanishRevealTime;
 
         /// <summary>拼接出的木箱视觉块（消失动画 + 重建显示用）。</summary>
         private readonly List<GameObject> _visualPieces = new List<GameObject>();
@@ -413,9 +434,11 @@ namespace CrowdMatch
         /// <summary>
         /// 记一次「相邻像素移出」（一次点击调用一次，重复计数由调用方保证 —— 同一组只算 1 次）。
         /// 没计满就按计数表现摘掉一条封条（从先摘的那条开始）；
-        /// 计满则本箱转为已拆：立刻不再占格 / 不再盖像素（掩码由 PixelGroup.RefreshCrateState 重建），
-        /// 视觉**立即消失**（本体与还剩着的封条一起销毁，不再弹缩），被盖住的像素随后按斜向波前浮现
-        /// （见 <see cref="StartRestoreWave"/>）。返回**本次是否刚拆掉**。
+        /// 计满则本箱转为已拆：**放大阶段内仍算盖住自己的格子**（像素不露头、也点不到，见
+        /// <see cref="IsHidingForVanish"/>），视觉**整体匀速升起 + 「先放大后缩小」**（见
+        /// <see cref="PlayBreakDisappear"/>，缩到 0 才销毁本体与还剩着的封条），
+        /// 缩小一开始才撤占格、恢复像素显示，并让其按斜向波前起身（见 <see cref="RevealCoveredPixels"/>）。
+        /// 返回**本次是否刚拆掉**。
         ///
         /// 音效：**扣减后不为 0 → <see cref="hitSoundTag"/>；扣减后为 0（拆掉）→ <see cref="breakSoundTag"/>**。
         /// 两者互斥 —— 拆掉那一次只播破碎音，不会再叠一声命中音。
@@ -437,8 +460,15 @@ namespace CrowdMatch
 
             PlayTag(breakSoundTag);     // 扣减到 0：拆掉本体
             destroyed = true;
-            ClearVisual();              // 木箱**立即消失**（不再弹一下再缩小），封条一并销毁
-            StartRestoreWave();         // 被盖住的像素按「左下 → 右上」的斜向波前浮现
+
+            // 消失表现分三段（见 PlayBreakDisappear）：先**只放大**（不升起、像素也不露头）→ 缩小开始才
+            // 升起 + 像素露头 + 起「起身」波前 → 缩到 0 销毁本体与剩下的封条。
+            // 编辑器里不跑动画（DOTween / 协程都不适合），退回「立即消失」。
+            if (Application.isPlaying)
+                PlayBreakDisappear();
+            else
+                ClearVisual();
+
             return true;
         }
 
@@ -453,6 +483,89 @@ namespace CrowdMatch
                 return;
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play(tag);
+        }
+
+        /// <summary>
+        /// 木箱被拆掉时的消失表现，**分三段**（时长与高度都配在 PixelGroup 上，本组件只负责读）：
+        ///
+        /// | 阶段 | 木箱 | 被盖住的像素 |
+        /// |---|---|---|
+        /// | 放大（<c>crateVanishPopDuration</c>） | 只弹大 1.1 倍，**不上升** | **不露头**（本箱仍算遮挡，见 <see cref="IsHidingForVanish"/>） |
+        /// | 缩小（<c>crateVanishShrinkDuration</c>） | **匀速升起** <c>crateVanishRiseHeight</c>，同时缩到 0 | 这一刻才露头，并按 <see cref="StartRestoreWave"/> 的延时起身 |
+        /// | 缩到 0 | 销毁本体与还剩着的封条（<see cref="ClearVisual"/>） | 照旧起身 |
+        ///
+        /// 两条实现口径：
+        /// · 缩放作用在**木箱根节点**上（它的位置就是矩形中心，见 <see cref="BuildVisual"/>），
+        ///   所以整箱以中心为轴一起弹缩，而不是每块各自原地缩；封条是根的子物体，自然跟着一起。
+        /// · **手写 Sequence** 而不用 <see cref="TransformDisappearExtensions.DisappearWithPop"/>：
+        ///   需要在「放大 → 缩小」的交界处插一段并行动作（升起 + 揭示像素），而那个扩展入口会
+        ///   <c>DOKill()</c> 掉同一 Transform 上的其它 Tween，没法在交界处接东西。
+        ///   升起另用 <c>DOVirtual.Float</c>（它的目标不是这个 Transform，不会被 DOKill 误杀），
+        ///   <c>Ease.Linear</c> 就是「匀速」；<c>SetLink</c> 保证木箱中途被销毁时它自己收掉。
+        /// </summary>
+        private void PlayBreakDisappear()
+        {
+            Transform root = transform;
+            Vector3 baseScale = root.localScale;   // 正常是 1
+            Vector3 fromPos = root.position;
+            float pop = PopDuration;
+            float shrink = ShrinkDuration;
+            float rise = VanishRiseHeight;
+
+            // 「放大」阶段内本箱仍算盖住自己的格子 → 像素不露头、也照旧点不到（见 IsHidingForVanish）
+            _vanishRevealTime = Time.time + pop;
+
+            root.DOKill();   // 防重叠（与 DisappearWithPop 入口同口径）
+
+            // 三段式：只放大 →（缩小开始的交界处）升起 + 像素露头 → 缩到 0 销毁本体与剩下的封条。
+            // 这里**手写链**而不用 DisappearWithPop：需要在「放大 → 缩小」的交界处插一段并行动作
+            // （升起 + 揭示像素），而那个扩展入口会 DOKill 掉同一 Transform 上的其它 Tween，
+            // 没法在交界处接东西（扩展自己的注释里也写了「要并行得手写链」）。
+            var seq = DOTween.Sequence();
+            seq.Append(root.DOScale(baseScale * 1.1f, pop).SetEase(Ease.OutQuad));
+            seq.AppendCallback(() =>
+            {
+                if (root == null)
+                    return;   // 动画途中随关卡重建被销毁：后面什么都不做
+
+                // 缩小开始：整箱匀速升起，时长与缩小同步（缩到 0 之后升起也没意义了）
+                if (rise > 0f)
+                {
+                    DOVirtual.Float(0f, rise, shrink, v => root.position = fromPos + Vector3.up * v)
+                        .SetEase(Ease.Linear)
+                        .SetLink(root.gameObject)
+                        .OnComplete(() => root.position = fromPos);   // 收尾把壳挪回起点（视觉已经没了，看不见）
+                }
+
+                RevealCoveredPixels();   // 像素露头 + 重算暴露 + 起「起身」波前
+            });
+            seq.Append(root.DOScale(Vector3.zero, shrink).SetEase(Ease.InQuad));
+            seq.OnComplete(() =>
+            {
+                if (root == null)
+                    return;
+                root.localScale = baseScale;   // 还原，否则重载后复用的木箱会带着 0 缩放
+                ClearVisual();
+            });
+        }
+
+        /// <summary>
+        /// 缩小开始那一刻：撤掉「消失动画期间仍算遮挡」的窗口，然后让 PixelGroup 重算 ——
+        /// 被盖住的像素恢复可见、暴露与连通重新判定，最后按斜向波前「起身」。
+        ///
+        /// **顺序不能换**：先撤窗口，再 <see cref="PixelGroup.RefreshExposed"/>（它内部先
+        /// <see cref="PixelGroup.RefreshCrateState"/> 撤占格 + 恢复渲染，再重算暴露），
+        /// 最后才起波前 —— 波前要用刷新后的像素状态。
+        /// </summary>
+        private void RevealCoveredPixels()
+        {
+            _vanishRevealTime = 0f;   // 本箱不再遮挡（无论下面能不能刷新，这个窗口都得撤）
+
+            if (group == null)
+                return;
+
+            group.RefreshExposed();
+            StartRestoreWave();
         }
 
         /// <summary>
@@ -491,19 +604,21 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 木箱被拆掉那一刻：把**被它盖住的**像素按「从左下至右上」的斜向波前依次浮现
-        /// （单个动画见 <see cref="PixelItem.PlayCrateRestore"/>）。
+        /// 木箱**开始缩小**那一刻（见 <see cref="RevealCoveredPixels"/>）：把**被它盖住的**像素按
+        /// 「从左下至右上」的斜向波前依次起身（单个动画见 <see cref="PixelItem.PlayCrateRestore"/>）。
         ///
         /// 波前号 = <c>(col - colMin) + (rowMax - row)</c>：左下角 (colMin, rowMax) 为 0、右上角
         /// (colMax, rowMin) 最大 —— 等值线是一条沿反对角线推进的波，波从木箱左下角推到右上角。
-        /// delay = 波前号 × <see cref="PixelGroup.crateRestoreWaveInterval"/>。
+        /// delay = <see cref="PixelGroup.crateRestoreDelay"/>（整体延后）+ 波前号 ×
+        /// <see cref="PixelGroup.crateRestoreWaveInterval"/>。
         ///
-        /// 三个参数（起始 y 偏移 / 波前间隔 / 单个时长）配在 <see cref="PixelGroup"/> 上，
+        /// 四个参数（起身延时 / 起始 y 偏移 / 波前间隔 / 单个时长）配在 <see cref="PixelGroup"/> 上，
         /// 与其它木箱预制体参数同一处 —— 它们是全局表现参数，不进关卡 JSON。
         ///
         /// **只在 Play 模式触发**：编辑器里重建显示时协程没法跑（非 Play 下 StartCoroutine 会报错）。
-        /// 此刻像素其实还被标着「被盖住」（渲染器关着），同一帧稍后 <see cref="PixelGroup.RefreshCrateState"/>
-        /// 才把它们放出来 —— 于是玩家看到的是「箱子没了、像素从下方浮起」，而不是先亮一下再沉下去。
+        /// 调用时 <see cref="RevealCoveredPixels"/> 已经先 <see cref="PixelGroup.RefreshExposed"/> 过，
+        /// 像素此刻刚恢复显示 —— 于是玩家看到的是「箱子缩没、像素沉在下面等一会儿再浮起」，
+        /// 而不是先亮一下再沉下去。
         /// </summary>
         private void StartRestoreWave()
         {
@@ -513,6 +628,7 @@ namespace CrowdMatch
             float yOffset = group.crateRestoreYOffset;
             float interval = Mathf.Max(0f, group.crateRestoreWaveInterval);
             float duration = Mathf.Max(0f, group.crateRestoreDuration);
+            float delay = Mathf.Max(0f, group.crateRestoreDelay);   // 木箱开始消失后，像素才起身的延时
 
             foreach (var cell in Cells)
             {
@@ -524,7 +640,7 @@ namespace CrowdMatch
                     continue;
 
                 int wave = (cell.x - colMin) + (rowMax - cell.y);
-                pixel.PlayCrateRestore(wave * interval, yOffset, duration);
+                pixel.PlayCrateRestore(delay + wave * interval, yOffset, duration);
             }
         }
 

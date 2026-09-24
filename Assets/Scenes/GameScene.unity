@@ -1236,6 +1236,10 @@ MonoBehaviour:
   crateSealHeight: 0
   crateSealFirstLift: 0.05
   crateSealYawOffset: 0
+  crateVanishRiseHeight: 3
+  crateVanishPopDuration: 0.2
+  crateVanishShrinkDuration: 0.35
+  crateRestoreDelay: 0
   crateRestoreYOffset: -1
   crateRestoreWaveInterval: 0.05
   crateRestoreDuration: 0.25
