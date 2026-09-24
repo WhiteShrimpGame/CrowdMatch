@@ -1791,7 +1791,7 @@ namespace CrowdMatch
         /// </summary>
         public List<(int layer, int color)> CollectPlanningPixels()
         {
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             var pixels = new List<(int, int)>(sources.Count);
@@ -1806,8 +1806,36 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时通关判定把总数算全
-        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就永远无法通关）。
+        /// 规划源的**明细**（带机制标签），与 <see cref="CollectPlanningPixels"/> 是**同一次枚举**，
+        /// 供「统计颜色总数」按机制分列显示 —— 于是「统计 / 生成 Containers」两处永不发散。
+        /// 倍乘门倍率**不在**这里乘：调用方按 <c>cell</c> 查 <see cref="GateMultiplierAt"/> 自行展开（与规划同一算法）。
+        /// </summary>
+        public List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> CollectPlanningDetail()
+        {
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
+            CollectPlanningSources(sources);
+            return sources;
+        }
+
+        /// <summary>规划源的类别（只用于把统计结果按机制分列）。</summary>
+        public enum PlanningSourceKind
+        {
+            /// <summary>网格上的像素（含管道轨道格上的开局阻挡像素）。</summary>
+            Grid,
+
+            /// <summary>管道将生成的像素（轨道格数 × 波次数）。</summary>
+            Pipe,
+
+            /// <summary>箱子隐藏像素。</summary>
+            Box,
+
+            /// <summary>升降台分组像素。</summary>
+            Elevator,
+        }
+
+        /// <summary>
+        /// 倍乘门额外产生的像素总数 = Σ (所在格倍率 − 1)，供运行时把像素总数算全
+        /// （倍乘出来的像素是真实像素、会被真实消费，总数少算就与实际交付量对不上）。
         /// 与 <see cref="CollectPlanningPixels"/> 同源，口径不会发散。
         /// </summary>
         public int CountGateExtraPixels()
@@ -1815,7 +1843,7 @@ namespace CrowdMatch
             if (gates == null || gates.Count == 0)
                 return 0;
 
-            var sources = new List<(int layer, int color, Vector2Int cell)>();
+            var sources = new List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)>();
             CollectPlanningSources(sources);
 
             int extra = 0;
@@ -1830,10 +1858,14 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// **只枚举一次**的 (层, 颜色, 所在格) 源列表，是「统计颜色总数 / 容器规划 / 通关判定」三处共同的底座，
-        /// 保证三处口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        /// **只枚举一次**的规划源列表，是「统计颜色总数 / 生成 Containers / 检查并修复容器颜色」三处共同的底座，
+        /// 保证这些口径永不发散。所在格 = 该像素最终落位的格，用来查倍乘门倍率（不在任何门区域内时倍率为 1）。
+        ///
+        /// 运行时的 <c>GameData.TotalPixelCount</c> 另按**实际生成的物体**统计（CountPixels + CountPipePixels +
+        /// CountGateExtraPixels），正常情形与本底座逐项相等；不等只可能来自「这里声明了、运行时没生成」的源
+        /// （如越界的升降台分组格、缺 prefab 的 SpawnPixel）。
         /// </summary>
-        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell)> outList)
+        private void CollectPlanningSources(List<(int layer, int color, Vector2Int cell, PlanningSourceKind kind)> outList)
         {
             outList.Clear();
 
@@ -1844,7 +1876,7 @@ namespace CrowdMatch
             {
                 if (it == null || !IsInRange(it.gridX, it.gridZ))
                     continue;
-                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ)));
+                outList.Add((it.gridZ, it.colorId, new Vector2Int(it.gridX, it.gridZ), PlanningSourceKind.Grid));
             }
 
             foreach (var pipe in GetComponentsInChildren<PipeItem>())
@@ -1859,7 +1891,7 @@ namespace CrowdMatch
                 int layer = Mathf.Clamp(pipeCell.y, 0, TotalRows - 1);
                 foreach (int c in pipe.colors)
                     for (int k = 0; k < trackCells.Count; k++)
-                        outList.Add((layer, c, trackCells[k]));
+                        outList.Add((layer, c, trackCells[k], PlanningSourceKind.Pipe));
             }
 
             // 箱子隐藏 Pixel：layer 取箱子 rowMin（最前排），颜色按 colorIds 逐个计入。
@@ -1873,7 +1905,7 @@ namespace CrowdMatch
                 int count = Mathf.Min(box.capacity, box.colorIds.Length);
                 var anchor = new Vector2Int(box.colMin, box.rowMin);
                 for (int i = 0; i < count; i++)
-                    outList.Add((layer, box.colorIds[i], anchor));
+                    outList.Add((layer, box.colorIds[i], anchor, PlanningSourceKind.Box));
             }
 
             // 升降台分组像素：layer 取升降台 rowMin，颜色与所在格按每组 cells 的三元组取（编辑器与运行时通用）
@@ -1887,7 +1919,7 @@ namespace CrowdMatch
                     if (g == null || g.cells == null)
                         continue;
                     for (int i = 0; i + 2 < g.cells.Length; i += 3)
-                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1])));
+                        outList.Add((layer, g.cells[i + 2], new Vector2Int(g.cells[i], g.cells[i + 1]), PlanningSourceKind.Elevator));
                 }
             }
         }
