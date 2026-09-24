@@ -84,7 +84,14 @@
       "Bash(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md)",
       "Bash(echo \"fences: $\\(grep -c '^```' Docs/ContainerRopeSecondAnchorArchived.md\\)\")",
       "Bash(grep -E \"错误|error|警告$|个警告\")",
-      "Bash(grep -n \"Scripts\\\\\\\\\\\\\\\\Editor\\\\\\\\\\\\\\\\M\" Assembly-CSharp-Editor.csproj)"
+      "Bash(grep -n \"Scripts\\\\\\\\\\\\\\\\Editor\\\\\\\\\\\\\\\\M\" Assembly-CSharp-Editor.csproj)",
+      "Bash(python -c \"import uuid; print\\(uuid.uuid4\\(\\).hex\\)\")",
+      "Bash(python3 -c \"import uuid; print\\(uuid.uuid4\\(\\).hex\\)\")",
+      "Bash(openssl rand *)",
+      "Read(//dev/**)",
+      "Bash(grep -m1 '\\\\\\\\r')",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(git --no-pager diff -U1 -- Assets/Scenes/GameScene.unity)"
     ]
   }
 }

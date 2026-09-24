@@ -84,67 +84,9 @@ namespace CrowdMatch
         [Tooltip("冰冻组预制体模板（需自带 IceItem 组件，并含单元模板子物体与计数 Text 子物体）。每个冰组实例化一份")]
         public GameObject icePrefab;
 
-        [Tooltip("木箱角格预制体（占一格；木箱可单独覆盖这三个字段，留空就用这里的）")]
-        public GameObject crateCornerPrefab;
-
-        [Tooltip("木箱边格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateEdgePrefab;
-
-        [Tooltip("木箱中心格预制体（占一格；木箱可单独覆盖，留空就用这里的）")]
-        public GameObject crateCenterPrefab;
-
-        [Tooltip("木箱封条预制体：**长度轴为局部 +X**（做在 +Z 就把 crateSealYawOffset 填 90），" +
-                 "长度按 **1 世界单位**制作。脚本**只动 x 缩放**（乘上「钉子间距 + crateSealExtend」的世界长度），" +
-                 "y / z 缩放与局部 y 位置都保留预制体原值")]
-        public GameObject crateSealPrefab;
-
-        [Tooltip("木箱钉子预制体：每条封条两端各钉一颗；不缩放、朝向不动，" +
-                 "局部 y 位置保留预制体原值（只由脚本定 x / z）")]
-        public GameObject crateNailPrefab;
-
-        [Tooltip("封条内偏移（xz，**Pixel 单位** = unitSize 的倍数）：以木箱矩形的四角为参考向箱内偏移，" +
-                 "偏移到的位置就是钉子位置")]
-        public Vector2 crateSealInset = new Vector2(0.5f, 0.5f);
-
-        [Tooltip("封条固定延长值（Pixel 单位）：封条长度 = 钉子间距 + 此值，于是两端各露出一截")]
-        public float crateSealExtend = 0.25f;
-
-        [Tooltip("封条与钉子整体离地高度（Pixel 单位）；预制体自己已经把高度做进去了就留 0")]
-        public float crateSealHeight = 0f;
-
-        [Tooltip("**先摘掉**的那条封条额外抬高的 Y（Pixel 单位），避免两条在交叉点重叠打架")]
-        public float crateSealFirstLift = 0.05f;
-
-        [Tooltip("封条长度轴相对预制体 +X 的额外偏航角（度）：预制体长度做在 +Z 就填 90")]
-        public float crateSealYawOffset = 0f;
-
-        [Tooltip("木箱被拆掉时根节点**匀速升起**的高度（世界单位）：在「先放大后缩小」那段动画的时长内线性走完；0 = 不升起")]
-        [Min(0f)]
-        public float crateVanishRiseHeight = 1.5f;
-
-        [Tooltip("木箱消失动画「先放大」那一段的时长（秒）")]
-        [Min(0.01f)]
-        public float crateVanishPopDuration = 0.1f;
-
-        [Tooltip("木箱消失动画「后缩小」那一段的时长（秒）：缩到 0 才真正销毁本体与剩下的封条")]
-        [Min(0.01f)]
-        public float crateVanishShrinkDuration = 0.2f;
-
-        [Tooltip("木箱**开始消失**之后，被它盖住的像素才开始「起身」的延时（秒）：0.3 ≈ 消失动画的时长，" +
-                 "于是箱体先飘走、像素再浮起；填 0 = 与消失同时开始")]
-        [Min(0f)]
-        public float crateRestoreDelay = 0.3f;
-
-        [Tooltip("木箱被拆掉时，**被它盖住的**像素的起始 Y 偏移（世界单位，默认 -0.5 = 先沉下去半个像素），" +
-                 "随后按从左下至右上的斜向波前恢复回原位")]
-        public float crateRestoreYOffset = -0.5f;
-
-        [Tooltip("波前相邻两档之间的间隔（秒）：波前号 = (col - colMin) + (rowMax - row)，" +
-                 "左下角为 0、右上角最大，于是波从木箱左下角推到右上角。填 0 = 整块同时恢复")]
-        public float crateRestoreWaveInterval = 0.04f;
-
-        [Tooltip("单个像素恢复的时长（秒），运动为**先匀加速后匀减速**（等价 DOTween 的 InOutQuad）")]
-        public float crateRestoreDuration = 0.25f;
+        [Tooltip("木箱预制体模板（需自带 CrateItem 组件）。木箱的**全部视觉与表现参数**（角 / 边 / 中心格块、" +
+                 "封条与钉子预制体及偏移、消失动画、被盖像素的恢复动画）都配在这个预制体的 CrateItem 上")]
+        public GameObject cratePrefab;
 
         [Tooltip("默认地面材质（原始 Block_BG 材质；无升降台的关卡用它恢复地面，清除挖洞材质污染）")]
         public Material defaultGroundMaterial;
@@ -1576,11 +1518,28 @@ namespace CrowdMatch
                     (rmax - rmin + 1) + "），仍然创建，但请检查关卡数据。");
             }
 
-            var go = new GameObject("Crate_" + rmin + "_" + cmin);
-            go.transform.SetParent(transform, false);
-            go.transform.localPosition = Vector3.zero;
+            if (cratePrefab == null)
+            {
+                Debug.LogError("[PixelGroup] cratePrefab 为空，无法生成木箱（请指定自带 CrateItem 组件的预制体）。");
+                return null;
+            }
 
-            var crate = go.AddComponent<CrateItem>();
+            var go = PrefabSpawner.Instantiate(cratePrefab, transform);
+            if (go == null)
+                return null;
+            go.name = "Crate_" + rmin + "_" + cmin;
+
+            var crate = go.GetComponent<CrateItem>();
+            if (crate == null)
+            {
+                Debug.LogError("[PixelGroup] 预制体 " + cratePrefab.name + " 缺少 CrateItem 组件。");
+                if (Application.isPlaying)
+                    Destroy(go);
+                else
+                    DestroyImmediate(go);
+                return null;
+            }
+
             crate.colMin = cmin;
             crate.rowMin = rmin;
             crate.colMax = cmax;
