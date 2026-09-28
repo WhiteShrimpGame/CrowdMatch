@@ -91,10 +91,6 @@ public class SettingPanel : MonoBehaviour
     // 保存动态生成的按钮列表，用于销毁
     private List<Button> _spawnedGmBtns = new List<Button>();
 
-    private void Start()
-    {
-    }
-
     public void InitSettingPanel()
     {
         // 初始化指令字典，所有GM命令在这里注册
@@ -123,10 +119,10 @@ public class SettingPanel : MonoBehaviour
         testBtn.triggers.Add(testUpTrigger);
 
         transform.Find("BG/InputField/OkBtn").GetComponent<Button>().onClick.AddListener(_OnCheckBtnClk);
-        transform.Find("TestPanel/JumpToLevel/GoBtn").GetComponent<Button>().onClick.AddListener(_OnGoBtnClk);
+        transform.Find("BG/TestPanel/JumpToLevel/GoBtn").GetComponent<Button>().onClick.AddListener(_OnGoBtnClk);
 
         // ===================== 【新版】销毁旧GM按钮 + 根据SO动态生成 =====================
-        DestroyAllSpawnedGmButtons();
+        //DestroyAllSpawnedGmButtons();
         SpawnGmButtonsFromSO();
         // ================================================================================
 
@@ -144,16 +140,16 @@ public class SettingPanel : MonoBehaviour
 
         if (isShowTestPanel)
         {
-            GMBtn.gameObject.SetActive(true);
+            /*GMBtn.gameObject.SetActive(true);
             GMBtn.onClick.AddListener(() =>
             {
                 Debug.Log("GMBtn 被点击");
                 testPanel.SetActive(!isForbidTestPanel);
                 isForbidTestPanel=!isForbidTestPanel;
                 GMBtn.transform.GetChild(0).GetComponent<Text>().text = "GM：" + (isForbidTestPanel ? "开" : "关");
-            });
+            });*/
             testInput.gameObject.SetActive(false);
-            //testPanel.SetActive(!isForbidTestPanel);
+            testPanel.SetActive(!isForbidTestPanel);
             //levelShowText.gameObject.SetActive(true);
             //ShowLevelText();
         }
@@ -190,9 +186,22 @@ public class SettingPanel : MonoBehaviour
         }
 
         var configList = testBtnConfigSO.items;
-        for (int i = 0; i < configList.Count; i++)
+        int max = configList.Count;
+        for (int i = 0, j = 0; i < max; i++)
         {
-            var btnItem = configList[i];
+            if (i > 7 && i< 24)
+            {
+                // 创建空物体，父物体设置为 gmBtnRoot
+                GameObject spaceObj = new GameObject("SpaceItem");
+                spaceObj.transform.SetParent(gmBtnRoot, false); 
+                // false = worldPositionStays:false，UI常用，保持本地坐标，避免RectTransform位置错乱
+
+                // 必须添加RectTransform！UGUI子物体必须有这个组件
+                spaceObj.AddComponent<RectTransform>();
+                max++;
+                continue;
+            }
+            var btnItem = configList[j];
             // 实例化按钮
             Button btn = Instantiate(gmBtnPrefab, gmBtnRoot);
             _spawnedGmBtns.Add(btn);
@@ -228,6 +237,8 @@ public class SettingPanel : MonoBehaviour
             {
                 Debug.LogError($"找不到测试指令 cmdKey={cmd}");
             }
+
+            j++;
         }
     }
 
@@ -347,14 +358,14 @@ public class SettingPanel : MonoBehaviour
     private void OnDisable()
     {
         // 销毁动态生成按钮，防止残留
-        DestroyAllSpawnedGmButtons();
+        //DestroyAllSpawnedGmButtons();
 
         if (UIManager.Instance.isMainPanelActive)
         {
             UIManager.Instance.settingPanel = null;
         }
 
-        isForbidTestPanel = false;
+        //isForbidTestPanel = false;
         Destroy(gameObject);
     }
 
@@ -554,16 +565,12 @@ public class SettingPanel : MonoBehaviour
 
     public void OnBackBtnClk()
     {
-        ////AudioManager.Instance.playClip(1);
-        GameManager.Instance.TriggerVibrate(1);
-        {
-            GameState.GameStart();
-            UIManager.Instance.ShowSettingPanel(false);
-        }
-        //gameObject.SetActive(false);
-
-        //GameManager.Instance.ReloadScene(false);
-        //SceneManager.LoadScene("GameScene");
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        GameManager.Instance.CleanupSpawnPool();
+        //UIManager.Instance.Init();
+        UIManager.Instance.showGamePanel(false);
+        UIManager.Instance.ShowMenuPanel(true);
+        UIManager.Instance.ShowSettingPanel(false);
     }
 
     public void OnRetryBtnClk()
@@ -679,16 +686,16 @@ public class SettingPanel : MonoBehaviour
         {
             testInput.gameObject.SetActive(false);
             isShowTestPanel = true;
-            GMBtn.gameObject.SetActive(true);
+            /*GMBtn.gameObject.SetActive(true);
             GMBtn.onClick.AddListener(() =>
             {
                 Debug.Log("GMBtn 被点击");
                 testPanel.SetActive(!isForbidTestPanel);
                 isForbidTestPanel=!isForbidTestPanel;
                 GMBtn.transform.GetChild(0).GetComponent<Text>().text = "GM：" + (isForbidTestPanel ? "开" : "关");
-            });
-            //testPanel.SetActive(!isForbidTestPanel);
-            levelShowText.gameObject.SetActive(true);
+            });*/
+            testPanel.SetActive(!isForbidTestPanel);
+            //levelShowText.gameObject.SetActive(true);
             //ShowLevelText();
         }
     }

@@ -1,30 +1,66 @@
 ﻿using CrowdMatch;
 using UnityEngine;
 using UnityEngine.UI;
-using WsGame;
 
 public class MainPanel : MonoBehaviour
 {
-    // ===================== 体力系统UI =====================
+
+    private Button startBtn;
+    private Text goldCountText;
+    private bool showHandBookTipsPanel;
+
+    // ===================== 体力系统UI新增 =====================
     [Header("体力系统UI")]
     [SerializeField] private GameObject staminaPanel;          // 体力总面板
     [SerializeField] private Text staminaCountText;             // 体力数量文本 (当前/上限)
     [SerializeField] private Text staminaCountdownText;         // 体力恢复倒计时文本
-    [SerializeField] private GameObject staminaAddBtn;          // 体力+号按钮
-    [SerializeField] private Image infiniteStaminaIcon;         // 无限体力图标
-    [SerializeField] private Text infiniteCountdownText;        // 无限体力倒计时文本
+    [SerializeField] private GameObject staminaAddBtn;              // 体力+号按钮
+    [SerializeField] private Image infiniteStaminaIcon;        // 无限体力图标
+    [SerializeField] private Text infiniteCountdownText;       // 无限体力倒计时文本
 
     // 体力系统私有变量
     private float staminaRefreshTimer;                          // 体力刷新计时器(每秒刷新)
-
+    private bool isInfiniteStamina;                             // 是否激活无限体力
+    private int infiniteStaminaEndTime;                        // 无限体力结束时间戳
     private void OnEnable()
     {
+        UIManager.IsPanelShow = true;
+
+        if (GameData.LevelDiff == 1)
+        {
+            startBtn = transform.Find("StartBtnHard").GetComponent<Button>();
+        }
+        else if (GameData.LevelDiff == 2)
+        {
+            startBtn = transform.Find("StartBtnSuperHard").GetComponent<Button>();
+        }
+        else
+        {
+            startBtn = transform.Find("StartBtn").GetComponent<Button>();
+        }
+
+        startBtn.gameObject.SetActive(true);
+        startBtn.onClick.AddListener(_OnStartBtnClk);
+        var levelNum = startBtn.transform.Find("LevelText").GetComponent<Text>();
+        levelNum.text = "第 " + GameData.CurrentLevel + " 关";
+
+        //if (GameData.IsWinStreakActive && GameData.WinStreak > 0)
+        if (GameData.WinStreak > 0)
+        {
+            var streak = transform.Find("WinStreak");
+            streak.gameObject.SetActive(true);
+            streak.Find("StreakCount").GetComponent<Text>().text =
+                Mathf.Min(GameData.WinStreak, 5).ToString();
+        }
+        goldCountText = transform.Find("GoldFrame/GoldCount").GetComponent<Text>();
+        transform.Find("SettingButton").GetComponent<Button>().onClick.AddListener(_OnSettingBtnClk);
+        RefreshGoldCount();
         if (StaminaSystemData.IsActive())
         {
             InitStaminaUI();
         }
     }
-
+    
     private void Update()
     {
         if (StaminaSystemData.IsActive())
@@ -37,8 +73,43 @@ public class MainPanel : MonoBehaviour
             }
         }
     }
+    
 
-    #region 体力
+    private void OnDisable()
+    {
+        transform.Find("SettingButton").GetComponent<Button>().onClick.RemoveAllListeners();
+        startBtn.onClick.RemoveAllListeners();
+        Destroy(gameObject);
+    }
+
+    public void _OnSettingBtnClk()
+    {
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        UIManager.Instance.ShowSettingPanel(true);
+    }
+
+    public void _OnStartBtnClk()
+    {
+        UIManager.IsPanelShow = false;
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        //if (StaminaSystemData.Config.StaminaSwitch==1&&!StaminaSystemData.HasEnoughStamina(1))
+        if (StaminaSystemData.IsActive()&&!StaminaSystemData.HasEnoughStamina(1))
+        {
+            UIManager.Instance.ShowStaminaPanel(true); // 弹补充体力弹窗
+            return;
+        }
+
+        GameManager.Instance.ReloadLevel();
+        UIManager.Instance.showMainPanel(false);
+        
+    }
+    
+    public void RefreshGoldCount()
+    {
+        goldCountText.text = ((float)GameData.Gold.Count).ConvertToKMGString();
+    }
+
+#region 体力
     /// <summary>
     /// 初始化体力UI
     /// </summary>
