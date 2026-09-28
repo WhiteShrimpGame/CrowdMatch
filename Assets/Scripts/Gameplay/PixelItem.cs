@@ -124,8 +124,12 @@ namespace CrowdMatch
         /// <summary>进入物理缓冲区时随机到的朝向点横向（x）偏移（世界单位，由 CrowdBufferZone 赋值；距出口较远时朝 gap + perp*该偏移 前进）</summary>
         [System.NonSerialized] public float bufferAimOffset;
 
-        /// <summary>IConveyorItem：供传送带定位的 Transform。</summary>
-        public Transform Transform => transform;
+        /// <summary>
+        /// IConveyorItem：供传送带定位的 Transform；对象已被销毁时返回 null。
+        /// 必须用 `this == null`（Unity 运算符）判：传送带持有的是 IConveyorItem 数组，
+        /// 那里的 `== null` 是普通引用比较、看不见已销毁对象（见 ConveyorBelt.CheckLeave 的「防御」分支）。
+        /// </summary>
+        public Transform Transform => this == null ? null : transform;
 
         private void Awake()
         {
