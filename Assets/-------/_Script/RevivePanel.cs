@@ -49,7 +49,8 @@ public class RevivePanel : MonoBehaviour//,IPointerDownHandler, IPointerUpHandle
         transform.Find("BG/ReviveBtn").GetComponent<Button>().onClick.AddListener(_OnVideoReviveBtnClk);
         mainCanvasGroup = GetComponent<CanvasGroup>();
         //int prog = GameData.LevelProgress;
-        int prog = GameData.ClearedPixelCount * 100 / GameData.TotalPixelCount;
+        // 进度 = 已点出 / 总数，封顶 99（见 GameData.ProgressPercent）；与失败面板同源，关闭本面板后进度条不会跳变
+        int prog = GameData.ProgressPercent;
 
         progItem = (RectTransform)progBg.Find("Item");
         progText = progItem.Find("ProgText").GetComponent<Text>();
