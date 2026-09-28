@@ -47,6 +47,8 @@ namespace CrowdMatch
 
         public StaminaConfig staminaConfig;
         public NewFeatureConfig newFeatureConfig;
+        [Header("Prop Config")] public List<PropInfo> propInfos = new List<PropInfo>();
+        public ItemDataConfig itemData;
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -202,6 +204,7 @@ namespace CrowdMatch
         /// </summary>
         public void TriggerVibrate(int level)
         {
+            if (SettingData.VibrateSet == 0) return;
 #if WeChat
             switch (level)
             {
@@ -237,6 +240,20 @@ namespace CrowdMatch
                     break;
             }
 #endif
+        }
+        /// <summary>
+        /// 找到目标道具
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public PropInfo GetAimPropInfo(string id)
+        {
+            return propInfos.Find(a => a.propId == id);
+        }
+
+        public PropInfo GetPropInfo(ItemType propType)
+        {
+            return propInfos.Find(a => a.propType == propType);
         }
     }
 }

@@ -767,6 +767,41 @@ namespace CrowdMatch
         // ===== 木箱 =====
 
         /// <summary>
+        /// Record 模式下「木箱不再遮挡像素」的总开关：被盖像素照常显示、照常参与暴露判定、可正常点击，
+        /// 只有**点击求组**被限制在同一木箱内（见 <c>GameController.FloodFill</c>）。
+        ///
+        /// 由 <c>GameController</c> 在关卡加载时按它自己的 Record 模式写入，**必须在 <c>LevelLoader.Apply</c>
+        /// 之前**（那一步就会做 RebuildGrid → RefreshCrateState → SetCovered，而 SetCovered 是幂等的、
+        /// 不会在开关变化后自动重刷）。
+        ///
+        /// 为什么需要这一条：Record 模式录的是**理想取出顺序**，木箱把像素藏起来会让顺序无法录制；
+        /// 但木箱格在正常模式下算障碍（<see cref="IsBlocked"/>），连掩盖带联通一起封死。
+        /// 这里只把「木箱盖住像素」这一层拿掉，木箱**本身**仍然是拆箱机制的一部分
+        /// （Record 模式不走拆箱计数，见 <c>GameController.ResolveMatch</c> 的提前返回）。
+        /// </summary>
+        [System.NonSerialized] public bool recordRevealCrates;
+
+        /// <summary>
+        /// 该格所属的木箱（口径与 <see cref="crateMask"/> 一致：已拆掉、且已过放大阶段的木箱不再算）；无则 null。
+        /// 供 Record 模式的「同一木箱内才算相邻」用。
+        /// </summary>
+        public CrateItem CrateAt(int col, int row)
+        {
+            if (crates == null || !IsInRange(col, row))
+                return null;
+
+            for (int i = 0; i < crates.Count; i++)
+            {
+                var crate = crates[i];
+                if (crate == null || (crate.destroyed && !crate.IsHidingForVanish))
+                    continue;
+                if (crate.IsInBody(col, row))
+                    return crate;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// 刷新木箱状态：按未拆掉的木箱重填 <see cref="crateMask"/>，并把「被盖住」标志写回各像素
         /// （关渲染器 / 恢复显示）。
         ///
@@ -935,6 +970,22 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 暴露判定里该格是否「封住了里面的像素」。与 <see cref="IsBlocked"/> 只差木箱一处：
+        /// Record 模式下木箱不再遮挡像素，被盖像素照常参与同色连通块与直接暴露判定，
+        /// 于是它有描边、会站立，与普通像素一模一样（见 <see cref="recordRevealCrates"/>）。
+        ///
+        /// **木箱格仍然不算「空」**——<c>IsEmptyForExposure</c> 照旧按 <see cref="IsBlocked"/> 判。
+        /// 所以木箱不会变成一条从首排通到后排的空路，只是它盖住的那颗像素本身被放行；
+        /// 木箱边缘上的像素照样只能靠「贴着通向出口的空格」来点亮。
+        /// </summary>
+        private bool BlocksExposureForPixel(int col, int row)
+        {
+            if (!IsBlocked(col, row))
+                return false;
+            return !(recordRevealCrates && IsCrateCell(col, row));
+        }
+
+        /// <summary>
         /// 刷新所有像素的「暴露（可点击）」状态：
         /// 先标记「直接暴露」的格子（第 0 行，或四周前/后/左/右任一紧邻格为「连通首排的空格」），
         /// 再把每个同色连通块整体激活——只要该连通块包含至少一个直接暴露格，块内所有像素同时激活。
@@ -1000,7 +1051,7 @@ namespace CrowdMatch
             {
                 for (int r = 0; r < totalRows; r++)
                 {
-                    if (grid[c, r] == null || IsBlocked(c, r))
+                    if (grid[c, r] == null || BlocksExposureForPixel(c, r))
                         continue;
                     directlyExposed[c, r] =
                         r == 0 ||                                            // 前方：出口（第一排）
@@ -1023,7 +1074,7 @@ namespace CrowdMatch
                 {
                     // 冰冻中的冰格**不参与**同色连通块：它既不做块的种子、也不能被扩散穿过
                     // （两条守卫缺一不可）。于是「只有隔着冰才连到外面的同色像素」不会被整块点亮。
-                    if (grid[c, r] == null || IsBlocked(c, r) || visited[c, r] || IsFrozenCell(c, r))
+                    if (grid[c, r] == null || BlocksExposureForPixel(c, r) || visited[c, r] || IsFrozenCell(c, r))
                         continue;
 
                     int color = grid[c, r].colorId;
@@ -1056,7 +1107,7 @@ namespace CrowdMatch
                                 continue;
 
                             var nb = grid[nx, nz];
-                            if (nb == null || IsBlocked(nx, nz) || nb.colorId != color)
+                            if (nb == null || BlocksExposureForPixel(nx, nz) || nb.colorId != color)
                                 continue;
                             if (IsFrozenCell(nx, nz))
                                 continue;   // 冰冻中的冰格 = 块边界，不扩散进去（见上面的说明）

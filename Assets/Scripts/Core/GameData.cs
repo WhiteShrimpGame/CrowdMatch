@@ -113,6 +113,31 @@ namespace CrowdMatch
         /// <summary>本关已被点出的像素数。</summary>
         public static int RemovePixelCount { get; set; } = 0;
 
+        /// <summary>
+        /// 供关卡进度使用的「已点出量」：与 <see cref="RemovePixelCount"/> 同一时点（点击移出）累加，
+        /// 但按**像素所在格的倍率**一并计入倍乘门裂变出的分身 —— 口径与分母
+        /// <see cref="TotalPixelCount"/> 一致（后者含 CountGateExtraPixels）。
+        /// 若直接拿 RemovePixelCount 当分子，分身永远不会被计入（它们由缓冲区裂变而来、从不在网格上被点击），
+        /// 带倍乘门的关卡进度会按 1/倍率 缩水。
+        /// </summary>
+        public static int ProgressPixelCount { get; set; } = 0;
+
+        /// <summary>
+        /// 关卡进度百分比（0~99），供复活 / 失败面板的进度条使用。
+        /// 分子 = <see cref="ProgressPixelCount"/>（点击移出即计，不等上车），分母 = 本关像素总数。
+        /// <b>封顶 99</b>：100% 只留给真正通关，进度条不应在通关前显示满。
+        /// </summary>
+        public static int ProgressPercent
+        {
+            get
+            {
+                if (TotalPixelCount <= 0)
+                    return 0;
+                int p = ProgressPixelCount * 100 / TotalPixelCount;
+                return p > 99 ? 99 : p;
+            }
+        }
+
         /// <summary>重置单局计数。在每次重载关卡时调用。</summary>
         /// <param name="gaming">是否进入游玩模式</param>
         public static void Init(bool gaming = true)
@@ -121,6 +146,7 @@ namespace CrowdMatch
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
             RemovePixelCount = 0;
+            ProgressPixelCount = 0;
         }
         // GameData.cs 里新增
         public static void ResetAll()
@@ -134,6 +160,8 @@ namespace CrowdMatch
             TotalPixelCount = 0;
             ClearedPixelCount = 0;
             RemovePixelCount = 0;
+            ProgressPixelCount = 0;
+            itemPlayerData.Clear();
         }
         /// <summary>关卡难度 (0=普通, 1=困难, 2=超难) / Level difficulty</summary>
         //public static int LevelDiff = 0;
@@ -166,5 +194,19 @@ namespace CrowdMatch
                 return 0;
             }
         }
+        public static ItemPlayerData itemPlayerData
+        {
+            get
+            {
+                if (_itemPlayerData == null)
+                {
+                    _itemPlayerData = new ItemPlayerData();
+                }
+
+                return _itemPlayerData;
+            }
+        }
+
+        private static ItemPlayerData _itemPlayerData;
     }
 }
