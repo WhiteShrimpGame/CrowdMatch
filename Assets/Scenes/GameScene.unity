@@ -1526,6 +1526,8 @@ MonoBehaviour:
   maxCapacity: 3
   maxSpanLayers: 20
   maxOpenRows: 4
+  instantiateRows: 5
+  containerPoolTag: Bus
   consumeSpeed: 10
   refillSpeed: 10
   ropeMaterial: {fileID: 2100000, guid: 9f884cd5b7afe874fa04f41242a8c7d9, type: 2}

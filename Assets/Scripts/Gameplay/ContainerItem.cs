@@ -212,6 +212,103 @@ namespace CrowdMatch
                 capacityText.text = _remaining.ToString();
         }
 
+        /// <summary>
+        /// 池化复用复位：把本实例恢复成「刚从预制体实例化出来」的**脚本状态**。
+        /// **只在运行模式、且车是从对象池里取出来的**时候调用（新实例本来就是干净的，也不需要）——
+        /// <see cref="ContainerGroup"/> 那边的入口是 <c>SpawnFromCell</c> 的 <c>fromPool</c> 分支。
+        ///
+        /// 层级 / 本地姿态 / 显隐的还原由 <see cref="ContainerViewTemplate"/> 负责，这里只管脚本自己的运行期状态：
+        /// 协程与 tween、座位占用表、换轴标记、两类动画阶段机，以及残留在座位上的乘客像素
+        /// （旧流程里车出库后连同乘客一起 Destroy，改成回池之后必须显式清，否则乘客会跟着下一趟车复活）。
+        ///
+        /// **必须在 Spawn 之后调用，而不是 Despawn 时**：<see cref="SpawnPool.GC"/> 会把正在使用中的车
+        /// 直接 <c>SetActive(false)</c> 入队（停掉协程、绕过 Despawn），只有「取出来时重置」才能保证
+        /// 任何来路的车都是干净的。
+        /// </summary>
+        public void ResetForReuse()
+        {
+            StopAllCoroutines();
+
+            // 清掉整棵车身上挂着的 DOTween（车身位移、盖子消失、轴的挤压 / 侧倾、座位上的上车跳跃）：
+            // 残留 tween 会在复用时继续改下一趟车的姿态。
+            var nodes = GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < nodes.Length; i++)
+                nodes[i].DOKill();
+
+            _occupiedPos.Clear();
+            _boardingPixels.Clear();
+
+            _elasticPhase = 0;
+            _elasticRoutine = null;
+            _elasticAxleParent = null;
+            _elasticAxleSwapped = false;
+
+            _rollPhase = 0;
+            _rollAngle = 0f;
+            _rollTimer = 0f;
+            _rollMoveDone = false;
+            _rollMoving = false;
+            _rollMovePending = false;
+            _rollRoutine = null;
+            _rollOnComplete = null;
+            _rollAxleParent = null;
+            _rollAxleSwapped = false;
+            _rollSkipTilt = false;
+
+            isRefilling = false;
+            lidOpened = false;
+            revealed = false;      // 由 ApplyCell 按数据层重新决定
+            group = null;
+
+            DestroyLeftoverPassengers();
+        }
+
+        /// <summary>
+        /// 用数据层（<see cref="ContainerCell"/>）的状态水合本实例：新增实例与池化复用的**唯一入口**，幂等。
+        ///
+        /// 刻意不调用 <see cref="HideLid"/> / <see cref="OpenLid"/>——那两个会连带 <see cref="RevealQuestion"/>，
+        /// 把「后排还没揭晓的问号车」水合成已揭晓。这里按数据层的 <c>revealed</c> 显式铺。
+        /// </summary>
+        public void ApplyCell(int col, int row, int colorId, int capacity, int remaining,
+                              bool isQuestion, bool revealed, bool lidOpened, int ropeGroupId,
+                              ColorConfig config)
+        {
+            gridX = col;
+            gridZ = row;
+            this.colorId = colorId;
+            this.isQuestion = isQuestion;
+            this.ropeGroupId = ropeGroupId;
+            this.revealed = revealed;
+            this.lidOpened = lidOpened;
+
+            SetCapacity(capacity);
+            _remaining = Mathf.Max(0, remaining);   // 覆盖 SetCapacity 的「满容量」：数据层可能已经被扣过
+
+            ApplyMaterial(config);
+            if (lidTransform != null)
+                lidTransform.gameObject.SetActive(!lidOpened);
+            RefreshQuestionObject();
+            UpdateText();
+        }
+
+        /// <summary>清掉座位上的残留乘客像素（池化复用时调用：旧流程是「车连乘客一起销毁」，回池后得手动清）。</summary>
+        private void DestroyLeftoverPassengers()
+        {
+            if (posList == null)
+                return;
+
+            for (int i = 0; i < posList.Count; i++)
+            {
+                var seat = posList[i];
+                if (seat == null)
+                    continue;
+
+                var passenger = seat.GetComponentInChildren<PixelItem>(true);
+                if (passenger != null)
+                    Destroy(passenger.gameObject);
+            }
+        }
+
         /// <summary>直接隐藏盖子（初始就在第一排的小车使用）。</summary>
         public void HideLid()
         {

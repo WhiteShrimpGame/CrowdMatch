@@ -126,20 +126,24 @@ namespace CrowdMatch
         /// <summary>「出车角度永远回不了 0」这条警告只打一次：属配置问题，同类型号的车会重复出现。</summary>
         private static bool _warnedAngleNeverRecovers;
 
-        /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调）。</summary>
+        /// <summary>启动出库动画；转正瞬间调用 onRefill（补位回调），动画结束后调用 onFinished。</summary>
         /// <param name="ropeRearExit">
         /// true = 绳组的**非头车**：跳过倒车、直接切前轴，从正姿（0°）起步甩头（运动参数走 Rope Rear Exit 那一组）。
         /// 会被 <see cref="ropeRearExitEnabled"/> 总开关拦一道。
         /// </param>
-        public void Play(Action onRefill, bool ropeRearExit = false)
+        /// <param name="onFinished">
+        /// 出车动画播完的回调。**替代原来这里的 <c>Destroy(gameObject)</c>**：车改由对象池回收，
+        /// 交给 ContainerGroup 决定是回池还是销毁（未注册池时它自己 Destroy）。
+        /// </param>
+        public void Play(Action onRefill, bool ropeRearExit = false, Action onFinished = null)
         {
             if (_playing)
                 return;
             _playing = true;
-            StartCoroutine(Run(onRefill, ropeRearExit && ropeRearExitEnabled));
+            StartCoroutine(Run(onRefill, ropeRearExit && ropeRearExitEnabled, onFinished));
         }
 
-        private IEnumerator Run(Action onRefill, bool ropeRearExit)
+        private IEnumerator Run(Action onRefill, bool ropeRearExit, Action onFinished)
         {
             var container = GetComponent<ContainerItem>();
             Transform front = container != null ? container.frontAxle : null;
@@ -148,11 +152,11 @@ namespace CrowdMatch
             Transform roll = container != null ? container.rollAxle : null;
             Transform elastic = container != null ? container.elasticScaleAxle : null;
 
-            // 轴未配置：回退到旧「直接补位 + 销毁」
+            // 轴未配置：回退到旧「直接补位 + 出车」（车由 onFinished 交回对象池 / 销毁）
             if (front == null || rear == null)
             {
                 onRefill?.Invoke();
-                Destroy(gameObject);
+                onFinished?.Invoke();
                 yield break;
             }
 
@@ -351,8 +355,36 @@ namespace CrowdMatch
                 yield return null;
             }
 
-            DespawnTrail();   // 拖尾挂在车节点下，必须先回收再销毁车，否则会连带销毁、池里留下空引用
-            Destroy(gameObject);
+            // 拖尾挂在车节点下，必须先归还给池，否则会随车一起被回收、池里留下空引用。
+            // 车本身不在这里销毁——交给 onFinished，由 ContainerGroup 决定回池还是销毁。
+            DespawnTrail();
+            onFinished?.Invoke();
+        }
+
+        /// <summary>
+        /// 池化回收前的就地清理：把拖尾还给池、清播放中标记。
+        ///
+        /// 刻意**不**停协程：本方法由 <see cref="Run"/> 收尾时的 <c>onFinished</c> 回调进来，
+        /// 此刻正处在自己的协程里，<c>StopAllCoroutines</c> 会把这帧的收尾一起掐断。
+        /// 残留协程由下次取出时的 <see cref="ResetForReuse"/> 统一处理。
+        /// </summary>
+        public void PrepareForPool()
+        {
+            DespawnTrail();
+            _playing = false;
+        }
+
+        /// <summary>
+        /// 池化取出后复位：停残留协程、归还拖尾、清播放中标记。
+        ///
+        /// **组件本身保留、不删**：<c>Destroy</c> 是延迟的，同帧 <c>GetComponent</c> 还会拿到将死组件，
+        /// 下一次 <see cref="Play"/> 会被它拦住然后把协程一起做掉。
+        /// </summary>
+        public void ResetForReuse()
+        {
+            StopAllCoroutines();
+            DespawnTrail();
+            _playing = false;
         }
 
         /// <summary>
