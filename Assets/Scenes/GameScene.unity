@@ -1056,6 +1056,21 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1062539249}
   m_CullTransparentMesh: 1
+--- !u!114 &1062539253
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1062539249}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e19747de3f5aca642ab2be37e372fb86, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectColor: {r: 0.16078432, g: 0.38431373, b: 1, a: 1}
+  m_EffectDistance: {x: 2, y: -2}
+  m_UseGraphicAlpha: 1
 --- !u!1001 &1097098086
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1162,21 +1177,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!114 &1062539253
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1062539249}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e19747de3f5aca642ab2be37e372fb86, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_EffectColor: {r: 0.16078432, g: 0.38431373, b: 1, a: 1}
-  m_EffectDistance: {x: 2, y: -2}
-  m_UseGraphicAlpha: 1
 --- !u!1 &1287049118
 GameObject:
   m_ObjectHideFlags: 0
@@ -1287,6 +1287,16 @@ PrefabInstance:
       propertyPath: m_AnchoredPosition.y
       value: -240.8999
       objectReference: {fileID: 0}
+    - target: {fileID: 898979412340817822, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_AnchoredPosition.x
+      value: 116.3999
+      objectReference: {fileID: 0}
+    - target: {fileID: 898979412340817822, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_AnchoredPosition.y
+      value: -240.8999
+      objectReference: {fileID: 0}
     - target: {fileID: 5512917950557974597, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
       propertyPath: m_AnchoredPosition.x
@@ -1296,6 +1306,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_AnchoredPosition.y
       value: -106.37988
+      objectReference: {fileID: 0}
+    - target: {fileID: 6386999703924397347, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_AnchoredPosition.y
+      value: -130.7998
       objectReference: {fileID: 0}
     - target: {fileID: 6386999703924397347, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1426,6 +1441,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6702724837723487258, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_AnchoredPosition.y
+      value: -105.200195
       objectReference: {fileID: 0}
     - target: {fileID: 6702724837723487258, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1942,7 +1962,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
-  levelJsons: []
+  levelJsons: [{fileID: 4900000, guid: e26725ad938f96e4a89c9888aadbb378, type: 3}]
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
