@@ -26,6 +26,9 @@ namespace CrowdMatch
         [Tooltip("显示聚集点单位数量的 UI 文本")]
         public Text gatherCountText;
 
+        [Tooltip("实时显示关卡进度的 UI 文本（形如 45%）；口径与复活 / 失败面板的进度条完全一致，见 GameData.ProgressPercent")]
+        public Text progressText;
+
         [Tooltip("管理的 PixelGroup，留空会自动查找")]
         public PixelGroup pixelGroup;
 
@@ -668,6 +671,7 @@ namespace CrowdMatch
                 HandleClick();
         }
 
+        /// <summary>刷新每帧变化的文本：聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。</summary>
         private void UpdateCountText()
         {
             if (gatherCountText != null)
@@ -677,6 +681,8 @@ namespace CrowdMatch
                 else
                     gatherCountText.text = gatheredItems.Count.ToString();
             }
+            if (progressText != null)
+                progressText.text = GameData.ProgressPercent + "%";
         }
 
         /// <summary>当前「传送带 + 已点未进带」的总占用数。</summary>
