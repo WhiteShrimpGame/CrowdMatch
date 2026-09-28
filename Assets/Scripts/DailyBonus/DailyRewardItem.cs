@@ -44,7 +44,9 @@ namespace WsGame.DailyBouns
         }
 
         /// <summary>
-        /// 显示奖励数量：道具显示 xN，纯金币显示 x{金币数}。
+        /// 显示奖励数量：单件道具显示数量，纯金币显示金币数，**只显示数字、不带头部 x**。
+        /// 多件道具（第7天礼包）**不显示数量** —— 格子只展示美术原图，
+        /// 显示第一件的数量会让人误以为只发一件。
         /// 适配记录 §五：原版 Init 只设图标不设数量，导致道具数量不显示。
         /// </summary>
         private void SetCount()
@@ -56,15 +58,20 @@ namespace WsGame.DailyBouns
                 numText.gameObject.SetActive(false);
                 return;
             }
+            if (rewardData.items.Count > 1)
+            {
+                numText.gameObject.SetActive(false);
+                return;
+            }
             if (rewardData.items.Count > 0)
             {
                 numText.gameObject.SetActive(true);
-                numText.text = "x" + rewardData.items[0].count;
+                numText.text = rewardData.items[0].count.ToString();
             }
             else if (rewardData.gold > 0)
             {
                 numText.gameObject.SetActive(true);
-                numText.text = "x" + rewardData.gold;
+                numText.text = rewardData.gold.ToString();
             }
             else
             {

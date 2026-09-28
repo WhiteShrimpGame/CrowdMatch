@@ -178,7 +178,7 @@ public class RewardData
                         break;
                 }
 
-                //GameData.itemPlayerData.AddCount(items[i].type, items[i].count * multiple, way, type);
+                GameData.itemPlayerData.AddCount(items[i].type, items[i].count * multiple, way, type);
                 
 
                 //var findAimProp = GameData.getProps.Find(a => a.propId == propId);

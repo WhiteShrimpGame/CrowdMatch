@@ -34,7 +34,7 @@ public class ItemPlayerData
 
     public bool IsUnlock(ItemType type)
     {
-        return  GameManager.Instance.itemData.GetUnlockLvl(type)>=GameData.CurrentLevel;
+        return  GameManager.Instance.itemData.GetUnlockLvl(type)<=GameData.CurrentLevel;
     }
     
     public string GetCountString()
