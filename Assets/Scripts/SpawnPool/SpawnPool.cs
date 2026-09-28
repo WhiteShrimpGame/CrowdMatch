@@ -116,6 +116,28 @@ namespace CrowdMatch
             usingObjDic.Remove(go);
         }
 
+        /// <summary>该 tag 是否已在配置里注册。调用方用它决定走池还是回退直接 Instantiate，
+        /// 免得每取一次就刷一条 "Pool Dict not contains tag" 错误。</summary>
+        public bool HasTag(string tag)
+        {
+            return !string.IsNullOrEmpty(tag) && poolDic != null && poolDic.ContainsKey(tag);
+        }
+
+        /// <summary>
+        /// <see cref="Despawn"/> 的「有返回值」版：返回 false 表示该物体不在本池的「使用中」表里
+        /// （例如 <see cref="GC"/> 已经把表清空、或它根本不是从本池取的）。
+        /// 那种情况下 Despawn 会静默什么都不做，**物体就泄漏在场景里**——
+        /// 调用方看到 false 应自行 <c>Destroy</c>。
+        /// </summary>
+        public bool TryDespawn(GameObject go)
+        {
+            if (go == null || usingObjDic == null || !usingObjDic.ContainsKey(go))
+                return false;
+
+            Despawn(go);
+            return true;
+        }
+
         public GameObject SpawnDuration(string tag, float timeDuration, Transform parent = null)
         {
             var go = Spawn(tag, parent);
