@@ -740,7 +740,7 @@
             {
                 "x": 1,
                 "y": 7,
-                "colorId": 3,
+                "colorId": 19,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -820,7 +820,7 @@
             {
                 "x": 1,
                 "y": 17,
-                "colorId": 3,
+                "colorId": 19,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -876,7 +876,7 @@
             {
                 "x": 1,
                 "y": 24,
-                "colorId": 3,
+                "colorId": 19,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -988,7 +988,7 @@
             {
                 "x": 2,
                 "y": 12,
-                "colorId": 3,
+                "colorId": 19,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1374,7 +1374,7 @@
                 }
             ],
             "colors": [
-                3,
+                19,
                 22
             ]
         },
@@ -1399,7 +1399,7 @@
             ],
             "colors": [
                 8,
-                3
+                19
             ]
         }
     ],
