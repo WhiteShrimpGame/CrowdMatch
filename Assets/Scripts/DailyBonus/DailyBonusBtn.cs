@@ -1,3 +1,4 @@
+using CrowdMatch;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -24,6 +25,7 @@ namespace WsGame.DailyBouns
 
         private void OnBtnClick()
         {
+            AudioManager.Instance.PlayButtonAudioAndVibrate();
             tipIcon.gameObject.SetActive(false);
             ShowDailyBounsPanel();
         }

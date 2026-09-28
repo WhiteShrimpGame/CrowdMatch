@@ -57,7 +57,7 @@ public class UnlimitedStaminaPanel : MonoBehaviour
                 // 时长型无限体力
                 if (sec > 0)
                 {
-                    timeText.text = $"{sec / 60:D2}:{sec % 60:D2}";
+                    timeText.text = $"{sec / 60:D2}分{sec % 60:D2}秒";
                 }
             }
         }

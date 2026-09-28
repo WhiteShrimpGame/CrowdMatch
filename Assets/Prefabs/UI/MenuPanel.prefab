@@ -646,6 +646,7 @@ GameObject:
   - component: {fileID: 3023913701027264084}
   - component: {fileID: 4102215548644781281}
   - component: {fileID: 8567536743385984524}
+  - component: {fileID: 2809922892103490704}
   m_Layer: 0
   m_Name: Btn_LeaderBoard
   m_TagString: Untagged
@@ -757,6 +758,18 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &2809922892103490704
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2534933469926226410}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 86d5ee882b64fc643a39df52a3f89e45, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &2985431335765791368
 GameObject:
   m_ObjectHideFlags: 0
@@ -1699,6 +1712,7 @@ GameObject:
   - component: {fileID: 5289311099688022483}
   - component: {fileID: 308326587958370393}
   - component: {fileID: 7098406158437577076}
+  - component: {fileID: 1116104949577250195}
   m_Layer: 0
   m_Name: Btn_Collect
   m_TagString: Untagged
@@ -1810,6 +1824,18 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1116104949577250195
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8292810780588701816}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 86d5ee882b64fc643a39df52a3f89e45, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &8482007546933862601
 GameObject:
   m_ObjectHideFlags: 0
