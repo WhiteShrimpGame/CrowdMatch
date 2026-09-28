@@ -740,7 +740,7 @@
             {
                 "x": 1,
                 "y": 7,
-                "colorId": 19,
+                "colorId": 3,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -820,7 +820,7 @@
             {
                 "x": 1,
                 "y": 17,
-                "colorId": 19,
+                "colorId": 3,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -876,7 +876,7 @@
             {
                 "x": 1,
                 "y": 24,
-                "colorId": 19,
+                "colorId": 3,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -988,7 +988,7 @@
             {
                 "x": 2,
                 "y": 12,
-                "colorId": 19,
+                "colorId": 3,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1405,5 +1405,7 @@
     ],
     "boxes": [],
     "elevators": [],
-    "gates": []
+    "gates": [],
+    "iceGroups": [],
+    "crates": []
 }
