@@ -48,6 +48,7 @@ namespace CrowdMatch
         public StaminaConfig staminaConfig;
         public NewFeatureConfig newFeatureConfig;
         [Header("Prop Config")] public List<PropInfo> propInfos = new List<PropInfo>();
+        public ItemDataConfig itemData;
         private void Awake()
         {
             if (Instance != null && Instance != this)

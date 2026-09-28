@@ -133,7 +133,7 @@ public class WinPanel : MonoBehaviour
         int curGold = GameData.Gold.Count;
         if (curGold > lastGold)
         {
-            //DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
+            DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
             ShowCoinTween(lastGold, curGold, () =>
             {
                 /*if (MiniGameSolution.Ad.IsShowInterstitial && GameData.IsInterstitialShowAfterClose &&
@@ -190,7 +190,6 @@ public class WinPanel : MonoBehaviour
         coinTween.ShowCoins(coinAniStartPosTran.position, end, 30, 1,
             () =>
             {
-                Debug.Log(coinAniStartPosTran.parent.name);
                 DOVirtual.Int(lastCount, newCount, 0.5f,
                         (val) =>
                         {

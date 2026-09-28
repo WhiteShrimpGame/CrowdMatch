@@ -60,7 +60,7 @@ public class GetPropTipPanel : MonoBehaviour
         if(GetTipAction == null)return;
         GetTipAction?.Invoke(1, 1);
         RefreshGoldCount();
-        ClosePanelMethod();
+        UIManager.Instance.ShowPropGetTip(false);
         /*MiniGameSolution.Ad.ShowRewardAd(() =>
         {
             Debug.Log("激励回调成功, 发放奖励");
