@@ -36,7 +36,7 @@ public class FailPanel : MonoBehaviour
         
         progItem = (RectTransform)progBg.Find("Item");
         progText = progItem.Find("ProgText").GetComponent<Text>();
-        int prog = GameData.ClearedPixelCount * 100 / GameData.TotalPixelCount;
+        int prog = GameData.ProgressPercent;
         /*progItem.DOAnchorPosX(startX + (endX - startX) * prog / 100,
             Mathf.Max(0.6f, 1.4f * prog / 100)).SetEase(Ease.OutQuad);*/
         float targetX = startX + (endX - startX) * prog / 100;
