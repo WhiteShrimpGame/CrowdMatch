@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CrowdMatch;
 using DG.Tweening;
 using UnityEngine;
 using UnityEngine.UI;
@@ -113,6 +114,7 @@ namespace WsGame.DailyBouns
 
         public void OnBtnClick(int rate = 1)
         {
+            AudioManager.Instance.PlayButtonAudioAndVibrate();
             transform.DOKill();
             transform.localScale = Vector3.one;
             transform.DOScale(startScale + Vector3.one * 0.08f, 0.1f).OnComplete(() =>
