@@ -992,6 +992,11 @@ namespace CrowdMatch
                 pixelGroup.grid[item.gridX, item.gridZ] = null;
                 // 从网格移出即算「已点出」：一次点击计入整组像素数（不是点击数）
                 GameData.RemovePixelCount++;
+                // 进度分子用**计划口径**累加：乘上像素所在格的倍率，把倍乘门裂变出来的分身一并算上。
+                // 分身在缓冲区生成（CrowdBufferZone.SpawnGateClone）、从不在网格上被点击，
+                // 不补这一笔分子就永远追不上含 CountGateExtraPixels 的分母。
+                // 口径与记录模式按倍率补记 N 份、与 PixelGroup.CollectPlanningSources 同源。
+                GameData.ProgressPixelCount += Mathf.Max(1, pixelGroup.GateMultiplierAt(item.gridX, item.gridZ));
                 item.SetExposed(false);
                 item.SetClickable(false);
                 if (!recordMode)

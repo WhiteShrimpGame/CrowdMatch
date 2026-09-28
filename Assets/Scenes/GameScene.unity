@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.44300658, g: 0.4921953, b: 0.57192475, a: 1}
+  m_IndirectSpecularColor: {r: 0.44300634, g: 0.4921952, b: 0.5719241, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -884,6 +884,8 @@ MonoBehaviour:
     type: 3}
   unlimitedStaminaPanelPrefab: {fileID: 2504530522051090434, guid: 5362b7bec8bd3d44d8cc1886c43202fa,
     type: 3}
+  propGetTipPanelPrefab: {fileID: 8783159860097895648, guid: 68a5469552fae3f45b78b3dbdf5faf94,
+    type: 3}
   menuPanelPrefab: {fileID: 5987610650457024942, guid: 5b33686f7db07674c853242c3eeb6ec8,
     type: 3}
   featurePanelPrefab: {fileID: 50078561173315393, guid: 6ace791c25cfedc499d33f1846fd681f,
@@ -1278,12 +1280,12 @@ PrefabInstance:
     - target: {fileID: 898979412340817822, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
       propertyPath: m_AnchoredPosition.x
-      value: 116.400024
+      value: 116.3999
       objectReference: {fileID: 0}
     - target: {fileID: 898979412340817822, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: -240.90002
+      value: -240.8999
       objectReference: {fileID: 0}
     - target: {fileID: 5512917950557974597, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1298,7 +1300,7 @@ PrefabInstance:
     - target: {fileID: 6386999703924397347, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
       propertyPath: m_AnchoredPosition.y
-      value: -130.80005
+      value: -130.7998
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704560936574, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1328,7 +1330,12 @@ PrefabInstance:
     - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
       propertyPath: m_RootOrder
-      value: 3
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_RootOrder
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 6386999704969479179, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1419,6 +1426,11 @@ PrefabInstance:
         type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6702724837723487258, guid: da4b17d86347fb448b46ae97ed3404c5,
+        type: 3}
+      propertyPath: m_AnchoredPosition.y
+      value: -105.200195
       objectReference: {fileID: 0}
     - target: {fileID: 6784580834354105894, guid: da4b17d86347fb448b46ae97ed3404c5,
         type: 3}
@@ -1726,11 +1738,11 @@ RectTransform:
   m_Children:
   - {fileID: 1062539250}
   m_Father: {fileID: 112434343}
-  m_RootOrder: 3
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0.5}
   m_AnchorMax: {x: 1, y: 0.5}
-  m_AnchoredPosition: {x: 0.000061035156, y: 142.5}
+  m_AnchoredPosition: {x: 0, y: 142.5}
   m_SizeDelta: {x: 0, y: 126}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1676200903
@@ -1937,6 +1949,37 @@ MonoBehaviour:
   emojiManager: {fileID: 1287049119}
   staminaConfig: {fileID: 11400000, guid: 67e6055727302cc4296f0ce4981add9c, type: 2}
   newFeatureConfig: {fileID: 11400000, guid: aa1bfd311f5a14d4aab5fd1b79a701d4, type: 2}
+  propInfos:
+  - propType: 1
+    propId: AddSlot
+    propName: "\u5237\u65B0"
+    buyLogWay: AddSlot
+    adSceneId: AddSlot
+    propSpr: {fileID: 21300000, guid: 17e07ec686b0798498def3e32e7201a2, type: 3}
+    propSmallSpr: {fileID: 21300000, guid: 7fdf925e202d81f41819b30a798d4485, type: 3}
+    price: 100
+    propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u5237\u65B0"
+    isShowTextTip: 0
+  - propType: 2
+    propId: RemoveAimTape
+    propName: "\u78C1\u94C1"
+    buyLogWay: RemoveAimTape
+    adSceneId: RemoveAimTape
+    propSpr: {fileID: 21300000, guid: 47378b39a98911e4fa2d5429a125634e, type: 3}
+    propSmallSpr: {fileID: 21300000, guid: eb0825458d526c6449f7951e8503724f, type: 3}
+    price: 100
+    propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u78C1\u94C1"
+    isShowTextTip: 0
+  - propType: 3
+    propId: ClearWaitSlot
+    propName: "\u79FB\u9664"
+    buyLogWay: ClearWaitSlot
+    adSceneId: ClearWaitSlot
+    propSpr: {fileID: 21300000, guid: 7fd579ff1ddb77f428d1c9320e7ee4be, type: 3}
+    propSmallSpr: {fileID: 21300000, guid: f750399b31651f943b56f3c485d546b8, type: 3}
+    price: 100
+    propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u79FB\u9664"
+    isShowTextTip: 0
 --- !u!4 &1940794605
 Transform:
   m_ObjectHideFlags: 0
