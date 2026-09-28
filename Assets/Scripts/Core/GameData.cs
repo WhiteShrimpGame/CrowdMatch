@@ -166,5 +166,19 @@ namespace CrowdMatch
                 return 0;
             }
         }
+        public static ItemPlayerData itemPlayerData
+        {
+            get
+            {
+                if (_itemPlayerData == null)
+                {
+                    _itemPlayerData = new ItemPlayerData();
+                }
+
+                return _itemPlayerData;
+            }
+        }
+
+        private static ItemPlayerData _itemPlayerData;
     }
 }

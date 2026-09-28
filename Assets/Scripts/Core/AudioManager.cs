@@ -307,7 +307,7 @@ namespace CrowdMatch
         public void PlayButtonAudioAndVibrate()
         {
             Play("Button");
-
+            GameManager.Instance.TriggerVibrate(1);
             // TODO: Add your project's vibration call here.
             // 在此处添加你的项目的振动调用。
         }

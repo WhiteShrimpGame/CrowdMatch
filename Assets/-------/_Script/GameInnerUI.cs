@@ -69,13 +69,13 @@ public class GameInnerUI : MonoBehaviour
 
     private void Awake()
     {
-        /*addSlotBtn?.onClick.AddListener(AddSlotMethod);
+        addSlotBtn?.onClick.AddListener(AddSlotMethod);
         clearWaitSlotBtn?.onClick.AddListener(ClearWaitSlotMethod);
         removeAimTapBtn?.onClick.AddListener(RemoveAimTapeMethod);
-        removeAimTapeCloseBtn?.onClick.AddListener(OnRemoveTapeCloseBtnClick);*/
+        //removeAimTapeCloseBtn?.onClick.AddListener(OnRemoveTapeCloseBtnClick);
         homeButton?.onClick.AddListener(OnBackBtnClk);
 
-        //UpdateCurrentButtonInfo();
+        UpdateCurrentButtonInfo();
         RefreshGoldCount();
 
         InitHardTip();
@@ -140,28 +140,28 @@ public class GameInnerUI : MonoBehaviour
         
     }
 
-    /*#region 道具按钮方法
+    #region 道具按钮方法
 
     //按钮触发方法：直接移除Tape
     private void RemoveAimTapeMethod()
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
+        //HideFoolProofPropTips();
 
         if (!GameState.IsGameStart)
         {
             return;
         }
 
-        if (GameData.isNoCheckRemoveTape)
-            return;
+        /*if (GameData.isNoCheckRemoveTape)
+            return;*/
 
         var propId = "RemoveAimTape";
 
@@ -184,21 +184,21 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanRemoveTape())
+            /*if (!GameController.Instance.CheckCanRemoveTape())
             {
                 UIManager.Instance.ShowTip("场景中没有胶带！");
                 return;
-            }
-
-            // CousmeProp(propId);
-            // UpdateCurrentButtonInfo();
-            LogicRemoveAimTapeMethod();
-            // WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            // MiniGameSolution.Utilities.PlayerPrefs.Save();
+            }*/
+            Debug.Log("使用了道具2");
+            CousmeProp(propId);
+            UpdateCurrentButtonInfo();
+            //LogicRemoveAimTapeMethod();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicRemoveAimTapeMethod()
+    /*private void LogicRemoveAimTapeMethod()
     {
         GameData.isNoCheckRemoveTape = true;
         maskImage.gameObject.SetActive(true);
@@ -207,7 +207,7 @@ public class GameInnerUI : MonoBehaviour
         removeAimTapBtn.transform.Find("CloseBtn").Show();
 
         GameController.Instance.curLevel.MakeAllTapeBright();
-    }
+    }*/
 
     /// <summary>
     /// 点击移除胶带按钮上的关闭按钮
@@ -225,7 +225,7 @@ public class GameInnerUI : MonoBehaviour
         var propId = "RemoveAimTape";
         CousmeProp(propId);
         UpdateCurrentButtonInfo();
-        MiniGameSolution.Utilities.PlayerPrefs.Save();
+        PlayerPrefs.Save();
     }
 
     //按钮触发方法：清空槽位
@@ -233,13 +233,13 @@ public class GameInnerUI : MonoBehaviour
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
+        //HideFoolProofPropTips();
 
         if (!GameState.IsGameStart)
         {
@@ -267,41 +267,41 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanClearWaitList())
+            /*if (!GameController.Instance.CheckCanClearWaitList())
             {
                 UIManager.Instance.ShowTip("等待区无胶带可清除");
                 return;
-            }
-
+            }*/
+            Debug.Log("使用了道具3");
             CousmeProp(propId);
             UpdateCurrentButtonInfo();
-            LogicClearWaitAllItems();
-            WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            MiniGameSolution.Utilities.PlayerPrefs.Save();
+            //LogicClearWaitAllItems();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicClearWaitAllItems()
+    /*private void LogicClearWaitAllItems()
     {
         GameController.Instance.waitAlert.HideRed();
         GameController.Instance.waitAlert.HideSign();
         GameController.Instance.ClearWaitAllItems();
 
         DOVirtual.DelayedCall(0.2f, () => { AudioManager.Instance.playClip(11); });
-    }
+    }*/
 
     //按钮触发方法：增加槽位
     private void AddSlotMethod()
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
+        //HideFoolProofPropTips();
 
         if (!GameState.IsGameStart)
         {
@@ -329,24 +329,24 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanAddWaitList())
+            /*if (!GameController.Instance.CheckCanAddWaitList())
             {
                 UIManager.Instance.ShowTip("槽位已满，无法添加");
                 return;
-            }
-
+            }*/
+            Debug.Log("使用了道具1");
             CousmeProp(propId);
             UpdateCurrentButtonInfo();
-            LogicAddSlot();
-            WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            MiniGameSolution.Utilities.PlayerPrefs.Save();
+            //LogicAddSlot();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicAddSlot()
+    /*private void LogicAddSlot()
     {
         GameController.Instance.UnlockWait();
-    }
+    }*/
 
     private bool CanUseProp(string propId)
     {
@@ -355,7 +355,7 @@ public class GameInnerUI : MonoBehaviour
 
     private void CousmeProp(string propId)
     {
-        GameData.ItemUseCount++;
+        //GameData.ItemUseCount++;
         GameData.itemPlayerData.CostCount(PropInfo.PropToType(propId));
     }
 
@@ -430,7 +430,7 @@ public class GameInnerUI : MonoBehaviour
         }
     }
 
-    #endregion*/
+    #endregion
 
     //IEnumerator Start()
     private void Init()

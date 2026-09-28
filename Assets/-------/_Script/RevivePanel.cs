@@ -8,7 +8,7 @@ using Spine.Unity;
 using UnityEngine.EventSystems;
 
 
-public class RevivePanel : MonoBehaviour,IPointerDownHandler, IPointerUpHandler
+public class RevivePanel : MonoBehaviour//,IPointerDownHandler, IPointerUpHandler
 {
     /*public GameObject item1, item2;
     public Text reviveInfo;

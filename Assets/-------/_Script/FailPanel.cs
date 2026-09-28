@@ -18,6 +18,7 @@ public class FailPanel : MonoBehaviour
 
     private void OnEnable()
     {
+        AudioManager.Instance.Play("Fail");
         GameState.GameFail();
         if (StaminaSystemData.IsActive())
         {

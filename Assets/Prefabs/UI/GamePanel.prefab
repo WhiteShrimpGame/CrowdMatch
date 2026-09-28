@@ -17,7 +17,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &4241413834226776819
 RectTransform:
   m_ObjectHideFlags: 0
@@ -220,7 +220,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &3629628242792913136
 RectTransform:
   m_ObjectHideFlags: 0
@@ -1939,7 +1939,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: 38332856e53bb394e8d0ff038bc48680, type: 3}
+  m_Sprite: {fileID: 21300000, guid: fef1f7ce7b5070f4d8aa8d03bb12a2df, type: 3}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -2392,7 +2392,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &2249762142895457655
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2875,7 +2875,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &2923188695387991910
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2951,7 +2951,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &4762459249371879534
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4687,9 +4687,9 @@ MonoBehaviour:
   homeButton: {fileID: 1117521194139929451}
   levelText: {fileID: 6386999704641619028}
   goldCountText: {fileID: 2118553234618584503}
-  addSlotBtn: {fileID: 0}
-  clearWaitSlotBtn: {fileID: 0}
-  removeAimTapBtn: {fileID: 0}
+  addSlotBtn: {fileID: 6386999704142428212}
+  clearWaitSlotBtn: {fileID: 3420188481244156850}
+  removeAimTapBtn: {fileID: 6763012996492552163}
   removeAimTapeCloseBtn: {fileID: 0}
   removeTip: {fileID: 0}
   GuideTip: {fileID: 0}
