@@ -161,6 +161,7 @@ namespace CrowdMatch
             ClearedPixelCount = 0;
             RemovePixelCount = 0;
             ProgressPixelCount = 0;
+            itemPlayerData.Clear();
         }
         /// <summary>关卡难度 (0=普通, 1=困难, 2=超难) / Level difficulty</summary>
         //public static int LevelDiff = 0;
