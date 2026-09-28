@@ -7,7 +7,7 @@ public static class GoldConfig
         GameData.MaxItemAdGetCount = GetAdGetItemTime();
         GameData.MaxReviveAdCount = GetAdReviveTime();
         GameData.MaxReviveGoldCount = GetGoldReviveTime();
-    }
+    }*/
 
     public static bool IsItemOutOfUse(ItemType type)
     {
@@ -21,7 +21,8 @@ public static class GoldConfig
 
     public static bool IsItemAdOutOfUse(ItemType type)
     {
-        if (GameData.MaxItemAdGetCount < 0)
+        return false;
+        /*if (GameData.MaxItemAdGetCount < 0)
         {
             return false;
         }
@@ -36,10 +37,10 @@ public static class GoldConfig
             return false;
         }
 
-        return GameData.ItemAdGetCountDict[type] >= GameData.MaxItemAdGetCount;
+        return GameData.ItemAdGetCountDict[type] >= GameData.MaxItemAdGetCount;*/
     }
 
-    public static bool IsReviveOutOfUse()
+    /*public static bool IsReviveOutOfUse()
     {
         return IsReviveAdOutOfUse() && IsReviveGoldOutOfUse();
     }
@@ -89,7 +90,7 @@ public static class GoldConfig
         {
             GameData.ItemAdGetCountDict[type]++;
         }
-    }
+    }*/
 
     public static bool IsGoldGetItemActive()
     {
@@ -165,7 +166,7 @@ public static class GoldConfig
         }
 
         return val;
-    }*/
+    }
 
     public static int GetItemPrice(ItemType type)
     {

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CrowdMatch;
 using DG.Tweening;
 using UnityEngine;
 using WsGame.Time;
@@ -63,6 +64,11 @@ namespace WsGame.DailyBouns
             }
         }
 
+        public void OnCloseBtn()
+        {
+            AudioManager.Instance.PlayButtonAudioAndVibrate();
+            Hide();
+        }
         public void Hide()
         {
             transform.Find("Bg").DOScale(0.4f, 0.2f).SetEase(DG.Tweening.Ease.InBack).OnComplete(delegate
@@ -103,7 +109,8 @@ namespace WsGame.DailyBouns
                 mainCanvasGroup = gameObject.AddComponent<CanvasGroup>();
 
             claimBtn.onClick.AddListener(ClaimReward);
-            closeBtn.onClick.AddListener(Hide);
+            //closeBtn.onClick.AddListener(Hide);
+            closeBtn.onClick.AddListener(OnCloseBtn);
 
             // 初始有 1 个，复制 5 个，第 7 天是单独的（共 7 个）
             for (int i = 0; i < 5; i++)

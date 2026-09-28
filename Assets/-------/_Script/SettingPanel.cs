@@ -295,6 +295,11 @@ public class SettingPanel : MonoBehaviour
                     {
                         gp.RefreshGoldCount();
                     }
+                    var mp = UIManager.Instance.mainPanel.GetComponent<MainPanel>();
+                    if (mp != null && mp.gameObject.activeSelf)
+                    {
+                        mp.RefreshGoldCount();
+                    }
                 }
             },
             {
@@ -558,7 +563,8 @@ public class SettingPanel : MonoBehaviour
         }
 
         ////AudioManager.Instance.playClip(1);
-        GameManager.Instance.TriggerVibrate(1);
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        //GameManager.Instance.TriggerVibrate(1);
         //UIManager.Instance.HidePanel(transform);
         UIManager.Instance.ShowSettingPanel(false);
     }
@@ -576,15 +582,14 @@ public class SettingPanel : MonoBehaviour
     public void OnRetryBtnClk()
     {
         ////AudioManager.Instance.playClip(1);
-        GameManager.Instance.TriggerVibrate(1);
-
+        //GameManager.Instance.TriggerVibrate(1);
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
         GameManager.Instance.ReloadLevel();
         //SceneManager.LoadScene("GameScene");
     }
 
     public void OnMusicBtnClk()
     {
-        ////AudioManager.Instance.playClip(1);
         GameManager.Instance.TriggerVibrate(1);
         if (SettingData.MusicSet == 1)
         {
@@ -622,7 +627,7 @@ public class SettingPanel : MonoBehaviour
         else
         {
             SettingData.SoundSet = 1;
-            ////AudioManager.Instance.playClip(1);
+            AudioManager.Instance.Play("Button");
             _soundBtn.Find("Open").gameObject.SetActive(true);
             _soundBtn.Find("Close").gameObject.SetActive(false);
 

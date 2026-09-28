@@ -62,7 +62,7 @@ MonoBehaviour:
     volume: 1
     isBGM: 0
   - tag: WinPart
-    clip: {fileID: 8300000, guid: 04c9a280676efc74d823ceba656b3db0, type: 3}
+    clip: {fileID: 8300000, guid: 8fb9d2de7cf293e48afb65ec1007554b, type: 3}
     volume: 1
     isBGM: 0
   - tag: BoxHit
@@ -71,5 +71,13 @@ MonoBehaviour:
     isBGM: 0
   - tag: BoxBreak
     clip: {fileID: 8300000, guid: 2ef58cc24b59d6c4d91e2f267de6ec48, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: Fail
+    clip: {fileID: 8300000, guid: f9cc811a4a9c52b46b76bd73546f629c, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: Coins
+    clip: {fileID: 8300000, guid: 8f18ee7736cd9e345838d0eee6302204, type: 3}
     volume: 1
     isBGM: 0
