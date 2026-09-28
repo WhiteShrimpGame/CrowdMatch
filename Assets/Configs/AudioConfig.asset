@@ -77,3 +77,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: f9cc811a4a9c52b46b76bd73546f629c, type: 3}
     volume: 1
     isBGM: 0
+  - tag: Coins
+    clip: {fileID: 8300000, guid: 8f18ee7736cd9e345838d0eee6302204, type: 3}
+    volume: 1
+    isBGM: 0

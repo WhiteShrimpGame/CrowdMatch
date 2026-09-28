@@ -11,11 +11,9 @@ using UnityEngine;
 public class ItemDataConfig : ScriptableObject
 {
     public ItemData[] data;
+    public Sprite itemUnlockBg;
+    public Sprite itemLockBg;
     public Sprite goldImg;
-    public Sprite gold3Img;
-    public Sprite giftImg;
-    public Sprite hammerImg;
-
     private Dictionary<ItemType, int> indexDict;
 
     public void InitIndexDict()
