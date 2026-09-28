@@ -176,6 +176,11 @@ namespace CrowdMatch
             if (!data.container.lockContainer)
                 LevelLoader.ShuffleContainers(data.container);
 
+            // Record 模式：木箱不再遮挡像素（照常显示 / 参与暴露 / 可正常点击，求组限制在同一木箱内）。
+            // 必须在 LevelLoader.Apply **之前**写入：那一步会走 RebuildGrid → RefreshCrateState → SetCovered，
+            // 而 SetCovered 是幂等的（同值直接返回），事后再改这个开关不会重刷。
+            pixelGroup.recordRevealCrates = recordMode;
+
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
             pixelGroup.RefreshExposed();
             RefreshFrame();
@@ -805,7 +810,11 @@ namespace CrowdMatch
             //
             // 这条守卫在冰冻之前：木箱是盖在最上面的，一个格子同时被冰和木箱占住时以木箱为准
             // （否则会打出冰块那套「有反馈但不摆表情」的表现，而木箱的要求是完全没有反馈）。
-            if (item.IsCovered)
+            //
+            // **Record 模式例外**：木箱不再遮挡像素（见 PixelGroup.recordRevealCrates），
+            // 箱内像素照常可点——录的是理想取出顺序，不能让木箱把像素藏起来点不到。
+            // 求组时箱内像素只在同一木箱内相邻，见 CrateAdjacencyAllowed。
+            if (item.IsCovered && !recordMode)
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 命中 " + item.name + " 但被木箱盖住，忽略点击（无反馈）");
@@ -1098,10 +1107,11 @@ namespace CrowdMatch
                     // 于是点冰旁边的同色像素时，冰里的像素不会被一起带走——必须等冰化开。
                     if (nb.IsFrozen)
                         continue;
-                    // 被木箱盖住的 Pixel 也断开连通：不参与移除、不扩散。
+                    // 木箱的连通口径（见 CrateAdjacencyAllowed）：
+                    // 非 Record 模式完全断开；Record 模式只在同一木箱内相邻。
                     // 这条守卫是必须的 —— 木箱格虽然算障碍，但 FloodFill 根本不看 IsBlocked
                     // （同色相邻就连上），漏了它就会点木箱旁边的同色像素时把木箱里的像素也一起移出去。
-                    if (nb.IsCovered)
+                    if (!CrateAdjacencyAllowed(cur, nb))
                         continue;
                     if (visited.Add(nb))
                         queue.Enqueue(nb);
@@ -1109,6 +1119,32 @@ namespace CrowdMatch
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 木箱处「这两颗像素算不算相邻」的口径：<paramref name="b"/> 能不能被 <paramref name="a"/> 连通到。
+        ///
+        /// · **非 Record 模式**：木箱像素完全断开连通 —— 与原来的 `if (nb.IsCovered) continue;` 等价。
+        ///   点木箱旁边的同色像素不会把箱里的带走，点箱里的也不会带出箱外的。
+        /// · **Record 模式**（木箱不再遮挡像素，见 <see cref="PixelGroup.recordRevealCrates"/>）：
+        ///   连通性被限制在**同一个木箱内** —— 两颗都不在木箱里 → 相邻（正常规则）；
+        ///   同属一个木箱 → 相邻（箱内自成一个连通岛，点一颗能带走同箱同色的整片）；
+        ///   一颗在箱里、一颗在箱外 → 不相邻。
+        ///
+        /// 分属两个木箱也算不相邻：两个木箱的格集合互不重叠，但边缘可以紧挨着，
+        /// 那不属于「箱内相邻」。这也是 Record 模式的取舍——录的是理想取出顺序，
+        /// 箱内像素被当成一块独立的同色块来处理。
+        /// </summary>
+        private bool CrateAdjacencyAllowed(PixelItem a, PixelItem b)
+        {
+            if (!recordMode)
+                return !b.IsCovered;
+
+            var ca = pixelGroup.CrateAt(a.gridX, a.gridZ);
+            var cb = pixelGroup.CrateAt(b.gridX, b.gridZ);
+            if (ca == null && cb == null)
+                return true;
+            return ca != null && ca == cb;
         }
 
         /// <summary>

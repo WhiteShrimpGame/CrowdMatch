@@ -408,6 +408,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 木箱遮盖：关掉本体渲染器（不可见）与问号物体，恢复时再按「是否未揭晓问号」重算显隐。
+        /// （Record 模式例外，见末尾一段。）
         ///
         /// **不能改用 SetActive(false)**：那是箱子隐藏像素的做法，而 CountPixels 用
         /// GetComponentsInChildren 默认扫不到 inactive 物体（箱子的隐藏像素靠 BoxItem.hiddenPixels
@@ -417,6 +418,12 @@ namespace CrowdMatch
         /// **保留点击碰撞体**（与冰冻同理）：射线必须还能打到它。区别在命中之后 ——
         /// 冰的守卫给阻挡反馈，木箱的守卫什么都不做（那里本来就看着没有像素）。
         /// 若把碰撞体关掉，射线会直接穿过去打中木箱更后面的像素，那才是真的错。
+        ///
+        /// **Record 模式**（<see cref="PixelGroup.recordRevealCrates"/>）下不关渲染器：木箱不再遮挡像素，
+        /// 被盖像素照常显示。`IsCovered` 仍旧写 true —— 「箱内像素只在同一木箱内才算相邻」
+        /// 那条口径（`GameController.FloodFill`）读的就是它。
+        /// 该开关是关卡级常量，必须在本轮 RebuildGrid 之前写入：本方法是幂等的（同值直接返回），
+        /// 开关事后变化不会自动重刷。
         /// </summary>
         public void SetCovered(bool covered)
         {
@@ -424,14 +431,18 @@ namespace CrowdMatch
                 return;
             IsCovered = covered;
 
+            // Record 模式：木箱不再遮挡像素 → 照常渲染；木箱格在暴露判定里也不再算障碍
+            // （见 PixelGroup.BlocksExposureForPixel）
+            bool hide = covered && (group == null || !group.recordRevealCrates);
+
             for (int i = 0; i < renderers.Count; i++)
             {
                 var r = renderers[i];
                 if (r != null)
-                    r.enabled = !covered;
+                    r.enabled = !hide;
             }
 
-            if (covered)
+            if (hide)
             {
                 if (questionObject != null)
                     questionObject.SetActive(false);
