@@ -193,6 +193,9 @@ namespace CrowdMatch
             GameData.RemovePixelCount = 0;
             if (recordMode)
                 BeginRecord(json.name, GameData.TotalPixelCount);   // json.name = 关卡 JSON 文件名
+            //更新道具状态
+            var gp= UIManager.Instance.gameInnerUI;
+            gp.UpdateCurrentButtonInfo();
         }
 
         /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>

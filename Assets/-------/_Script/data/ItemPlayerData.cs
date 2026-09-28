@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CrowdMatch;
 using UnityEngine;
 
 public class ItemPlayerData
@@ -31,6 +32,11 @@ public class ItemPlayerData
         return dataDict[type];
     }
 
+    public bool IsUnlock(ItemType type)
+    {
+        return  GameManager.Instance.itemData.GetUnlockLvl(type)>=GameData.CurrentLevel;
+    }
+    
     public string GetCountString()
     {
         return GetCount(ItemType.Add) + "_" + GetCount(ItemType.Remove) + "_" + GetCount(ItemType.Clear);

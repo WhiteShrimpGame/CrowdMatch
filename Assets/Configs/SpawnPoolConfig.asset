@@ -28,3 +28,6 @@ MonoBehaviour:
   - tag: IceBreak
     item: {fileID: 6898527057234586512, guid: 760af748348fbb04e9e72a9bd22ae5ff, type: 3}
     preloadCount: 0
+  - tag: Bus
+    item: {fileID: 6270132325612386151, guid: 3173dcb344714ed40baebfcef9b75a40, type: 3}
+    preloadCount: 0

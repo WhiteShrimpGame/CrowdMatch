@@ -81,6 +81,7 @@ public class GetStaminaPanel : MonoBehaviour
     /// </summary>
     private void GetADPropPanelMethod()
     {
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
         StaminaSystemData.AddStamina(staminaConfig.AdStaminaValue,"ad",true);
         /*AudioManager.Instance.PlayButtonAudioAndVibrate();
 

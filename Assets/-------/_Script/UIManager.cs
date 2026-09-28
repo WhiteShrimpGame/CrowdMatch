@@ -43,6 +43,7 @@ public class UIManager : MonoBehaviour
     public GameObject recordPanelPrefab;
     public GameObject getStaminaPanelPrefab;
     public GameObject unlimitedStaminaPanelPrefab;
+    public GameObject propGetTipPanelPrefab;
     public GameObject menuPanelPrefab;
     public GameObject featurePanelPrefab;
     
@@ -195,7 +196,7 @@ public class UIManager : MonoBehaviour
                 ShowPanel(revivePanel);
                 //gamePanel?.GetComponent<GamePanel>()?.HideAllItemPanel();
                 ShowSettingPanel(false);
-                //ShowPropGetTip(false);
+                ShowPropGetTip(false);
             }
         }
 
@@ -289,7 +290,7 @@ public class UIManager : MonoBehaviour
         if (GetComponentInChildren<GetRewardPanel>() != null)
             return GetComponentInChildren<GetRewardPanel>();
         return Instantiate(getRewardPanelPrefab, transform).GetComponent<GetRewardPanel>();
-    }
+    }*/
 
     public void ShowPropGetTip(bool isShow, PropInfo propInfo = null, Action<int, int> finish = null)
     {
@@ -317,42 +318,7 @@ public class UIManager : MonoBehaviour
             }
         }
     }
-
-    public void ShowShareBoxPanel(bool isShow)
-    {
-        if (shareBoxPanel == null && isShow)
-        {
-            shareBoxPanel = Instantiate(shareBoxPanelPrefab, transform).transform;
-        }
-
-        if (shareBoxPanel != null)
-        {
-            shareBoxPanel.gameObject.SetActive(isShow);
-
-            if (isShow)
-            {
-                ShowPanel(shareBoxPanel);
-            }
-        }
-    }
-
-    public void ShowAddBoxPanel(bool isShow)
-    {
-        if (addBoxPanel == null && isShow)
-        {
-            addBoxPanel = Instantiate(addBoxPanelPrefab, transform).transform;
-        }
-
-        if (addBoxPanel != null)
-        {
-            addBoxPanel.gameObject.SetActive(isShow);
-
-            if (isShow)
-            {
-                ShowPanel(addBoxPanel);
-            }
-        }
-    }*/
+    
     public void ShowStaminaPanel(bool isShow)
     {
         if (getStaminaPanel == null && isShow)

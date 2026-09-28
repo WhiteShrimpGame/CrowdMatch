@@ -40,6 +40,7 @@ namespace WsGame.DailyBouns.Integration
         {
             panel.coinTweenCallback = (start, lastCount, newCount) =>
             {
+                DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
                 var target = panel.transform.Find("Bg/GoldFrame/CoinImg");
                 var coinTween = panel.GetComponentInChildren<CoinTweenPanel>(true);
 

@@ -339,8 +339,11 @@ namespace CrowdMatch
             cg.columns = Mathf.Max(1, d.columns);
             cg.rows = Mathf.Max(1, d.rows);
 
-            cg.ClearContainers();
+            cg.ClearContainers();   // 回收上一关的车 + 作废数据层
 
+            // 运行模式懒实例化：只把数据交给 ContainerGroup，由它实例化前几排；
+            // 其余的车留在数据层，等补位滚进视窗时再实例化（见 ContainerGroup.ApplyContainerData）。
+            var cells = new List<ContainerCell>();
             if (d.items != null)
             {
                 foreach (var it in d.items)
@@ -350,9 +353,22 @@ namespace CrowdMatch
                         Debug.LogWarning("[LevelLoader] 容器越界被忽略：x=" + it.x + " y=" + it.y);
                         continue;
                     }
-                    cg.SpawnContainer(it.x, it.y, it.colorId, it.capacity, config, it.question, it.ropeGroupId);
+
+                    cells.Add(new ContainerCell
+                    {
+                        col = it.x,
+                        row = it.y,
+                        occupied = true,
+                        colorId = it.colorId,
+                        capacity = it.capacity,
+                        remaining = it.capacity,
+                        ropeGroupId = it.ropeGroupId,
+                        isQuestion = it.question,
+                    });
                 }
             }
+
+            cg.ApplyContainerData(cells, config);
 
             cg.RebuildGrid();
 
