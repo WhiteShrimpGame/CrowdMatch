@@ -47,7 +47,7 @@ namespace WsGame.DailyBouns.Integration
                     panel.SetGoldText(newCount);
                     return;
                 }
-
+                DOVirtual.DelayedCall(0.6f, () => { RewardTips.CoinSE(); });
                 coinTween.ShowCoins(start.position, target, newCount - lastCount, 1, () =>
                 {
                     DOVirtual.Int(lastCount, newCount, 0.5f, panel.SetGoldText).SetEase(Ease.Linear);
@@ -153,7 +153,12 @@ namespace WsGame.DailyBouns.Integration
             }
 
             if (changed)
+            {
+                // 签到发放（金币或道具）都播这个音频。
+                // 金币那条路另外还有 CoinSE 的连响，两声叠加是刻意保留的。
+                AudioManager.Instance.Play("DailyReward");
                 RefreshHostUI();
+            }
         }
 
         /// <summary>金币读接口：返回宿主真实金币数，供飘字/增量显示使用。</summary>

@@ -81,3 +81,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 8f18ee7736cd9e345838d0eee6302204, type: 3}
     volume: 1
     isBGM: 0
+  - tag: DailyReward
+    clip: {fileID: 8300000, guid: 78b83af4fabd7b44aa96f54e753a2e8e, type: 3}
+    volume: 1
+    isBGM: 0
