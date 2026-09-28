@@ -1586,6 +1586,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   gatherPoint: {fileID: 786388044}
   gatherCountText: {fileID: 1097098087}
+  progressText: {fileID: 0}
   pixelGroup: {fileID: 882082744}
   containerGroup: {fileID: 1428373511}
   frameItem: {fileID: 0}
@@ -1854,7 +1855,7 @@ MonoBehaviour:
   colorConfig: {fileID: 11400000, guid: 55cb475d1a272d34d8a76d3259388565, type: 2}
   audioConfig: {fileID: 11400000, guid: 7142c14ca23227349a968dd5efa4c9b2, type: 2}
   levelJsons:
-  - {fileID: 4900000, guid: 128f1cc852e37fc49afdf580891aa27c, type: 3}
+  - {fileID: 4900000, guid: 20080d4946cbe8f4b9fbd222a4fb43e2, type: 3}
   levelDataConfig: {fileID: 11400000, guid: 3cf8ebe908cda4d48a438ee8b44f3bd5, type: 2}
   spawnPoolConfig: {fileID: 11400000, guid: d4c3201f10c039b47bd9f3b0303791d3, type: 2}
   spawnPoolRoot: {fileID: 230187025}
