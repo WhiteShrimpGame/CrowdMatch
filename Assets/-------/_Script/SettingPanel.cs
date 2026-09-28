@@ -38,7 +38,7 @@ public class SettingPanel : MonoBehaviour
 #if UNITY_EDITOR || NoAds
     public static bool isShowTestPanel = true;
 #else
-    public static bool isShowTestPanel = true;
+    public static bool isShowTestPanel = false;
 #endif
 
     public static bool isForbidTestPanel = false;
