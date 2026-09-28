@@ -346,7 +346,7 @@ public class GameInnerUI : MonoBehaviour
 
     private bool CanUseProp(string propId)
     {
-        return GameData.itemPlayerData.GetCount(PropInfo.PropToType(propId)) > 0;
+        return  GameData.itemPlayerData.GetCount(PropInfo.PropToType(propId)) > 0;
     }
 
     private void CousmeProp(string propId)
@@ -439,7 +439,7 @@ public class GameInnerUI : MonoBehaviour
         var propClearWaitSlot = "ClearWaitSlot";
         var propRemoveAimTape = "RemoveAimTape";
 
-        if (CanUseProp(propAddSlot))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Add) && CanUseProp(propAddSlot))
         {
             var group = addSlotBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
@@ -451,7 +451,7 @@ public class GameInnerUI : MonoBehaviour
         }
 
 
-        if (CanUseProp(propClearWaitSlot))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Clear) && CanUseProp(propClearWaitSlot))
         {
             var group = clearWaitSlotBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
@@ -462,7 +462,7 @@ public class GameInnerUI : MonoBehaviour
             clearWaitSlotBtn.transform.Find("CountGroup").gameObject.SetActive(false);
         }
 
-        if (CanUseProp(propRemoveAimTape))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Remove) && CanUseProp(propRemoveAimTape))
         {
             var group = removeAimTapBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
