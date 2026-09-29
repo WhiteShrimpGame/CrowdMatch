@@ -438,7 +438,7 @@ public class GameInnerUI : MonoBehaviour
         var propAddSlot = "AddSlot";
         var propClearWaitSlot = "ClearWaitSlot";
         var propRemoveAimTape = "RemoveAimTape";
-
+        
         if (GameData.itemPlayerData.IsUnlock(ItemType.Add) && CanUseProp(propAddSlot))
         {
             var group = addSlotBtn.transform.Find("CountGroup");
