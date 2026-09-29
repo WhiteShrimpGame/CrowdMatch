@@ -93,3 +93,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 78b83af4fabd7b44aa96f54e753a2e8e, type: 3}
     volume: 1
     isBGM: 0
+  - tag: Multi
+    clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
+    volume: 0.25
+    isBGM: 0
