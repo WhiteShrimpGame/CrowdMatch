@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CrowdMatch
@@ -103,18 +104,21 @@ namespace CrowdMatch
         [Tooltip("转正后整车直行段线性加速度（米/秒²），可与转正前分别配置")]
         public float ropeExitDriveAcceleration = 8f;
 
+        [Header("出车起步音效 / Car Leave Sfx")]
+        [Tooltip("出车起步音效 tag 列表：连续出车时按顺序循环递进，配几个就几段（到末尾回到开头）；" +
+                 "间隔超过轮换窗口则从第一段重来。留空则不出声。tag 需存在于 AudioConfig")]
+        public List<string> carLeaveTags = new List<string> { "CarLeave", "CarLeave2", "CarLeave3" };
+
         private bool _playing;
 
         /// <summary>出车时从 SpawnPool 生成的拖尾物体（挂在 ContainerItem.trailParent 下）；车销毁前回收。</summary>
         private GameObject _trail;
 
-        /// <summary>出车起步音效序列：连续出车时依次轮换。</summary>
-        private static readonly string[] CarLeaveTags = { "CarLeave", "CarLeave2", "CarLeave3" };
-
         /// <summary>出车起步音效的轮换窗口（秒）：上次播放距今不超过该值则换下一段，超过则回到第一段。</summary>
         private const float CarLeaveLoopWindow = 2f;
 
-        /// <summary>下一段出车音效的下标（静态：跨所有小车共享，同一时间可能有多辆车出库）。</summary>
+        /// <summary>下一段出车音效的下标（静态：跨所有小车共享，同一时间可能有多辆车出库）。
+        /// 列表长度由各车预制体上的 <see cref="carLeaveTags"/> 决定，取模落在哪一段就播哪一段。</summary>
         private static int _carLeaveIndex;
 
         /// <summary>上一次播放出车音效的时间（Time.time）。</summary>
@@ -478,11 +482,15 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 播放出车起步音效：上次播放距今不超过 CarLeaveLoopWindow 秒时，按 CarLeave → CarLeave2 → CarLeave3 依次轮换
-        /// （到末尾回到开头）；超过该窗口则从 CarLeave 重新开始。状态静态，跨所有小车共享。
+        /// 播放出车起步音效：上次播放距今不超过 <see cref="CarLeaveLoopWindow"/> 秒时，
+        /// 按 <see cref="carLeaveTags"/> 的顺序依次轮换（到末尾回到开头）；超过该窗口则从第一段重新开始。
+        /// 列表长度由本车预制体配置决定，配几段就循环几段。轮换下标静态，跨所有小车共享。
         /// </summary>
-        private static void PlayCarLeaveSfx()
+        private void PlayCarLeaveSfx()
         {
+            if (carLeaveTags == null || carLeaveTags.Count == 0)
+                return;   // 未配置 tag：不出声（顺带避开对 0 取模）
+
             var audio = AudioManager.Instance;
             if (audio == null)
                 return;
@@ -490,10 +498,10 @@ namespace CrowdMatch
             float now = Time.time;
             _carLeaveIndex = now - _carLeaveLastTime > CarLeaveLoopWindow
                 ? 0
-                : (_carLeaveIndex + 1) % CarLeaveTags.Length;
+                : (_carLeaveIndex + 1) % carLeaveTags.Count;
             _carLeaveLastTime = now;
 
-            audio.Play(CarLeaveTags[_carLeaveIndex]);
+            audio.Play(carLeaveTags[_carLeaveIndex]);
         }
 
         /// <summary>倒车起点就地生成 Confetti，3 秒后由 SpawnPool 自动回收。

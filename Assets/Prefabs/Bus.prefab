@@ -1083,6 +1083,8 @@ MonoBehaviour:
   ropeExitMaxSpeed: 18
   ropeExitDriveDuration: 1.2
   ropeExitDriveAcceleration: 70
+  carLeaveTags:
+  - CarLeave
 --- !u!1 &7246833716624784822
 GameObject:
   m_ObjectHideFlags: 0
