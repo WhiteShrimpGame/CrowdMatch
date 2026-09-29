@@ -111,7 +111,8 @@
       "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\")",
       "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" LevelHard_7.json)",
       "Bash(IGNORE_PIPE=1 node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\")",
-      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" Level08.json)"
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" Level08.json)",
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_shuffle.js\")"
     ]
   }
 }

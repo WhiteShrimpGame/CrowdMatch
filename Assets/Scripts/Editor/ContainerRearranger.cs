@@ -41,6 +41,34 @@ namespace CrowdMatch
             public List<BacklogSegment> segments = new List<BacklogSegment>();
         }
 
+        /// <summary>洗牌组里的一个元素：某列的**纵向百分比区间** [minPercent, maxPercent)。</summary>
+        [Serializable]
+        public class ShuffleItem
+        {
+            /// <summary>列号（0 基）。</summary>
+            public int column;
+
+            /// <summary>区间下限（%，端点取半开：0%~100% 覆盖整列）。</summary>
+            public int minPercent;
+
+            /// <summary>区间上限（%，端点取半开：min == max 不覆盖任何车位）。</summary>
+            public int maxPercent;
+        }
+
+        /// <summary>一个洗牌组：若干「列 + 纵向区间」元素；执行时取它们的**并集**一次性打乱。</summary>
+        [Serializable]
+        public class ShuffleGroup
+        {
+            public List<ShuffleItem> items = new List<ShuffleItem>();
+        }
+
+        /// <summary>洗牌组模板（导出 / 导入 JSON 用）。组**自上至下**依次执行。</summary>
+        [Serializable]
+        public class ShuffleGroupConfig
+        {
+            public List<ShuffleGroup> groups = new List<ShuffleGroup>();
+        }
+
         /// <summary>每次取出的像素数（= 标准容器容量；不足时记剩余数量）。</summary>
         private const int BatchSize = 3;
 
@@ -192,7 +220,8 @@ namespace CrowdMatch
         /// <summary>
         /// 执行重排：按进度分段生成容器序列 → 随机分布回各列 → 产出新的 LevelData（pixel 不变，lockContainer=true）。
         /// </summary>
-        public static LevelData Rearrange(LevelData data, IReadOnlyList<int> seq, IReadOnlyList<BacklogSegment> segments, int columnOverride, int seed)
+        public static LevelData Rearrange(LevelData data, IReadOnlyList<int> seq, IReadOnlyList<BacklogSegment> segments,
+                                          int columnOverride, int seed, IReadOnlyList<ShuffleGroup> shuffleGroups = null)
         {
             var rng = MakeRng(seed);
             var segs = NormalizeSegments(segments);
@@ -237,6 +266,13 @@ namespace CrowdMatch
             // Distribute 会为每一项新建对象，因此 ropeGroupId / question 都保持默认值 → 绳子信息天然被清除。
             // 注意：若日后把 Distribute 改成「保留原项、只改坐标」，必须在这里显式把 ropeGroupId 清零。
             result.container.items = Distribute(entries, columns, colCount, rng);
+
+            // 洗牌组：必须在 Distribute 之后（洗的是车位上已经摆好的车），组自上至下依次执行
+            if (shuffleGroups != null && shuffleGroups.Count > 0)
+            {
+                int executed = ShuffleGroups(result.container.items, columns, shuffleGroups, rng);
+                Debug.Log("[ContainerRearranger] 洗牌组：执行 " + executed + " / " + shuffleGroups.Count + " 组");
+            }
 
             LogSummary(entries, result.container.items, columns);
             return result;
@@ -369,6 +405,110 @@ namespace CrowdMatch
             return items.ToArray();
         }
 
+        /// <summary>
+        /// 按洗牌组重排车位上的车：组**自上至下**依次执行，每组把它覆盖到的所有车位中的车
+        /// （颜色 + 容量**整条**）随机置换一次。返回实际执行了的组数。
+        ///
+        /// 覆盖判据（纯位置口径，与生成进度无关）：
+        /// 车位 r 在列 c 的纵向占 <c>[r / N_c, (r+1) / N_c)</c>，其中 N_c = 该列**实际**车位数
+        /// （从 items 数出来 —— <see cref="Distribute"/> 在槽位不够时会提前截断，可能与 colCount 不等）；
+        /// 元素区间按端点**半开**处理为 [min%, max%)，两者相交即覆盖。于是
+        /// 0%~100% 覆盖整列，min == max 覆盖 0 格，越界列号 / 该列无车位 → 空操作。
+        ///
+        /// 置换只动覆盖集合**内部** ⇒ 颜色多重集、每列车数、列内压紧都不变，绳组信息也不会复活。
+        /// </summary>
+        public static int ShuffleGroups(LevelData.ContainerItemData[] items, int columns,
+                                        IReadOnlyList<ShuffleGroup> groups, System.Random rng)
+        {
+            if (items == null || items.Length == 0 || groups == null || groups.Count == 0 || columns <= 0)
+                return 0;
+
+            // 每列实际车位数
+            var countPerCol = new int[columns];
+            for (int i = 0; i < items.Length; i++)
+            {
+                int x = items[i].x;
+                if (x >= 0 && x < columns) countPerCol[x]++;
+            }
+
+            // 车位 (列, 行) → items 下标；-1 = 该车位不存在（列内有洞时留空，不参与）
+            var indexOf = new int[columns][];
+            for (int c = 0; c < columns; c++)
+            {
+                indexOf[c] = new int[countPerCol[c]];
+                for (int r = 0; r < indexOf[c].Length; r++) indexOf[c][r] = -1;
+            }
+            for (int i = 0; i < items.Length; i++)
+            {
+                int x = items[i].x, r = items[i].y;
+                if (x < 0 || x >= columns) continue;
+                if (r < 0 || r >= indexOf[x].Length) continue;
+                indexOf[x][r] = i;
+            }
+
+            int executed = 0;
+            var covered = new List<int>();
+            var inCovered = new HashSet<int>();
+
+            for (int g = 0; g < groups.Count; g++)
+            {
+                var group = groups[g];
+                if (group == null || group.items == null) continue;
+
+                covered.Clear();
+                inCovered.Clear();
+
+                for (int e = 0; e < group.items.Count; e++)
+                {
+                    var it = group.items[e];
+                    if (it == null) continue;
+                    int c = it.column;
+                    if (c < 0 || c >= columns) continue;
+                    int n = countPerCol[c];
+                    if (n <= 0) continue;
+
+                    double lo = Mathf.Clamp(it.minPercent, 0, 100) / 100.0;
+                    double hi = Mathf.Clamp(it.maxPercent, 0, 100) / 100.0;
+                    if (hi <= lo) continue;   // 空区间
+
+                    for (int r = 0; r < n; r++)
+                    {
+                        double slotLo = (double)r / n;
+                        double slotHi = (double)(r + 1) / n;
+                        if (slotLo >= hi || lo >= slotHi) continue;   // 不相交
+                        if (indexOf[c][r] < 0) continue;
+                        if (inCovered.Add(indexOf[c][r])) covered.Add(indexOf[c][r]);
+                    }
+                }
+
+                if (covered.Count < 2) continue;   // 0 / 1 个车位置换没有意义
+
+                // 整条车一起置换：取出 (颜色, 容量) → Fisher-Yates → 写回
+                int m = covered.Count;
+                var colors = new int[m];
+                var caps = new int[m];
+                for (int i = 0; i < m; i++)
+                {
+                    colors[i] = items[covered[i]].colorId;
+                    caps[i] = items[covered[i]].capacity;
+                }
+                for (int i = m - 1; i > 0; i--)
+                {
+                    int j = rng.Next(i + 1);
+                    int tc = colors[i]; colors[i] = colors[j]; colors[j] = tc;
+                    int tp = caps[i]; caps[i] = caps[j]; caps[j] = tp;
+                }
+                for (int i = 0; i < m; i++)
+                {
+                    items[covered[i]].colorId = colors[i];
+                    items[covered[i]].capacity = caps[i];
+                }
+                executed++;
+            }
+
+            return executed;
+        }
+
         /// <summary>规范化分段：拷贝一份，按 percent 升序排列，尾段强制 100；空输入回退为单段默认。</summary>
         private static List<BacklogSegment> NormalizeSegments(IReadOnlyList<BacklogSegment> segments)
         {
@@ -457,6 +597,7 @@ namespace CrowdMatch
         private const string RecordPathKey = "CrowdMatch.ContainerRearranger.LastRecordPath";
         private const string ExportPathKey = "CrowdMatch.ContainerRearranger.LastExportPath";
         private const string TemplatePathKey = "CrowdMatch.ContainerRearranger.LastTemplatePath";
+        private const string ShufflePathKey = "CrowdMatch.ContainerRearranger.LastShufflePath";
 
         private TextAsset levelJson;
         private string recordPath = "";
@@ -464,8 +605,13 @@ namespace CrowdMatch
         {
             new ContainerRearranger.BacklogSegment { percent = 100, backlogMin = 0, backlogMax = 6 }
         };
+        private List<ContainerRearranger.ShuffleGroup> shuffleGroups = new List<ContainerRearranger.ShuffleGroup>();
         private int seed = 0;
         private int columnOverride = 0;
+
+        /// <summary>校验洗牌组列号要用到「当前几列」，按选中的关卡 JSON 缓存解析结果（换关卡才重解析）。</summary>
+        private TextAsset cachedColumnsFor;
+        private int cachedColumns;
 
         [MenuItem("CrowdMatch/按 Record 重排容器", false, MenuPriority.Level + 3)]
         public static void Open() => GetWindow<ContainerRearrangerWindow>("按 Record 重排容器");
@@ -532,6 +678,9 @@ namespace CrowdMatch
             if (GUILayout.Button("导入分段模板", GUILayout.Width(96)))
                 ImportSegmentsTemplate();
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(6);
+            DrawShuffleGroups();
 
             EditorGUILayout.Space(4);
             columnOverride = EditorGUILayout.IntField("容器列数（0=维持原列数）", columnOverride);
@@ -648,6 +797,245 @@ namespace CrowdMatch
             Debug.Log("[ContainerRearranger] 已导入积压分段模板（" + segments.Count + " 段）：" + path);
         }
 
+        /// <summary>
+        /// 洗牌组板块：自上至下依次执行；每个元素 = 列号 + 该列**纵向**百分比区间。
+        /// 删除沿用积压分段那套「循环里只记索引、画完再删」，避免在 BeginHorizontal 里 break 漏掉 End
+        /// 导致的 Mismatched LayoutGroup。
+        /// </summary>
+        private void DrawShuffleGroups()
+        {
+            EditorGUILayout.LabelField("洗牌组（自上至下依次执行；元素 = 列号 + 该列纵向百分比区间）", EditorStyles.boldLabel);
+
+            int removeGroupAt = -1, removeItemGroup = -1, removeItemAt = -1;
+
+            for (int g = 0; g < shuffleGroups.Count; g++)
+            {
+                var grp = shuffleGroups[g];
+                if (grp == null)
+                {
+                    removeGroupAt = g;
+                    continue;
+                }
+                if (grp.items == null)
+                    grp.items = new List<ContainerRearranger.ShuffleItem>();
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("组" + (g + 1), GUILayout.Width(34));
+                if (GUILayout.Button("×", GUILayout.Width(22)))
+                    removeGroupAt = g;
+                EditorGUILayout.EndHorizontal();
+
+                for (int i = 0; i < grp.items.Count; i++)
+                {
+                    var it = grp.items[i];
+                    if (it == null)
+                    {
+                        removeItemGroup = g;
+                        removeItemAt = i;
+                        continue;
+                    }
+
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Space(16f);
+                    EditorGUILayout.LabelField("列", GUILayout.Width(18));
+                    it.column = EditorGUILayout.IntField(it.column, GUILayout.Width(32));
+                    it.minPercent = EditorGUILayout.IntField(it.minPercent, GUILayout.Width(34));
+                    EditorGUILayout.LabelField("%", GUILayout.Width(14));
+                    EditorGUILayout.LabelField("~", GUILayout.Width(12));
+                    it.maxPercent = EditorGUILayout.IntField(it.maxPercent, GUILayout.Width(34));
+                    EditorGUILayout.LabelField("%", GUILayout.Width(14));
+                    if (GUILayout.Button("×", GUILayout.Width(22)))
+                    {
+                        removeItemGroup = g;
+                        removeItemAt = i;
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(16f);
+                if (GUILayout.Button("+ 添加元素", GUILayout.Width(84)))
+                    AddShuffleItem(grp);
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space(2);
+            }
+
+            // 先删元素再删组：删组会让后面的组下标前移
+            if (removeItemGroup >= 0 && removeItemGroup < shuffleGroups.Count
+                && shuffleGroups[removeItemGroup].items != null
+                && removeItemAt >= 0 && removeItemAt < shuffleGroups[removeItemGroup].items.Count)
+                shuffleGroups[removeItemGroup].items.RemoveAt(removeItemAt);
+            if (removeGroupAt >= 0 && removeGroupAt < shuffleGroups.Count)
+                shuffleGroups.RemoveAt(removeGroupAt);
+
+            if (GUILayout.Button("+ 添加洗牌组", GUILayout.Width(96)))
+                AddShuffleGroup();
+
+            string err = ValidateShuffleGroups();
+            if (err != null)
+                EditorGUILayout.HelpBox(err, MessageType.Warning);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("导出洗牌组模板", GUILayout.Width(112)))
+                ExportShuffleGroupsTemplate();
+            if (GUILayout.Button("导入洗牌组模板", GUILayout.Width(112)))
+                ImportShuffleGroupsTemplate();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void AddShuffleGroup()
+        {
+            var grp = new ContainerRearranger.ShuffleGroup();
+            grp.items.Add(new ContainerRearranger.ShuffleItem { column = 0, minPercent = 0, maxPercent = 100 });
+            shuffleGroups.Add(grp);
+            Repaint();
+        }
+
+        private void AddShuffleItem(ContainerRearranger.ShuffleGroup grp)
+        {
+            var it = new ContainerRearranger.ShuffleItem { column = 0, minPercent = 0, maxPercent = 100 };
+            if (grp.items.Count > 0)
+            {
+                var last = grp.items[grp.items.Count - 1];
+                if (last != null)
+                {
+                    it.column = last.column;
+                    it.minPercent = last.minPercent;
+                    it.maxPercent = last.maxPercent;
+                }
+            }
+            grp.items.Add(it);
+            Repaint();
+        }
+
+        /// <summary>洗牌组的提示（只提示、不拦导出 —— 无效元素在算法里就是空操作）。通过返回 null。</summary>
+        private string ValidateShuffleGroups()
+        {
+            if (shuffleGroups.Count == 0)
+                return null;
+
+            int knownCols = KnownColumns();
+            for (int g = 0; g < shuffleGroups.Count; g++)
+            {
+                var grp = shuffleGroups[g];
+                if (grp == null || grp.items == null || grp.items.Count == 0)
+                    return "组" + (g + 1) + " 没有任何元素，不会执行。";
+
+                for (int i = 0; i < grp.items.Count; i++)
+                {
+                    var it = grp.items[i];
+                    if (it == null)
+                        continue;
+                    if (it.column < 0)
+                        return "组" + (g + 1) + " 元素" + (i + 1) + "：列号不能为负，该元素不会覆盖任何车位。";
+                    if (knownCols > 0 && it.column >= knownCols)
+                        return "组" + (g + 1) + " 元素" + (i + 1) + "：列号 " + it.column + " 超出当前 " +
+                            knownCols + " 列，该元素不会覆盖任何车位。";
+                    if (it.minPercent < 0 || it.minPercent > 100 || it.maxPercent < 0 || it.maxPercent > 100)
+                        return "组" + (g + 1) + " 元素" + (i + 1) + "：百分比应落在 0~100。";
+                    if (it.minPercent >= it.maxPercent)
+                        return "组" + (g + 1) + " 元素" + (i + 1) + "：区间 [" + it.minPercent + "%, " +
+                            it.maxPercent + "%] 为空（需 min < max），不会覆盖任何车位。";
+                }
+            }
+            return null;
+        }
+
+        /// <summary>当前生效的列数：有「容器列数」覆盖就用它，否则用选中关卡 JSON 里的列数（0 = 还不知道）。</summary>
+        private int KnownColumns()
+        {
+            if (columnOverride > 0)
+                return columnOverride;
+            if (levelJson == null)
+                return 0;
+            if (cachedColumnsFor != levelJson)
+            {
+                cachedColumnsFor = levelJson;
+                var d = LevelLoader.ParseJson(levelJson.text, levelJson.name);
+                cachedColumns = d != null ? Mathf.Max(1, d.container.columns) : 0;
+            }
+            return cachedColumns;
+        }
+
+        private void ExportShuffleGroupsTemplate()
+        {
+            var cfg = new ContainerRearranger.ShuffleGroupConfig();
+            foreach (var g in shuffleGroups)
+            {
+                if (g == null)
+                    continue;
+                var copy = new ContainerRearranger.ShuffleGroup();
+                if (g.items != null)
+                    foreach (var it in g.items)
+                        if (it != null)
+                            copy.items.Add(new ContainerRearranger.ShuffleItem
+                            {
+                                column = it.column,
+                                minPercent = it.minPercent,
+                                maxPercent = it.maxPercent,
+                            });
+                cfg.groups.Add(copy);
+            }
+
+            string json = JsonUtility.ToJson(cfg, true);
+
+            string defaultDir = EditorPathMemory.LoadDir(ShufflePathKey, "Assets");
+            string path = EditorUtility.SaveFilePanel("导出洗牌组模板", defaultDir, "ShuffleGroups.json", "json");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(ShufflePathKey, path);
+
+            File.WriteAllText(path, json, new UTF8Encoding(false));
+            AssetDatabase.Refresh();
+            Debug.Log("[ContainerRearranger] 已导出洗牌组模板（" + cfg.groups.Count + " 组）到 " + path);
+        }
+
+        private void ImportShuffleGroupsTemplate()
+        {
+            string defaultDir = EditorPathMemory.LoadDir(ShufflePathKey, "Assets");
+            string path = EditorUtility.OpenFilePanel("导入洗牌组模板", defaultDir, "json");
+            if (string.IsNullOrEmpty(path))
+                return;
+            EditorPathMemory.SaveDir(ShufflePathKey, path);
+
+            string json;
+            try
+            {
+                json = File.ReadAllText(path);
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("导入洗牌组模板", "读取失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            ContainerRearranger.ShuffleGroupConfig cfg;
+            try
+            {
+                cfg = JsonUtility.FromJson<ContainerRearranger.ShuffleGroupConfig>(json);
+            }
+            catch (Exception e)
+            {
+                EditorUtility.DisplayDialog("导入洗牌组模板", "解析失败：\n" + e.Message, "确定");
+                return;
+            }
+
+            if (cfg == null || cfg.groups == null)
+            {
+                EditorUtility.DisplayDialog("导入洗牌组模板", "模板里没有任何洗牌组。", "确定");
+                return;
+            }
+
+            foreach (var g in cfg.groups)
+                if (g != null && g.items == null)
+                    g.items = new List<ContainerRearranger.ShuffleItem>();
+
+            shuffleGroups = cfg.groups;
+            Repaint();
+            Debug.Log("[ContainerRearranger] 已导入洗牌组模板（" + shuffleGroups.Count + " 组）：" + path);
+        }
+
         private void GenerateAndExport()
         {
             if (levelJson == null)
@@ -700,7 +1088,7 @@ namespace CrowdMatch
                 return;
             }
 
-            var outData = ContainerRearranger.Rearrange(data, seq, segments, columnOverride, seed);
+            var outData = ContainerRearranger.Rearrange(data, seq, segments, columnOverride, seed, shuffleGroups);
 
             string json = JsonUtility.ToJson(outData, true);
 
@@ -715,7 +1103,7 @@ namespace CrowdMatch
             AssetDatabase.Refresh();
 
             Debug.Log("[ContainerRearranger] 已导出重排关卡 JSON 到 " + path + "（容器 " +
-                outData.container.items.Length + " 个，lockContainer=true）");
+                outData.container.items.Length + " 个，洗牌组 " + shuffleGroups.Count + " 组，lockContainer=true）");
 
             EditorUtility.DisplayDialog("按 Record 重排容器",
                 "已导出到：\n" + path + "\n\n请确保该文件位于 Assets 目录下，并在 GameManager.levelJsons 中按关卡序号引用。",
