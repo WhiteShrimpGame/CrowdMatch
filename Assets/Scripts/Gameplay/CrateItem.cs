@@ -271,6 +271,20 @@ namespace CrowdMatch
             }
 
             BuildSeals(pg);
+
+            // Record 模式：木箱不再遮挡像素（见 PixelGroup.recordRevealCrates）——藏掉**占格的格块**
+            // （角 / 边 / 中心），只留封条与钉子当作木箱范围与拆箱进度的提示。
+            // 只 SetActive(false)、不销毁：封条与 ClearVisual / 拆箱动画那两条路径都不受影响
+            // （本模式下木箱不会被拆，见 GameController.ResolveMatch 的 Record 提前返回）。
+            if (group.recordRevealCrates)
+            {
+                for (int i = 0; i < _visualPieces.Count; i++)
+                {
+                    var piece = _visualPieces[i];
+                    if (piece != null)
+                        piece.SetActive(false);
+                }
+            }
         }
 
         /// <summary>
