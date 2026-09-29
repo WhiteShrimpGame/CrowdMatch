@@ -160,8 +160,8 @@ namespace CrowdMatch
             int spawned = 0;
             foreach (var w in walls)
             {
-                if (w == null || w.points == null || w.points.Length < 2)
-                    continue;
+                if (w == null || w.points == null || w.points.Length < 1)
+                    continue;   // 1 个端点 = 1×1 墙，也要生成
                 if (pg.SpawnWall(w.points, w.closed) != null)
                     spawned++;
             }
