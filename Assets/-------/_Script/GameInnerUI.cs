@@ -267,17 +267,21 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            /*if (!GameController.Instance.CheckCanClearWaitList())
-            {
-                UIManager.Instance.ShowTip("等待区无胶带可清除");
+            var gc = GameController.Instance;
+            if (gc == null)
                 return;
-            }*/
-            Debug.Log("使用了道具3移除");
-            CousmeProp(itemType);
-            UpdateCurrentButtonInfo();
-            //LogicClearWaitAllItems();
-            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            PlayerPrefs.Save();
+
+            // 再点一次 = 取消模式（不扣道具）
+            if (gc.PropForceMode)
+            {
+                gc.ExitPropForceMode(false);
+                return;
+            }
+
+            // 进入「强制取出」模式：所有人发光，点任意一组都能无视前排连通送出。
+            // 道具在成功送出一组之后才扣（见 ConsumeRemovePropForce）。
+            Debug.Log("使用了道具3移除：进入强制取出模式");
+            gc.EnterPropForceMode();
         }
     }
 
@@ -372,6 +376,19 @@ public class GameInnerUI : MonoBehaviour
     {
         //GameData.ItemUseCount++;
         GameData.itemPlayerData.CostCount(type);
+    }
+
+    /// <summary>
+    /// 道具3「强制取出」成功送出一组后的结算：扣 1 个道具并刷新显示。
+    /// 由 GameController.ExitPropForceMode(consumed: true) 调用 —— 扣费在真正用掉那一刻，
+    /// 而不是点道具按钮时（玩家进模式后取消不损失）。
+    /// </summary>
+    public void ConsumeRemovePropForce()
+    {
+        CousmeProp(ItemType.Remove);
+        UpdateCurrentButtonInfo();
+        RefreshGoldCount();
+        PlayerPrefs.Save();
     }
     private void GetAimProp(ItemType itemType, int type, int count)
     {

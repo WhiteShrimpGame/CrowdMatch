@@ -108,6 +108,12 @@ namespace CrowdMatch
         /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
         private int _clickMask;
 
+        /// <summary>道具「强制取出」模式：开启后点一组即可无视前排连通限制送出（见 <see cref="EnterPropForceMode"/>）。</summary>
+        private bool _propForceMode;
+
+        /// <summary>当前是否处于道具「强制取出」模式。</summary>
+        public bool PropForceMode { get { return _propForceMode; } }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -546,10 +552,48 @@ namespace CrowdMatch
                     " 无同色车销毁=" + unmatched.Count);
         }
 
+        // ===== 道具「强制取出」模式 =====
+
+        /// <summary>
+        /// 进入道具「强制取出」模式：所有人发光提示，之后点击任意一组都能无视前排连通限制送出。
+        /// 由 GameInnerUI 的道具3按钮调用。道具在**成功送出一组之后**才扣（见 <see cref="ExitPropForceMode"/>）。
+        /// </summary>
+        public void EnterPropForceMode()
+        {
+            if (_propForceMode)
+                return;
+
+            _propForceMode = true;
+            if (pixelGroup != null)
+                pixelGroup.SetPropForceGlow(true);
+        }
+
+        /// <summary>退出道具「强制取出」模式并恢复常规描边。</summary>
+        /// <param name="consumed">true = 成功送出一组（扣 1 个道具）；false = 玩家取消或换关重置（不扣）。</param>
+        public void ExitPropForceMode(bool consumed)
+        {
+            if (!_propForceMode)
+                return;
+
+            _propForceMode = false;
+            if (pixelGroup != null)
+                pixelGroup.SetPropForceGlow(false);
+
+            if (!consumed)
+                return;
+
+            var ui = UIManager.Instance;
+            if (ui != null && ui.gameInnerUI != null)
+                ui.gameInnerUI.ConsumeRemovePropForce();
+        }
+
         /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
         private void CleanupLevel()
         {
             StopAllCoroutines();
+
+            // 换关作废道具模式：这关没用掉就不扣道具
+            ExitPropForceMode(false);
 
             foreach (var item in gatheredItems)
             {
@@ -961,9 +1005,14 @@ namespace CrowdMatch
             bool singleRemove = recordMode && Input.GetKey(KeyCode.S);
             List<PixelItem> matched = singleRemove ? new List<PixelItem> { start } : FloodFill(start);
 
+            // 道具「强制取出」：本批要无视阻挡直接飞出去。先记下来 —— 后面的 ExitPropForceMode
+            // 会清掉 _propForceMode，而 EnterBatch 在那之后才调用，不能那时再读。
+            bool propForce = _propForceMode;
+
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
             // 记录模式不做此限制：被包围的组也允许点击（记录的是取出顺序，与组能否寻路无关）
-            if (!recordMode && !CanReachFront(matched))
+            // 道具「强制取出」模式下跳过这道限制：点哪组都能送出（木箱/冰冻/堆积门槛仍在 HandleClick 里挡着）
+            if (!recordMode && !propForce && !CanReachFront(matched))
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
@@ -1020,10 +1069,15 @@ namespace CrowdMatch
                 // 口径与记录模式按倍率补记 N 份、与 PixelGroup.CollectPlanningSources 同源。
                 GameData.ProgressPixelCount += Mathf.Max(1, pixelGroup.GateMultiplierAt(item.gridX, item.gridZ));
                 item.SetExposed(false);
+                item.SetPropGlow(false);   // 道具高亮一并复位：它已离格，不该顶着描边走上传送带
                 item.SetClickable(false);
                 if (!recordMode)
                     item.SetWalking(true);   // 记录模式下像素随即原地消失，不需要走动画
             }
+
+            // 道具「强制取出」：一组成功送出即算用掉 → 退出模式并扣 1 个道具
+            if (_propForceMode)
+                ExitPropForceMode(true);
 
             // 匹配移除后，先让箱子/升降台释放像素占格（占格同步、动画异步），
             // 再统一刷新暴露状态：避免「移除后短暂暴露的像素紧接着被释放像素封路」却已经站起。
@@ -1076,7 +1130,8 @@ namespace CrowdMatch
             // 否则：回退到旧的直接散布聚集
             if (crowdBuffer != null)
             {
-                crowdBuffer.EnterBatch(matched, pixelGroup);
+                // propForce：本批无视前方阻挡直接离场，否则被围住的组永远走不出去
+                crowdBuffer.EnterBatch(matched, pixelGroup, propForce);
             }
             else
             {

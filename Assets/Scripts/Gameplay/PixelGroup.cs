@@ -986,6 +986,44 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 道具「强制取出」模式的高亮：把所有「本来点得动」的像素点亮描边
+        /// （木箱覆盖 / 冰冻 / 未揭晓问号除外——这三类本来就点不动，点亮会误导）。
+        /// 传 false 时无条件全部还原：模式期间网格可能已经变过，逐个记状态不划算。
+        /// </summary>
+        public void SetPropForceGlow(bool on)
+        {
+            if (grid == null)
+                RebuildGrid();
+
+            int cols = columns;
+            int totalRows = TotalRows;
+
+            for (int c = 0; c < cols; c++)
+            {
+                for (int r = 0; r < totalRows; r++)
+                {
+                    var p = grid[c, r];
+                    if (p == null)
+                        continue;
+
+                    if (on && !IsPropGlowEligible(p))
+                        continue;
+
+                    p.SetPropGlow(on);
+                }
+            }
+        }
+
+        /// <summary>道具高亮的候选判定：与 HandleClick 里那几道「点了没反应」的门槛保持一致。</summary>
+        private static bool IsPropGlowEligible(PixelItem p)
+        {
+            if (p.IsCovered) return false;                    // 木箱盖住：点了无反馈
+            if (p.IsFrozen) return false;                     // 冰组冻住：点了被拒
+            if (p.isQuestion && !p.revealed) return false;    // 未揭晓问号：点了被拒
+            return true;
+        }
+
+        /// <summary>
         /// 刷新所有像素的「暴露（可点击）」状态：
         /// 先标记「直接暴露」的格子（第 0 行，或四周前/后/左/右任一紧邻格为「连通首排的空格」），
         /// 再把每个同色连通块整体激活——只要该连通块包含至少一个直接暴露格，块内所有像素同时激活。
