@@ -494,13 +494,16 @@ namespace CrowdMatch
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
         public void DoRevive()
         {
-            Revive();
-            GameState.GameStart();   // 复活后回到游玩态，继续本关
-            _transitioning = false;
-            // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
-            // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
-            if (containerGroup != null)
-                containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            DOVirtual.DelayedCall(0.6f, () =>
+            {
+                Revive();
+                GameState.GameStart();   // 复活后回到游玩态，继续本关
+                _transitioning = false;
+                // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
+                // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
+                if (containerGroup != null)
+                    containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            });
         }
 
         /// <summary>
