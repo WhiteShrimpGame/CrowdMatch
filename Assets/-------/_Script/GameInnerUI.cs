@@ -106,7 +106,7 @@ public class GameInnerUI : MonoBehaviour
     {
         if (GameState.IsGameWin) return;
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        if (GameData.ProgressPercent>10)
+        if (GameData.ProgressPercent>30)
         {
             UIManager.Instance.showFailTipPanel(true);
         }
