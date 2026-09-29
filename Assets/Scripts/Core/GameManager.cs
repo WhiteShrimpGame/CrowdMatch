@@ -242,10 +242,10 @@ namespace CrowdMatch
         /// </summary>
         /// <param name="id"></param>
         /// <returns></returns>
-        public PropInfo GetAimPropInfo(string id)
+        /*public PropInfo GetAimPropInfo(string id)
         {
             return propInfos.Find(a => a.propId == id);
-        }
+        }*/
 
         public PropInfo GetPropInfo(ItemType propType)
         {

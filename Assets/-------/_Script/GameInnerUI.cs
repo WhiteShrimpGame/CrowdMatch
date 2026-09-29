@@ -12,9 +12,9 @@ public class GameInnerUI : MonoBehaviour
     [SerializeField] Button homeButton;
     [SerializeField] Text levelText;
     [SerializeField] Text goldCountText;
-    [SerializeField] Button addSlotBtn;
-    [SerializeField] Button clearWaitSlotBtn;
-    [SerializeField] Button removeAimTapBtn;
+    [SerializeField] Button refreshBtn;
+    [SerializeField] Button removeBtn;
+    [SerializeField] Button magnetBtn;
     [SerializeField] Button removeAimTapeCloseBtn;
 
     public GameObject removeTip;
@@ -54,9 +54,9 @@ public class GameInnerUI : MonoBehaviour
 
     private void Awake()
     {
-        addSlotBtn?.onClick.AddListener(AddSlotMethod);
-        clearWaitSlotBtn?.onClick.AddListener(ClearWaitSlotMethod);
-        removeAimTapBtn?.onClick.AddListener(RemoveAimTapeMethod);
+        refreshBtn?.onClick.AddListener(OnRefreshBtnClick);
+        removeBtn?.onClick.AddListener(OnRemoveBtnClick);
+        magnetBtn?.onClick.AddListener(OnMagnetBtnClick);
         //removeAimTapeCloseBtn?.onClick.AddListener(OnRemoveTapeCloseBtnClick);
         homeButton?.onClick.AddListener(OnBackBtnClk);
 
@@ -89,7 +89,7 @@ public class GameInnerUI : MonoBehaviour
     /// </summary>
     public void RestoreRemoveAimTapeButtonState()
     {
-        /*removeAimTapBtn.interactable = true;
+        /*magnetBtn.interactable = true;
         removeAimTapeCloseBtn.Hide();
 
         GameData.isNoCheckRemoveTape = false;
@@ -130,9 +130,100 @@ public class GameInnerUI : MonoBehaviour
     }
 
     #region 道具按钮方法
+    
+    private void OnMagnetBtnClick()
+    {
+        if (GameState.IsGameWin) return;
+        if (obj != null)
+        {
+            //obj.GetComponent<GuideMaskPanel>().Hide();
+            GameState.GameStart();
+            //Reporter.GameStart();
+        }
 
-    //按钮触发方法：直接移除Tape
-    private void RemoveAimTapeMethod()
+        AudioManager.Instance.PlayButtonAudioAndVibrate();
+        //HideFoolProofPropTips();
+        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Magnet);
+        if (UnlockLvl > GameData.CurrentLevel)
+        {
+            UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
+            return;
+        }
+        if (!GameState.IsGameStart)
+        {
+            return;
+        }
+
+        /*if (GameData.isNoCheckRemoveTape)
+            return;*/
+
+        //var propId = "Magnet";
+        ItemType itemType = ItemType.Magnet;
+        if (!CanUseProp(itemType))
+        {
+            var findPropInfo = GameManager.Instance.GetPropInfo(itemType);
+            if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
+            {
+                UIManager.Instance.ShowTip("道具已用完");
+            }
+            else
+            {
+                UIManager.Instance.ShowPropGetTip(true, findPropInfo, (type, count) =>
+                {
+                    GetAimProp(itemType, type, count);
+                    UpdateCurrentButtonInfo();
+                    RefreshGoldCount();
+                });
+            }
+        }
+        else
+        {
+            /*if (!GameController.Instance.CheckCanRemoveTape())
+            {
+                UIManager.Instance.ShowTip("场景中没有胶带！");
+                return;
+            }*/
+            Debug.Log("使用了道具2磁铁");
+            CousmeProp(itemType);
+            UpdateCurrentButtonInfo();
+            //LogicOnMagnetBtnClick();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
+        }
+    }
+
+    /*private void LogicOnMagnetBtnClick()
+    {
+        GameData.isNoCheckRemoveTape = true;
+        maskImage.gameObject.SetActive(true);
+        magnetBtn.interactable = false;
+        removeTip.SetActive(true);
+        magnetBtn.transform.Find("CloseBtn").Show();
+
+        GameController.Instance.curLevel.MakeAllTapeBright();
+    }*/
+
+    /// <summary>
+    /// 点击移除胶带按钮上的关闭按钮
+    /// </summary>
+    private void OnRemoveTapeCloseBtnClick()
+    {
+        RestoreRemoveAimTapeButtonState();
+    }
+
+    /// <summary>
+    /// 消耗移除胶带道具次数
+    /// </summary>
+    /*public void ConsumeRemoveTapeProp()
+    {
+        var propId = "RemoveAimTape";
+        CousmeProp(propId);
+        UpdateCurrentButtonInfo();
+        PlayerPrefs.Save();
+    }*/
+
+    //按钮触发方法：清空槽位
+    private void OnRemoveBtnClick()
     {
         if (GameState.IsGameWin) return;
         if (obj != null)
@@ -155,14 +246,11 @@ public class GameInnerUI : MonoBehaviour
             return;
         }
 
-        /*if (GameData.isNoCheckRemoveTape)
-            return;*/
-
-        var propId = "RemoveAimTape";
-
-        if (!CanUseProp(propId))
+        //var propId = "Remove";
+        ItemType itemType = ItemType.Remove;
+        if (!CanUseProp(itemType))
         {
-            var findPropInfo = GameManager.Instance.GetAimPropInfo(propId);
+            var findPropInfo = GameManager.Instance.GetPropInfo(itemType);
             if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
             {
                 UIManager.Instance.ShowTip("道具已用完");
@@ -171,96 +259,7 @@ public class GameInnerUI : MonoBehaviour
             {
                 UIManager.Instance.ShowPropGetTip(true, findPropInfo, (type, count) =>
                 {
-                    GetAimProp(propId, type, count);
-                    UpdateCurrentButtonInfo();
-                    RefreshGoldCount();
-                });
-            }
-        }
-        else
-        {
-            /*if (!GameController.Instance.CheckCanRemoveTape())
-            {
-                UIManager.Instance.ShowTip("场景中没有胶带！");
-                return;
-            }*/
-            Debug.Log("使用了道具2");
-            CousmeProp(propId);
-            UpdateCurrentButtonInfo();
-            //LogicRemoveAimTapeMethod();
-            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            PlayerPrefs.Save();
-        }
-    }
-
-    /*private void LogicRemoveAimTapeMethod()
-    {
-        GameData.isNoCheckRemoveTape = true;
-        maskImage.gameObject.SetActive(true);
-        removeAimTapBtn.interactable = false;
-        removeTip.SetActive(true);
-        removeAimTapBtn.transform.Find("CloseBtn").Show();
-
-        GameController.Instance.curLevel.MakeAllTapeBright();
-    }*/
-
-    /// <summary>
-    /// 点击移除胶带按钮上的关闭按钮
-    /// </summary>
-    private void OnRemoveTapeCloseBtnClick()
-    {
-        RestoreRemoveAimTapeButtonState();
-    }
-
-    /// <summary>
-    /// 消耗移除胶带道具次数
-    /// </summary>
-    public void ConsumeRemoveTapeProp()
-    {
-        var propId = "RemoveAimTape";
-        CousmeProp(propId);
-        UpdateCurrentButtonInfo();
-        PlayerPrefs.Save();
-    }
-
-    //按钮触发方法：清空槽位
-    private void ClearWaitSlotMethod()
-    {
-        if (GameState.IsGameWin) return;
-        if (obj != null)
-        {
-            //obj.GetComponent<GuideMaskPanel>().Hide();
-            GameState.GameStart();
-            //Reporter.GameStart();
-        }
-
-        AudioManager.Instance.PlayButtonAudioAndVibrate();
-        //HideFoolProofPropTips();
-        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Clear);
-        if (UnlockLvl > GameData.CurrentLevel)
-        {
-            UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
-            return;
-        }
-        if (!GameState.IsGameStart)
-        {
-            return;
-        }
-
-        var propId = "ClearWaitSlot";
-
-        if (!CanUseProp(propId))
-        {
-            var findPropInfo = GameManager.Instance.GetAimPropInfo(propId);
-            if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
-            {
-                UIManager.Instance.ShowTip("道具已用完");
-            }
-            else
-            {
-                UIManager.Instance.ShowPropGetTip(true, findPropInfo, (type, count) =>
-                {
-                    GetAimProp(propId, type, count);
+                    GetAimProp(itemType, type, count);
                     UpdateCurrentButtonInfo();
                     RefreshGoldCount();
                 });
@@ -273,8 +272,8 @@ public class GameInnerUI : MonoBehaviour
                 UIManager.Instance.ShowTip("等待区无胶带可清除");
                 return;
             }*/
-            Debug.Log("使用了道具3");
-            CousmeProp(propId);
+            Debug.Log("使用了道具3移除");
+            CousmeProp(itemType);
             UpdateCurrentButtonInfo();
             //LogicClearWaitAllItems();
             //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
@@ -292,7 +291,7 @@ public class GameInnerUI : MonoBehaviour
     }*/
 
     //按钮触发方法：增加槽位
-    private void AddSlotMethod()
+    private void OnRefreshBtnClick()
     {
         if (GameState.IsGameWin) return;
         if (obj != null)
@@ -304,7 +303,7 @@ public class GameInnerUI : MonoBehaviour
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
         //HideFoolProofPropTips();
-        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Add);
+        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Refresh);
         if (UnlockLvl > GameData.CurrentLevel)
         {
             UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
@@ -315,11 +314,11 @@ public class GameInnerUI : MonoBehaviour
             return;
         }
         
-        var propId = "AddSlot";
-
-        if (!CanUseProp(propId))
+        //var propId = "Refresh";
+        ItemType itemType = ItemType.Refresh;
+        if (!CanUseProp(itemType))
         {
-            var findPropInfo = GameManager.Instance.GetAimPropInfo(propId);
+            var findPropInfo = GameManager.Instance.GetPropInfo(itemType);
             /*if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
             {
                 UIManager.Instance.ShowTip("道具已用完");
@@ -328,7 +327,7 @@ public class GameInnerUI : MonoBehaviour
             {
                 UIManager.Instance.ShowPropGetTip(true, findPropInfo, (type, count) =>
                 {
-                    GetAimProp(propId, type, count);
+                    GetAimProp(itemType, type, count);
                     UpdateCurrentButtonInfo();
                     RefreshGoldCount();
                 });
@@ -341,8 +340,8 @@ public class GameInnerUI : MonoBehaviour
                 UIManager.Instance.ShowTip("槽位已满，无法添加");
                 return;
             }*/
-            Debug.Log("使用了道具1");
-            CousmeProp(propId);
+            Debug.Log("使用了道具1刷新");
+            CousmeProp(itemType);
             UpdateCurrentButtonInfo();
             //LogicAddSlot();
             //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
@@ -355,18 +354,26 @@ public class GameInnerUI : MonoBehaviour
         GameController.Instance.UnlockWait();
     }*/
 
-    private bool CanUseProp(string propId)
+    /*private bool CanUseProp(string propId)
     {
         return  GameData.itemPlayerData.GetCount(PropInfo.PropToType(propId)) > 0;
+    }*/
+    private bool CanUseProp(ItemType type)
+    {
+        return  GameData.itemPlayerData.GetCount(type) > 0;
     }
 
-    private void CousmeProp(string propId)
+    /*private void CousmeProp(string propId)
     {
         //GameData.ItemUseCount++;
         GameData.itemPlayerData.CostCount(PropInfo.PropToType(propId));
+    }*/
+    private void CousmeProp(ItemType type)
+    {
+        //GameData.ItemUseCount++;
+        GameData.itemPlayerData.CostCount(type);
     }
-
-    private void GetAimProp(string propId, int type, int count)
+    private void GetAimProp(ItemType itemType, int type, int count)
     {
         string way;
         string getType;
@@ -386,7 +393,7 @@ public class GameInnerUI : MonoBehaviour
                 break;
         }
 
-        GameData.itemPlayerData.AddCount(PropInfo.PropToType(propId), add: count, way: way, getType: getType);
+        GameData.itemPlayerData.AddCount(itemType, add: count, way: way, getType: getType);
     }
 
 
@@ -400,14 +407,14 @@ public class GameInnerUI : MonoBehaviour
         Button button = null;
         switch (type)
         {
-            case ItemType.Add:
-                button = addSlotBtn;
+            case ItemType.Refresh:
+                button = refreshBtn;
+                break;
+            case ItemType.Magnet:
+                button = magnetBtn;
                 break;
             case ItemType.Remove:
-                button = removeAimTapBtn;
-                break;
-            case ItemType.Clear:
-                button = clearWaitSlotBtn;
+                button = removeBtn;
                 break;
         }
         iconImage = button.transform.LFirstOrDefault<Transform>("Icon",true).gameObject;
@@ -433,56 +440,68 @@ public class GameInnerUI : MonoBehaviour
             iconImage.SetActive(true);
             plusImage.SetActive(true);
             countGroup.SetActive(true);
+            /*if (GameData.itemPlayerData.GetCount(type) > 0)
+            {
+                Debug.Log(button.name);
+                Debug.Log(GameData.itemPlayerData.GetCount(type));
+                plusImage.SetActive(false);
+                countGroup.SetActive(true);
+            }
+            else
+            {
+                plusImage.SetActive(true);
+                countGroup.SetActive(false);
+            }*/
         }
     }
     public void UpdateCurrentButtonInfo()
     {
-        ItemUIInit(ItemType.Add);
+        ItemUIInit(ItemType.Refresh);
         ItemUIInit(ItemType.Remove);
-        ItemUIInit(ItemType.Clear);
+        ItemUIInit(ItemType.Magnet);
 
-        /*if (addSlotBtn == null)
+        /*if (refreshBtn == null)
         {
             return;
         }*/
 
-        var propAddSlot = "AddSlot";
+        /*var propAddSlot = "AddSlot";
         var propClearWaitSlot = "ClearWaitSlot";
-        var propRemoveAimTape = "RemoveAimTape";
+        var propRemoveAimTape = "RemoveAimTape";*/
         
-        if (GameData.itemPlayerData.IsUnlock(ItemType.Add) && CanUseProp(propAddSlot))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Refresh) && CanUseProp(ItemType.Refresh))
         {
-            var group = addSlotBtn.transform.Find("CountGroup");
+            var group = refreshBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
-            group.Find("Count").GetComponent<Text>().text = GameData.itemPlayerData.GetCount(ItemType.Add).ToString();
+            group.Find("Count").GetComponent<Text>().text = GameData.itemPlayerData.GetCount(ItemType.Refresh).ToString();
         }
         else
         {
-            addSlotBtn.transform.Find("CountGroup").gameObject.SetActive(false);
+            refreshBtn.transform.Find("CountGroup").gameObject.SetActive(false);
         }
 
 
-        if (GameData.itemPlayerData.IsUnlock(ItemType.Clear) && CanUseProp(propClearWaitSlot))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Remove) && CanUseProp(ItemType.Remove))
         {
-            var group = clearWaitSlotBtn.transform.Find("CountGroup");
+            var group = removeBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
-            group.Find("Count").GetComponent<Text>().text = GameData.itemPlayerData.GetCount(ItemType.Clear).ToString();
+            group.Find("Count").GetComponent<Text>().text = GameData.itemPlayerData.GetCount(ItemType.Remove).ToString();
         }
         else
         {
-            clearWaitSlotBtn.transform.Find("CountGroup").gameObject.SetActive(false);
+            removeBtn.transform.Find("CountGroup").gameObject.SetActive(false);
         }
 
-        if (GameData.itemPlayerData.IsUnlock(ItemType.Remove) && CanUseProp(propRemoveAimTape))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Magnet) && CanUseProp(ItemType.Magnet))
         {
-            var group = removeAimTapBtn.transform.Find("CountGroup");
+            var group = magnetBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
             group.Find("Count").GetComponent<Text>().text =
-                GameData.itemPlayerData.GetCount(ItemType.Remove).ToString();
+                GameData.itemPlayerData.GetCount(ItemType.Magnet).ToString();
         }
         else
         {
-            removeAimTapBtn.transform.Find("CountGroup").gameObject.SetActive(false);
+            magnetBtn.transform.Find("CountGroup").gameObject.SetActive(false);
         }
     }
 
@@ -555,9 +574,9 @@ public class GameInnerUI : MonoBehaviour
     void OnDestroy()
     {
         setttingButton.onClick.RemoveAllListeners();
-        addSlotBtn?.onClick.RemoveListener(AddSlotMethod);
-        clearWaitSlotBtn?.onClick.RemoveListener(ClearWaitSlotMethod);
-        removeAimTapBtn?.onClick.RemoveListener(RemoveAimTapeMethod);
+        refreshBtn?.onClick.RemoveListener(OnRefreshBtnClick);
+        removeBtn?.onClick.RemoveListener(OnRemoveBtnClick);
+        magnetBtn?.onClick.RemoveListener(OnMagnetBtnClick);
     }
 
     private void UIInit()

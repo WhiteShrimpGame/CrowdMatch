@@ -8,14 +8,14 @@ public class ItemPlayerData
     {
         switch (type)
         {
-            case ItemType.Add:
-                return "PlayerPickCount";
+            case ItemType.Refresh:
+                return "PlayerRefreshCount";
             case ItemType.Remove:
                 return "PlayerRemoveCount";
-            case ItemType.Clear:
-                return "PlayerVIPCount";
+            case ItemType.Magnet:
+                return "PlayerMagnetCount";
             default:
-                return "PlayerPickCount";
+                return "PlayerRefreshCount";
         }
     }
 
@@ -37,10 +37,10 @@ public class ItemPlayerData
         return  GameManager.Instance.itemData.GetUnlockLvl(type)<=GameData.CurrentLevel;
     }
     
-    public string GetCountString()
+    /*public string GetCountString()
     {
         return GetCount(ItemType.Add) + "_" + GetCount(ItemType.Remove) + "_" + GetCount(ItemType.Clear);
-    }
+    }*/
 
     public void SetCount(ItemType type, int value)
     {
@@ -125,9 +125,12 @@ public class ItemPlayerData
 public enum ItemType
 {
     None = 0,
-    Add = 1,
-    Remove = 2,
-    Clear = 3,
+    //Add = 1,
+    Refresh = 1,
+    //Remove = 2,
+    Magnet= 2,
+    //Clear = 3,
+    Remove =3,
 }
 [System.Serializable]
 public class ItemCount
