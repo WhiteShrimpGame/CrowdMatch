@@ -339,16 +339,15 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            /*if (!GameController.Instance.CheckCanAddWaitList())
-            {
-                UIManager.Instance.ShowTip("槽位已满，无法添加");
-                return;
-            }*/
-            Debug.Log("使用了道具1刷新");
+            // 道具1「刷新」：把每列还没开走的车的前后顺序随机重排（绳组车原地不动）。
+            // 按约定「点按钮就扣」—— 即使某列只有 1 辆车、洗了看不出变化，也照扣。
+            var cg = GameController.Instance != null ? GameController.Instance.containerGroup : null;
+            if (cg != null)
+                cg.ShuffleRemainingCars();
+
+            Debug.Log("使用了道具1刷新：随机重排未开走的车");
             CousmeProp(itemType);
             UpdateCurrentButtonInfo();
-            //LogicAddSlot();
-            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
             PlayerPrefs.Save();
         }
     }

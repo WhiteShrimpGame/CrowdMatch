@@ -1031,6 +1031,93 @@ namespace CrowdMatch
             _cells[from] = default(ContainerCell);
         }
 
+        /// <summary>
+        /// 道具1「刷新」：把**还没开走**的车的前后顺序随机重排（含载有乘客的车——乘客是车的子物体，会跟着一起走）。
+        ///
+        /// 口径（已与用户核对）：
+        /// · **全盘一起洗（可跨列）**：洗的是「谁占哪个格」，**格集合本身不动**，所以每列的占用行集合不变、
+        ///   「压紧连续」仍然成立。颜色 / 容量 / 乘客都跟着车走，不是重刷颜色；
+        /// · **绳组车（ropeGroupId != 0）原地不动**：绳链靠相邻列各车的相对偏移成立，动其中一辆会扯断；
+        /// · **正在补位 / 正在上车的车跳过**：挪它会和正在播的动画打架；
+        /// · 只洗**当前有实例的格**。运行模式是懒实例化（只有视窗内的排有实例，深排只有数据层），
+        ///   把深排数据替进视窗会得到「有数据没实例」的隐形车。
+        ///
+        /// 换位是**瞬间**的（直接改 grid / gridX / gridZ / localPosition），不播动画。
+        /// </summary>
+        public void ShuffleRemainingCars()
+        {
+            if (grid == null)
+                return;
+
+            var slots = new List<Vector2Int>();    // 参与洗牌的格 (col, row)
+            var cars = new List<ContainerItem>();  // 与 slots 一一对应的车
+            var cells = new List<ContainerCell>(); // 与 cars 配对的数据层条目
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    var item = grid[col, row];
+                    if (item == null)
+                        continue;                          // 空格
+                    if (item.ropeGroupId != 0)
+                        continue;                          // 绳组：原地不动
+                    if (item.isRefilling || item.IsBoarding)
+                        continue;                          // 正在动：跳过
+
+                    slots.Add(new Vector2Int(col, row));
+                    cars.Add(item);
+                    cells.Add(HasData ? _cells[CellIndex(col, row)] : default(ContainerCell));
+                }
+
+            if (cars.Count < 2)
+                return;                                    // 0/1 辆：洗了也不变
+
+            // Fisher-Yates：车与数据层条目一起洗，保持二者配对
+            for (int i = cars.Count - 1; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                var tc = cars[i]; cars[i] = cars[j]; cars[j] = tc;
+                var td = cells[i]; cells[i] = cells[j]; cells[j] = td;
+            }
+
+            // 全部落位。格集合与车集合是 1:1，逐个写入即可覆盖所有格，不会留下旧的 grid 残留。
+            var frontCars = new List<ContainerItem>();
+            for (int i = 0; i < cars.Count; i++)
+            {
+                int col = slots[i].x;
+                int row = slots[i].y;
+                var item = cars[i];
+
+                grid[col, row] = item;
+                item.gridX = col;
+                item.gridZ = row;
+                item.transform.localPosition = GetLocalPosition(col, row);
+
+                if (HasData)
+                {
+                    var c = cells[i];
+                    c.col = col;
+                    c.row = row;
+                    _cells[CellIndex(col, row)] = c;
+                }
+
+                if (row == 0)
+                {
+                    item.HideLid();   // 与 RebuildGrid 同口径：落到第一排的车直接开盖
+                    frontCars.Add(item);
+                }
+            }
+
+            // 落位之后再触发出库检查：新落到第一排的车可能已经装满，该走就得走。
+            // 必须放在落位循环之后 —— 出库会引发补位、改动盘面，边放边查会错位。
+            for (int i = 0; i < frontCars.Count; i++)
+            {
+                var item = frontCars[i];
+                if (item != null)
+                    TryExitIfAtFront(item, item.gridX);
+            }
+        }
+
         private IEnumerator MoveContainer(ContainerItem item, int col, int row)
         {
             item.isRefilling = true;
