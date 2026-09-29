@@ -102,7 +102,16 @@
       "Bash(git --no-pager log --oneline -3)",
       "Bash(git --no-pager diff -U1 Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
       "Bash(git --no-pager diff --stat Assets/Scripts/Editor/PixelColorBrushWindow.cs)",
-      "Bash(git --no-pager diff -U2 Assets/Scripts/Editor/LevelColorReplacer.cs)"
+      "Bash(git --no-pager diff -U2 Assets/Scripts/Editor/LevelColorReplacer.cs)",
+      "Bash(sort -k5 -n)",
+      "Bash(grep -n \"ContainerCell.cs\\\\|ContainerViewTemplate.cs\\\\|Gameplay\\\\\\\\\\\\\\\\PixelGroup.cs\\\\|Gameplay\\\\\\\\\\\\\\\\CrateItem.cs\" Assembly-CSharp.csproj)",
+      "Bash(python -c \"print\\('ok'\\)\")",
+      "Bash(py --version)",
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/scan_skip.js\")",
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\")",
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" LevelHard_7.json)",
+      "Bash(IGNORE_PIPE=1 node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\")",
+      "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" Level08.json)"
     ]
   }
 }

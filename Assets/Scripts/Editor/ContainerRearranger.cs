@@ -99,7 +99,7 @@ namespace CrowdMatch
                     if (p != null && p.points != null && p.points.Length >= 1)
                         barrierCells.Add(PipeItem.GetPipeCell(p.points));
 
-            var multiplier = BuildGateMultiplier(data, columns, totalRows, barrierCells);
+            var multiplier = GateMultiplierMap.Build(data, columns, totalRows, barrierCells);
 
             var pixelCounts = new Dictionary<int, int>();
             int gridPixels = 0, pipePixels = 0, boxPixels = 0, elevatorPixels = 0;
@@ -187,47 +187,6 @@ namespace CrowdMatch
                     return "颜色 " + kv.Key + " 数量不一致：像素 " + kv.Value + "，Record " + rc + "。";
             }
             return null;
-        }
-
-        /// <summary>
-        /// 倍率图 [column, row]：与运行时 <c>PixelGroup.RebuildGrid</c> 的算法完全一致 ——
-        /// 每道门把**门格也当障碍**、从最前排（row 0）四向 BFS 求出闭合区域，
-        /// 区域内的每格乘上该门倍数（多道门嵌套即连乘），区域外恒为 1。
-        /// 障碍只取「墙 ∪ 管道自身格」（<paramref name="barrierCells"/>）。
-        /// </summary>
-        private static int[,] BuildGateMultiplier(LevelData data, int columns, int totalRows, HashSet<Vector2Int> barrierCells)
-        {
-            var multiplier = new int[columns, totalRows];
-            for (int c = 0; c < columns; c++)
-                for (int r = 0; r < totalRows; r++)
-                    multiplier[c, r] = 1;
-
-            if (data.gates == null)
-                return multiplier;
-
-            foreach (var gate in data.gates)
-            {
-                if (gate == null)
-                    continue;
-
-                var gateCells = new HashSet<Vector2Int>();
-                GateItem.CollectCells(gate.start, gate.end, gateCells);
-                if (gateCells.Count == 0)
-                    continue;
-
-                var region = GateRegion.ComputeRegion(
-                    columns, totalRows, (c, r) => barrierCells.Contains(new Vector2Int(c, r)), gateCells);
-
-                int mult = Mathf.Max(1, gate.multiplier);
-                foreach (var cell in region)
-                {
-                    if (cell.x < 0 || cell.x >= columns || cell.y < 0 || cell.y >= totalRows)
-                        continue;
-                    multiplier[cell.x, cell.y] *= mult;
-                }
-            }
-
-            return multiplier;
         }
 
         /// <summary>
