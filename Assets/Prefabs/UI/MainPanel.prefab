@@ -220,6 +220,7 @@ GameObject:
   - component: {fileID: 2690759878085789674}
   - component: {fileID: 38561859055513229}
   - component: {fileID: 7554478470877413059}
+  - component: {fileID: 5169493766912690798}
   m_Layer: 5
   m_Name: StartBtnHard
   m_TagString: Untagged
@@ -331,6 +332,32 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &5169493766912690798
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 533514101033227948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f19b7e2285c104f6ca47d583f3e5444f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectFactor: 0.44163713
+  m_Width: 0.12
+  m_Rotation: 135
+  m_Softness: 0.5
+  m_Brightness: 0.15
+  m_Gloss: 0.4
+  m_EffectArea: 0
+  m_Player:
+    play: 1
+    initialPlayDelay: 0
+    duration: 2
+    loop: 1
+    loopDelay: 2
+    updateMode: 0
 --- !u!1 &1096543048510967489
 GameObject:
   m_ObjectHideFlags: 0
@@ -2039,6 +2066,7 @@ GameObject:
   - component: {fileID: 8340550734101953774}
   - component: {fileID: 847049650554053131}
   - component: {fileID: 6332533566101215716}
+  - component: {fileID: 5307228950160741839}
   m_Layer: 5
   m_Name: StartBtnSuperHard
   m_TagString: Untagged
@@ -2150,6 +2178,32 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &5307228950160741839
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6272963181232391390}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f19b7e2285c104f6ca47d583f3e5444f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectFactor: 0.44163713
+  m_Width: 0.12
+  m_Rotation: 135
+  m_Softness: 0.5
+  m_Brightness: 0.15
+  m_Gloss: 0.4
+  m_EffectArea: 0
+  m_Player:
+    play: 1
+    initialPlayDelay: 0
+    duration: 2
+    loop: 1
+    loopDelay: 2
+    updateMode: 0
 --- !u!1 &6279902547440547704
 GameObject:
   m_ObjectHideFlags: 0
@@ -2162,6 +2216,7 @@ GameObject:
   - component: {fileID: 6279902547440547700}
   - component: {fileID: 6279902547440547701}
   - component: {fileID: 6279902547440547702}
+  - component: {fileID: 1203261729289648327}
   m_Layer: 5
   m_Name: StartBtn
   m_TagString: Untagged
@@ -2272,6 +2327,32 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1203261729289648327
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6279902547440547704}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f19b7e2285c104f6ca47d583f3e5444f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectFactor: 0.44163713
+  m_Width: 0.12
+  m_Rotation: 135
+  m_Softness: 0.5
+  m_Brightness: 0.15
+  m_Gloss: 0.4
+  m_EffectArea: 0
+  m_Player:
+    play: 1
+    initialPlayDelay: 0
+    duration: 2
+    loop: 1
+    loopDelay: 2
+    updateMode: 0
 --- !u!1 &6279902547704463589
 GameObject:
   m_ObjectHideFlags: 0

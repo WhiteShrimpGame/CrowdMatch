@@ -104,11 +104,19 @@ public class GameInnerUI : MonoBehaviour
     /// </summary>
     public void OnBackBtnClk()
     {
+        if (GameState.IsGameWin) return;
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        GameManager.Instance.CleanupSpawnPool();
-        //UIManager.Instance.Init();
-        UIManager.Instance.showGamePanel(false);
-        UIManager.Instance.ShowMenuPanel(true);
+        if (GameData.ProgressPercent>10)
+        {
+            UIManager.Instance.showFailTipPanel(true);
+        }
+        else
+        {
+            GameManager.Instance.CleanupSpawnPool();
+            //UIManager.Instance.Init();
+            UIManager.Instance.showGamePanel(false);
+            UIManager.Instance.ShowMenuPanel(true);
+        }
         
         //UIManager.Instance.showMainPanel(true);
         /*{
@@ -126,6 +134,7 @@ public class GameInnerUI : MonoBehaviour
     //按钮触发方法：直接移除Tape
     private void RemoveAimTapeMethod()
     {
+        if (GameState.IsGameWin) return;
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -217,6 +226,7 @@ public class GameInnerUI : MonoBehaviour
     //按钮触发方法：清空槽位
     private void ClearWaitSlotMethod()
     {
+        if (GameState.IsGameWin) return;
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -284,6 +294,7 @@ public class GameInnerUI : MonoBehaviour
     //按钮触发方法：增加槽位
     private void AddSlotMethod()
     {
+        if (GameState.IsGameWin) return;
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -565,6 +576,8 @@ public class GameInnerUI : MonoBehaviour
     private void ClickSettingMethod()
     {
         if (GameState.IsGameStart == false) return;
+        if (GameState.IsGameWin) return;
+
         //if (MiniGameSolution.Utilities.IsInFeedStatus) return;
 
         GameState.GamePause();

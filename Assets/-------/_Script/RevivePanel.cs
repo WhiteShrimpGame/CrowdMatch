@@ -37,6 +37,10 @@ public class RevivePanel : MonoBehaviour,IPointerDownHandler, IPointerUpHandler
     public SkeletonGraphic spineGraphic;
     private void OnEnable()
     {
+        //如果失败时其他面板打开，关闭对应面板，包括后需可能的道具提示框
+        UIManager.Instance.ShowSettingPanel(false);
+        UIManager.Instance.showFailTipPanel(false);
+        UIManager.Instance.ShowPropGetTip(false);
         /*if (GameData.IsFirstReview)
         {
             transform.Find("BG/CloseBtn").gameObject.SetActive(false);

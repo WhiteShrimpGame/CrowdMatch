@@ -287,6 +287,10 @@ namespace CrowdMatch
             _winDeclared = true;
             Debug.Log("[胜利判定] 检查点=" + checkpoint + " ｜ 板上所有车均已完成匹配 → 判胜");
             GameState.GameWin();
+            //如果胜利时其他面板打开，关闭对应面板，包括后需可能的道具提示框
+            UIManager.Instance.ShowSettingPanel(false);
+            UIManager.Instance.showFailTipPanel(false);
+            UIManager.Instance.ShowPropGetTip(false);
             Invoke(nameof(DoGameWin), 2.5f);
             UIManager.Instance.ShowWinPart();
         }

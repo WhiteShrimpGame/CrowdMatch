@@ -24,6 +24,7 @@ public class FailPanel : MonoBehaviour
         {
             if (StaminaSystemData.IsInfiniteStamina)
             {
+                StaminaSystemData.AddStamina(1,"unlimitedStamina");
                 //Reporter.StaminaGet(1,"unlimitedStamina");
             }
             StaminaSystemData.CostStamina(1);

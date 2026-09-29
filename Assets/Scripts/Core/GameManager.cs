@@ -88,6 +88,7 @@ namespace CrowdMatch
                 {   
                     GameData.IsGaming=false;
                     //刚进游戏时，体力不足回主页
+                    CleanupSpawnPool();
                     AudioManager.Instance.PlayButtonAudioAndVibrate();
                     UIManager.Instance.showGamePanel(false);
                     UIManager.Instance.ShowMenuPanel(true);
@@ -107,11 +108,6 @@ namespace CrowdMatch
             else if (Input.GetKeyDown(KeyCode.B))
             {
                 PrevLevel();
-            }
-            else if (Input.GetKeyDown(KeyCode.G))
-            {
-                PlayerPrefs.DeleteAll();
-                Debug.Log("清除数据");
             }
         }
 #endif
