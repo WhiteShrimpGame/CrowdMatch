@@ -11,20 +11,13 @@ public class GameInnerUI : MonoBehaviour
     [SerializeField] Button setttingButton;
     [SerializeField] Button homeButton;
     [SerializeField] Text levelText;
-    //[SerializeField] Text tapeCountText;
-    //[SerializeField] Text levelProcessText;
     [SerializeField] Text goldCountText;
-    //[SerializeField] Image iconImage;
-
-    //[SerializeField] Image maskImage;
-
     [SerializeField] Button addSlotBtn;
     [SerializeField] Button clearWaitSlotBtn;
     [SerializeField] Button removeAimTapBtn;
     [SerializeField] Button removeAimTapeCloseBtn;
 
     public GameObject removeTip;
-    public GameObject GuideTip;
 
 
 
@@ -37,7 +30,6 @@ public class GameInnerUI : MonoBehaviour
 
     [Header("HardLevel")] 
     [SerializeField] Image hardTipBgImg;
-    [SerializeField] Image superHardTipBgImg;
     [SerializeField] Sprite hardTipBgHard;
     [SerializeField] Sprite hardTipBgSuperHard;
 
@@ -52,35 +44,26 @@ public class GameInnerUI : MonoBehaviour
     private Vector3 hardImgScale, superHardImgScale;
 
     private bool isHardTipInit;
-
-    //private int currentLevelBlocksIndex;
-
-    //public LevelBlockController CurrentLevelBlock { get { return levelBlocksGroup[currentLevelBlocksIndex]; } }
-
     private Sprite currentLevelModelSpr;
     private Sprite currentLevelModelLockSpr;
 
-    private float startNormalize = 0.5f;
     public static GameObject obj;
     public Sprite unLuckSprite;
     public Sprite luckSprite;
-    public bool isGuide;
     
 
     private void Awake()
     {
-        /*addSlotBtn?.onClick.AddListener(AddSlotMethod);
+        addSlotBtn?.onClick.AddListener(AddSlotMethod);
         clearWaitSlotBtn?.onClick.AddListener(ClearWaitSlotMethod);
         removeAimTapBtn?.onClick.AddListener(RemoveAimTapeMethod);
-        removeAimTapeCloseBtn?.onClick.AddListener(OnRemoveTapeCloseBtnClick);*/
+        //removeAimTapeCloseBtn?.onClick.AddListener(OnRemoveTapeCloseBtnClick);
         homeButton?.onClick.AddListener(OnBackBtnClk);
 
-        //UpdateCurrentButtonInfo();
+        UpdateCurrentButtonInfo();
         RefreshGoldCount();
 
         InitHardTip();
-
-       
     }
 
     public void ResetLevel()
@@ -121,8 +104,6 @@ public class GameInnerUI : MonoBehaviour
     /// </summary>
     public void OnBackBtnClk()
     {
-
-
         AudioManager.Instance.PlayButtonAudioAndVibrate();
         GameManager.Instance.CleanupSpawnPool();
         //UIManager.Instance.Init();
@@ -140,28 +121,33 @@ public class GameInnerUI : MonoBehaviour
         
     }
 
-    /*#region 道具按钮方法
+    #region 道具按钮方法
 
     //按钮触发方法：直接移除Tape
     private void RemoveAimTapeMethod()
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
-
+        //HideFoolProofPropTips();
+        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Remove);
+        if (UnlockLvl > GameData.CurrentLevel)
+        {
+            UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
+            return;
+        }
         if (!GameState.IsGameStart)
         {
             return;
         }
 
-        if (GameData.isNoCheckRemoveTape)
-            return;
+        /*if (GameData.isNoCheckRemoveTape)
+            return;*/
 
         var propId = "RemoveAimTape";
 
@@ -184,21 +170,21 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanRemoveTape())
+            /*if (!GameController.Instance.CheckCanRemoveTape())
             {
                 UIManager.Instance.ShowTip("场景中没有胶带！");
                 return;
-            }
-
-            // CousmeProp(propId);
-            // UpdateCurrentButtonInfo();
-            LogicRemoveAimTapeMethod();
-            // WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            // MiniGameSolution.Utilities.PlayerPrefs.Save();
+            }*/
+            Debug.Log("使用了道具2");
+            CousmeProp(propId);
+            UpdateCurrentButtonInfo();
+            //LogicRemoveAimTapeMethod();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicRemoveAimTapeMethod()
+    /*private void LogicRemoveAimTapeMethod()
     {
         GameData.isNoCheckRemoveTape = true;
         maskImage.gameObject.SetActive(true);
@@ -207,7 +193,7 @@ public class GameInnerUI : MonoBehaviour
         removeAimTapBtn.transform.Find("CloseBtn").Show();
 
         GameController.Instance.curLevel.MakeAllTapeBright();
-    }
+    }*/
 
     /// <summary>
     /// 点击移除胶带按钮上的关闭按钮
@@ -225,7 +211,7 @@ public class GameInnerUI : MonoBehaviour
         var propId = "RemoveAimTape";
         CousmeProp(propId);
         UpdateCurrentButtonInfo();
-        MiniGameSolution.Utilities.PlayerPrefs.Save();
+        PlayerPrefs.Save();
     }
 
     //按钮触发方法：清空槽位
@@ -233,14 +219,19 @@ public class GameInnerUI : MonoBehaviour
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
-
+        //HideFoolProofPropTips();
+        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Clear);
+        if (UnlockLvl > GameData.CurrentLevel)
+        {
+            UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
+            return;
+        }
         if (!GameState.IsGameStart)
         {
             return;
@@ -267,57 +258,62 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanClearWaitList())
+            /*if (!GameController.Instance.CheckCanClearWaitList())
             {
                 UIManager.Instance.ShowTip("等待区无胶带可清除");
                 return;
-            }
-
+            }*/
+            Debug.Log("使用了道具3");
             CousmeProp(propId);
             UpdateCurrentButtonInfo();
-            LogicClearWaitAllItems();
-            WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            MiniGameSolution.Utilities.PlayerPrefs.Save();
+            //LogicClearWaitAllItems();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicClearWaitAllItems()
+    /*private void LogicClearWaitAllItems()
     {
         GameController.Instance.waitAlert.HideRed();
         GameController.Instance.waitAlert.HideSign();
         GameController.Instance.ClearWaitAllItems();
 
         DOVirtual.DelayedCall(0.2f, () => { AudioManager.Instance.playClip(11); });
-    }
+    }*/
 
     //按钮触发方法：增加槽位
     private void AddSlotMethod()
     {
         if (obj != null)
         {
-            obj.GetComponent<GuideMaskPanel>().Hide();
+            //obj.GetComponent<GuideMaskPanel>().Hide();
             GameState.GameStart();
-            Reporter.GameStart();
+            //Reporter.GameStart();
         }
 
         AudioManager.Instance.PlayButtonAudioAndVibrate();
-        HideFoolProofPropTips();
-
+        //HideFoolProofPropTips();
+        int UnlockLvl = GameManager.Instance.itemData.GetUnlockLvl(ItemType.Add);
+        if (UnlockLvl > GameData.CurrentLevel)
+        {
+            UIManager.Instance.ShowTip("第 "+UnlockLvl + "关解锁" );
+            return;
+        }
         if (!GameState.IsGameStart)
         {
             return;
         }
-
+        
         var propId = "AddSlot";
 
         if (!CanUseProp(propId))
         {
             var findPropInfo = GameManager.Instance.GetAimPropInfo(propId);
-            if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
+            /*if (GoldConfig.IsItemOutOfUse(findPropInfo.propType))
             {
                 UIManager.Instance.ShowTip("道具已用完");
             }
-            else
+            else*/
             {
                 UIManager.Instance.ShowPropGetTip(true, findPropInfo, (type, count) =>
                 {
@@ -329,33 +325,33 @@ public class GameInnerUI : MonoBehaviour
         }
         else
         {
-            if (!GameController.Instance.CheckCanAddWaitList())
+            /*if (!GameController.Instance.CheckCanAddWaitList())
             {
                 UIManager.Instance.ShowTip("槽位已满，无法添加");
                 return;
-            }
-
+            }*/
+            Debug.Log("使用了道具1");
             CousmeProp(propId);
             UpdateCurrentButtonInfo();
-            LogicAddSlot();
-            WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
-            MiniGameSolution.Utilities.PlayerPrefs.Save();
+            //LogicAddSlot();
+            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
+            PlayerPrefs.Save();
         }
     }
 
-    private void LogicAddSlot()
+    /*private void LogicAddSlot()
     {
         GameController.Instance.UnlockWait();
-    }
+    }*/
 
     private bool CanUseProp(string propId)
     {
-        return GameData.itemPlayerData.GetCount(PropInfo.PropToType(propId)) > 0;
+        return  GameData.itemPlayerData.GetCount(PropInfo.PropToType(propId)) > 0;
     }
 
     private void CousmeProp(string propId)
     {
-        GameData.ItemUseCount++;
+        //GameData.ItemUseCount++;
         GameData.itemPlayerData.CostCount(PropInfo.PropToType(propId));
     }
 
@@ -383,18 +379,67 @@ public class GameInnerUI : MonoBehaviour
     }
 
 
-    private void UpdateCurrentButtonInfo()
+    public void ItemUIInit(ItemType type)
     {
-        if (addSlotBtn == null)
+        GameObject iconImage = null;
+        GameObject plusImage = null;
+        GameObject countGroup = null;
+        Text unlockLevelText = null;
+        GameObject lockImg = null;
+        Button button = null;
+        switch (type)
+        {
+            case ItemType.Add:
+                button = addSlotBtn;
+                break;
+            case ItemType.Remove:
+                button = removeAimTapBtn;
+                break;
+            case ItemType.Clear:
+                button = clearWaitSlotBtn;
+                break;
+        }
+        iconImage = button.transform.LFirstOrDefault<Transform>("Icon",true).gameObject;
+        plusImage = button.transform.LFirstOrDefault<Transform>("PlusIcon",true).gameObject;
+        countGroup = button.transform.LFirstOrDefault<Transform>("CountGroup",true).gameObject;
+        lockImg = button.transform.LFirstOrDefault<Transform>("suo",true).gameObject;
+        unlockLevelText = button.transform.LFirstOrDefault<Transform>("Text",true).GetComponent<Text>();
+        if (GameManager.Instance.itemData.GetUnlockLvl(type) > GameData.CurrentLevel)
+        {
+            button.transform.GetComponent<Image>().sprite = GameManager.Instance.itemData.itemLockBg;
+            lockImg.SetActive(true);
+            unlockLevelText.gameObject.SetActive(true);
+            unlockLevelText.text = "第 " + GameManager.Instance.itemData.GetUnlockLvl(type) + " 关";
+            iconImage.SetActive(false);
+            plusImage.SetActive(false);
+            countGroup.SetActive(false);
+        }
+        else
+        {
+            button.transform.GetComponent<Image>().sprite = GameManager.Instance.itemData.itemUnlockBg;
+            lockImg.SetActive(false);
+            unlockLevelText.gameObject.SetActive(false);
+            iconImage.SetActive(true);
+            plusImage.SetActive(true);
+            countGroup.SetActive(true);
+        }
+    }
+    public void UpdateCurrentButtonInfo()
+    {
+        ItemUIInit(ItemType.Add);
+        ItemUIInit(ItemType.Remove);
+        ItemUIInit(ItemType.Clear);
+
+        /*if (addSlotBtn == null)
         {
             return;
-        }
+        }*/
 
         var propAddSlot = "AddSlot";
         var propClearWaitSlot = "ClearWaitSlot";
         var propRemoveAimTape = "RemoveAimTape";
-
-        if (CanUseProp(propAddSlot))
+        
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Add) && CanUseProp(propAddSlot))
         {
             var group = addSlotBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
@@ -406,7 +451,7 @@ public class GameInnerUI : MonoBehaviour
         }
 
 
-        if (CanUseProp(propClearWaitSlot))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Clear) && CanUseProp(propClearWaitSlot))
         {
             var group = clearWaitSlotBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
@@ -417,7 +462,7 @@ public class GameInnerUI : MonoBehaviour
             clearWaitSlotBtn.transform.Find("CountGroup").gameObject.SetActive(false);
         }
 
-        if (CanUseProp(propRemoveAimTape))
+        if (GameData.itemPlayerData.IsUnlock(ItemType.Remove) && CanUseProp(propRemoveAimTape))
         {
             var group = removeAimTapBtn.transform.Find("CountGroup");
             group.gameObject.SetActive(true);
@@ -430,144 +475,13 @@ public class GameInnerUI : MonoBehaviour
         }
     }
 
-    #endregion*/
+    #endregion
 
     //IEnumerator Start()
     private void Init()
     {
-        //levelGroup.SetActive(false);
-        //yield return new WaitForEndOfFrame();
         UIInit();
-
-        //关掉开始动画
-        /*if (GameData.IsGaming)
-        {
-            GameManager.Instance.itemData.InitFreeItemConfig();
-            var itemFreeConfig = GameManager.Instance.itemData.freeItemConfig;
-            var addCfg = itemFreeConfig.GetValueOrDefault(4);
-            var removeCfg = itemFreeConfig.GetValueOrDefault(5);
-            var clearCfg = itemFreeConfig.GetValueOrDefault(6);
-
-            if (addSlotBtn != null)
-            {
-                if (addCfg != null && GameData.CurrentLevel < addCfg.level)
-                {
-                    LuckButton(addSlotBtn);
-                    addSlotBtn.transform.Find("Text").GetComponent<Text>().text = "第 " + addCfg.level + " 关";
-                }
-                else
-                {
-                    LuckButton(addSlotBtn, false);
-                    addSlotBtn.transform.Find("Text").gameObject.SetActive(false);
-                    //UpdateCurrentButtonInfo();
-                }
-            }
-            if (removeAimTapBtn != null)
-            {
-                if (removeCfg != null && GameData.CurrentLevel < removeCfg.level)
-                {
-                    LuckButton(removeAimTapBtn);
-                    removeAimTapBtn.transform.Find("Text").GetComponent<Text>().text = "第 " + removeCfg.level + " 关";
-                }
-
-                else
-                {
-                    LuckButton(removeAimTapBtn, false);
-                    removeAimTapBtn.transform.Find("Text").gameObject.SetActive(false);
-                    UpdateCurrentButtonInfo();
-                }
-            }
-            if (clearWaitSlotBtn != null)
-            {
-                if (clearCfg != null && GameData.CurrentLevel < clearCfg.level)
-                {
-                    LuckButton(clearWaitSlotBtn);
-                    clearWaitSlotBtn.transform.Find("Text").GetComponent<Text>().text = "第 " + clearCfg.level + " 关";
-                }
-                else
-                {
-                    LuckButton(clearWaitSlotBtn, false);
-                    clearWaitSlotBtn.transform.Find("Text").gameObject.SetActive(false);
-                    UpdateCurrentButtonInfo();
-                }
-            }
-            bool needShowAddGuide = gameObject.activeSelf && !GameData.IsShowAddGuide && addCfg != null &&
-                                    GameData.CurrentLevel == addCfg.level;
-            bool needShowRemoveGuide = gameObject.activeSelf && !GameData.IsShowRemoveGuide && removeCfg != null &&
-                                       GameData.CurrentLevel == removeCfg.level;
-            bool needShowClearGuide = gameObject.activeSelf && !GameData.IsShowClearGuide && clearCfg != null &&
-                                      GameData.CurrentLevel == clearCfg.level;
-            //同关只触发 P1 更小的（4 优先于 5）
-            if (needShowAddGuide)
-            {
-                GameData.itemPlayerData.AddCount(ItemType.Add, addCfg.count, "Guide");
-                ShowGuide(addSlotBtn);
-                //addSlotBtn.gameObject.SetActive(true);
-                /*addSlotBtn.GetComponent<Image>().sprite = unLuckSprite;
-                addSlotBtn.transform.Find("suo").gameObject.SetActive(false);//未加
-                addSlotBtn.GetComponent<Image>().raycastTarget=true;
-                GameState.GamePause();
-                Reporter.GamePause();
-                GameData.IsShowAddGuide = true;#1#
-                
-                /*UpdateCurrentButtonInfo();
-                obj = Instantiate(UIManager.Instance.maskUIPrefab, UIManager.Instance.transform);
-                obj.name = "GuideMaskPanel";
-                obj.GetComponent<GuideMaskPanel>().Show();
-                obj.GetComponent<GuideMaskPanel>().Guide(addSlotBtn.transform,
-                    addSlotBtn.GetComponent<RectTransform>().sizeDelta * 1.1f, 0.6f);#1#
-            }
-            // 只有不触发4的情况下，才判断是否触发5
-            else if (needShowRemoveGuide)
-            {
-                GameData.itemPlayerData.AddCount(ItemType.Remove, removeCfg.count, "Guide");
-                ShowGuide(removeAimTapBtn);
-                //removeAimTapBtn.gameObject.SetActive(true);
-                /*removeAimTapBtn.GetComponent<Image>().sprite = unLuckSprite;
-                removeAimTapBtn.transform.Find("suo").gameObject.SetActive(false);//未加
-                removeAimTapBtn.GetComponent<Image>().raycastTarget=true;
-                GameState.GamePause();
-                Reporter.GamePause();
-                GameData.IsShowRemoveGuide = true;#1#
-                
-                /*UpdateCurrentButtonInfo();
-                obj = Instantiate(UIManager.Instance.maskUIPrefab, UIManager.Instance.transform);
-                obj.name = "GuideMaskPanel";
-                obj.GetComponent<GuideMaskPanel>().Show();
-                obj.GetComponent<GuideMaskPanel>().Guide(removeAimTapBtn.transform,
-                    removeAimTapBtn.GetComponent<RectTransform>().sizeDelta * 1.1f, 0.6f);#1#
-            }
-            else if (needShowClearGuide)
-            {
-                GameData.itemPlayerData.AddCount(ItemType.Clear, clearCfg.count, "Guide");
-                ShowGuide(clearWaitSlotBtn);
-                
-                /*clearWaitSlotBtn.gameObject.SetActive(true);
-                GameState.GamePause();
-                Reporter.GamePause();
-                GameData.IsShowClearGuide = true;
-                GameData.itemPlayerData.AddCount(ItemType.Clear, clearCfg.count, "Guide");
-                UpdateCurrentButtonInfo();
-                obj = Instantiate(UIManager.Instance.maskUIPrefab, UIManager.Instance.transform);
-                obj.name = "GuideMaskPanel";
-                obj.GetComponent<GuideMaskPanel>().Show();
-                obj.GetComponent<GuideMaskPanel>().Guide(clearWaitSlotBtn.transform,
-                    clearWaitSlotBtn.GetComponent<RectTransform>().sizeDelta * 1.1f, 0.6f);#1#
-                GameController.Instance.AddFakeTape();
-            }*/
-
-            //StartCoroutine(BeginShowSticker());
-
-            //iconImage.transform.parent.DOScale(new Vector3(1.27f, 1.27f, 0.65f), 0.15f).SetEase(Ease.OutQuad).OnComplete(() =>
-            //{
-            //    iconImage.transform.parent.DOScale(Vector3.one, 0.15f).SetEase(Ease.InQuad);
-            //});
-
-            //levelScale = GameController.Instance.curLevel.transform.localScale;
-            levelScaleMulti = 1;
-            startNormalize = (1 - levelMinScale) / (levelMaxScale - levelMinScale);
-        
-        }
+    }
     
 
     public void LuckButton(Button but,bool luck=true)
@@ -593,55 +507,7 @@ public class GameInnerUI : MonoBehaviour
         but.transform.Find("CountGroup").gameObject.SetActive(!luck);
         but.transform.Find("PlusIcon").gameObject.SetActive(!luck);
     }
-    public void ShowGuide(Button but)
-    {
-        /*but.GetComponent<Image>().sprite = unLuckSprite;
-        but.transform.Find("Text").gameObject.SetActive(false);
-        but.transform.Find("suo").gameObject.SetActive(false);
-        but.transform.Find("Icon").gameObject.SetActive(true);
-        but.transform.Find("CountGroup").gameObject.SetActive(true);
-        
-        but.GetComponent<Image>().raycastTarget=true;
-        GameState.GamePause();
-
-        if (but==addSlotBtn)
-        {
-            GameData.IsShowAddGuide = true;
-        }
-
-        if (but==removeAimTapBtn)
-        {
-            GameData.IsShowRemoveGuide = true;
-        }
-        if (but==clearWaitSlotBtn)
-        {
-            GameData.IsShowClearGuide = true;
-        }
-        
-        //GameData.itemPlayerData.AddCount(ItemType.Add, addCfg.count, "Guide");
-        UpdateCurrentButtonInfo();
-        obj = Instantiate(UIManager.Instance.maskUIPrefab, UIManager.Instance.transform);
-        obj.name = "GuideMaskPanel";
-        obj.GetComponent<GuideMaskPanel>().Show();
-        obj.GetComponent<GuideMaskPanel>().Guide(but.transform,
-            but.GetComponent<RectTransform>().sizeDelta * 1.1f, 0.6f);*/
-    }
-
-    public static float InverseLerp(Vector3 min, Vector3 max, Vector3 current)
-    {
-        Vector3 ab = max - min; // 整段向量
-        Vector3 av = current - min; // 当前点到起点的向量
-
-        float abLenSq = ab.sqrMagnitude; // |AB|²   （省一次开方）
-        if (abLenSq < Mathf.Epsilon) // 起点 == 终点的防错
-            return 0f;
-
-        float dot = Vector3.Dot(av, ab); // 投影长度 * |AB|
-        float t = dot / abLenSq; // 投影长度 / |AB|
-
-        return Mathf.Clamp01(t); // 保证在 0‑1
-    }
-
+    
     /// <summary>
     /// 更新金币
     /// </summary>
@@ -678,9 +544,9 @@ public class GameInnerUI : MonoBehaviour
     void OnDestroy()
     {
         setttingButton.onClick.RemoveAllListeners();
-        /*addSlotBtn?.onClick.RemoveListener(AddSlotMethod);
+        addSlotBtn?.onClick.RemoveListener(AddSlotMethod);
         clearWaitSlotBtn?.onClick.RemoveListener(ClearWaitSlotMethod);
-        removeAimTapBtn?.onClick.RemoveListener(RemoveAimTapeMethod);*/
+        removeAimTapBtn?.onClick.RemoveListener(RemoveAimTapeMethod);
     }
 
     private void UIInit()
@@ -689,22 +555,8 @@ public class GameInnerUI : MonoBehaviour
         {
             return;
         }
-        /*if (!isGuide&&GameData.CurrentLevel==1)
-        {
-            addSlotBtn.transform.parent.gameObject.SetActive(!(!isGuide&&GameData.CurrentLevel==1));
-        }
-        else
-        {
-            addSlotBtn.transform.parent.gameObject.SetActive(true);
-        }*/
-        addSlotBtn?.transform.parent.gameObject.SetActive(!(isGuide&&GameData.CurrentLevel==1));
-        //GuideTip?.SetActive(isGuide&&GameData.CurrentLevel==1);
-        setttingButton.onClick.AddListener(ClickSettingMethod);
 
-        //currentLevelModelSpr = GameController.Instance.curLevel.GetComponent<LevelStickerController>().currentModelSprite;
-        //currentLevelModelLockSpr = GameController.Instance.curLevel.GetComponent<LevelStickerController>().currentModelLockSprite;
-        //levelProcessText.transform.parent.parent.Find("icon").GetComponent<Image>().sprite = currentLevelModelSpr;
-        //levelProcessText.transform.parent.parent.Find("iconGray").GetComponent<Image>().sprite = currentLevelModelLockSpr;
+        setttingButton.onClick.AddListener(ClickSettingMethod);
 
         RefreshGoldCount();
         

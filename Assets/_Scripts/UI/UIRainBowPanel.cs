@@ -1,3 +1,4 @@
+using CrowdMatch;
 using DG.Tweening;
 using UnityEngine;
 
@@ -23,6 +24,7 @@ public class UIRainBowPanel : MonoBehaviour
 
     public void rainBowPlay()
     {
+        AudioManager.Instance.Play("WinPart");
         for (int i = 0; i < rainPartics.Length; i++)
         {
             var rainVFX = rainPartics[i];

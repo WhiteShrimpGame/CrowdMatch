@@ -48,6 +48,13 @@ namespace CrowdMatch
         [Tooltip("最多开启匹配的前排数（前 N 排可同时匹配，默认 4 = 最前排 + 后三排）")]
         public int maxOpenRows = 4;
 
+        [Header("懒实例化（运行模式）")]
+        [Tooltip("运行模式开局实例化的排数。实际生效 = max(该值, maxOpenRows + 1)：可开盖匹配的窗口必须全部已实例化，否则失败判定看不到车、关卡会卡住。")]
+        public int instantiateRows = 5;
+
+        [Tooltip("容器对象池 tag：需在 SpawnPoolConfig 里注册同名条目（预制体 = containerPrefab）。未注册时自动回退成直接 Instantiate，只报一条 warning。")]
+        public string containerPoolTag = "Bus";
+
         [Header("速度")]
         [Tooltip("PixelItem 移向容器的速度")]
         public float consumeSpeed = 10f;
@@ -111,6 +118,79 @@ namespace CrowdMatch
         /// </summary>
         [System.NonSerialized] private int _unfinishedCars;
 
+        /// <summary>
+        /// 数据层：[row * columns + col]。**只有运行模式的关卡加载（<see cref="ApplyContainerData"/>）
+        /// 之后才是权威**；编辑模式 / 场景里手摆的车走 <see cref="BuildCellsFromView"/>，只是视图的镜像。
+        /// 读一律走下面的取值器（有实例读实例、无实例读它），不要在别处直接摸这个数组。
+        /// </summary>
+        [System.NonSerialized] private ContainerCell[] _cells;
+
+        /// <summary>数据层是否权威（true = 懒实例化生效：只有视窗内的格子有实例）。</summary>
+        [System.NonSerialized] private bool _dataAuthoritative;
+
+        /// <summary>关卡加载时传入的颜色配置（懒实例化补造车时要按它上色）。</summary>
+        [System.NonSerialized] private ColorConfig _containerConfig;
+
+        /// <summary>预制体层级快照（池化复用复位用；首次需要时从 containerPrefab 抓取）。</summary>
+        [System.NonSerialized] private ContainerViewTemplate _viewTemplate;
+
+        private bool _warnedNoPoolTag;
+        private bool _warnedNoTemplate;
+
+        /// <summary>视窗深度（排）：实际生效 = max(instantiateRows, maxOpenRows + 1)。</summary>
+        private int WindowRows { get { return Mathf.Max(instantiateRows, maxOpenRows + 1); } }
+
+        // ===== 数据层取值器：有实例读实例，无实例读数据层 =====
+        //
+        // 「有实例的一律以实例为准」是这套设计的关键：实例在场时数据层**完全不参与**读写，
+        // 于是不存在两份状态互相漂移的可能；数据层只在「这格还没实例化」时说话。
+
+        private bool HasData { get { return _dataAuthoritative && _cells != null; } }
+
+        private int CellIndex(int col, int row) { return row * columns + col; }
+
+        private bool CellInRange(int col, int row)
+        {
+            return HasData && col >= 0 && col < columns && row >= 0 && row < rows;
+        }
+
+        /// <summary>该格是否有车——**未实例化的深排车也算**。</summary>
+        private bool CarAt(int col, int row)
+        {
+            if (GetItem(col, row) != null)
+                return true;
+            return CellInRange(col, row) && _cells[CellIndex(col, row)].occupied;
+        }
+
+        /// <summary>该格的车是否已装满（已无剩余容量）。无车也返回 true（视作「不阻塞」）。</summary>
+        private bool EmptyAt(int col, int row)
+        {
+            var it = GetItem(col, row);
+            if (it != null)
+                return it.IsEmpty;
+            if (!CellInRange(col, row))
+                return true;
+            return _cells[CellIndex(col, row)].remaining <= 0;
+        }
+
+        /// <summary>该格的车接受的颜色 ID；无车返回 -1。</summary>
+        private int ColorAt(int col, int row)
+        {
+            var it = GetItem(col, row);
+            if (it != null)
+                return it.colorId;
+            return CellInRange(col, row) ? _cells[CellIndex(col, row)].colorId : -1;
+        }
+
+        /// <summary>该格的盖子是否已打开（深排车的开盖状态记在数据层）。</summary>
+        private bool LidOpenedAt(int col, int row)
+        {
+            var it = GetItem(col, row);
+            if (it != null)
+                return it.lidOpened;
+            return CellInRange(col, row) && _cells[CellIndex(col, row)].lidOpened;
+        }
+
         private void Start()
         {
             RebuildGrid();
@@ -129,7 +209,49 @@ namespace CrowdMatch
                         item.HideLid();   // 初始就在第一排：盖子直接隐藏
                 }
             }
+            // 数据层维护：
+            // · 非懒实例化（编辑模式 / 场景里手摆的车）：重建为视图的镜像，取值器结果与从前逐字一致；
+            // · 懒实例化：数据层由 ApplyContainerData 建好，这里只补齐视窗（幂等，
+            //   同时兜住 ContainerGroup.Start 与关卡加载的先后顺序）。
+            if (_dataAuthoritative)
+                EnsureWindow();
+            else
+                BuildCellsFromView();
+
             _unfinishedCars = CountUnfinishedCars();   // 换盘后按盘面重算（生成 / 导入 / 洗牌 / 重载都走这里）
+        }
+
+        /// <summary>
+        /// 把数据层建成**视图的镜像**（编辑模式 / 场景里手摆的车用）。
+        /// 这些路径下每格都有实例，于是取值器的「有实例读实例」分支恒成立，行为与改动前逐字一致。
+        /// </summary>
+        private void BuildCellsFromView()
+        {
+            _cells = new ContainerCell[Mathf.Max(1, columns * rows)];
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    var it = grid != null ? grid[col, row] : null;
+                    if (it == null)
+                        continue;
+
+                    _cells[CellIndex(col, row)] = new ContainerCell
+                    {
+                        col = col,
+                        row = row,
+                        originCol = col,   // 非懒实例化：格子不动，出生格就是当前格
+                        originRow = row,
+                        occupied = true,
+                        colorId = it.colorId,
+                        capacity = it.capacity,
+                        remaining = it.Remaining,
+                        ropeGroupId = it.ropeGroupId,
+                        isQuestion = it.isQuestion,
+                        lidOpened = it.lidOpened,
+                        revealed = it.revealed,
+                    };
+                }
         }
 
         /// <summary>
@@ -142,7 +264,7 @@ namespace CrowdMatch
         /// </summary>
         public string DescribeColumnHoles(int maxColumns = 4)
         {
-            if (grid == null)
+            if (grid == null && !HasData)
                 return null;
 
             string msg = null;
@@ -152,7 +274,7 @@ namespace CrowdMatch
                 int firstEmpty = -1;
                 for (int r = 0; r < rows; r++)
                 {
-                    if (grid[c, r] == null)
+                    if (!CarAt(c, r))
                     {
                         if (firstEmpty < 0)
                             firstEmpty = r;
@@ -196,7 +318,7 @@ namespace CrowdMatch
                 return false;
             for (int r = 0; r < row; r++)
             {
-                if (!IsRowReleased(GetItem(col, r)))
+                if (!IsRowReleased(col, r))
                     return false;
             }
             return true;
@@ -212,13 +334,16 @@ namespace CrowdMatch
         ///   · **失败判定**：后排被误判成「即将补位到前排」，于是 <see cref="HasPendingFrontTransition"/>
         ///     在被绳车堵死的列上恒为真 → <c>IsFail</c> 提前返回 false → **该判失败时不判、关卡卡住**。
         /// </summary>
-        private bool IsRowReleased(ContainerItem item)
+        private bool IsRowReleased(int col, int row)
         {
-            if (item == null)
+            if (!CarAt(col, row))
                 return true;                    // 空格子：没有阻挡
-            if (!item.IsEmpty)
+            if (!EmptyAt(col, row))
                 return false;                   // 还没找全匹配对象
-            return !IsWaitingRopeCar(item);     // 装满但在等同组的绳车：仍未放行
+            // 装满但在等同组的绳车：仍未放行。
+            // 未实例化的深排车 GetItem 为 null，IsWaitingRopeCar 恒 false——
+            // 那是安全的：生效中的绳组只可能由已实例化的车构成（建绳只认视窗内的车）。
+            return !IsWaitingRopeCar(GetItem(col, row));
         }
 
         /// <summary>某格子的本地坐标：X 居中，前排（row 0）Z = 0，后排向 +Z 延展</summary>
@@ -363,18 +488,21 @@ namespace CrowdMatch
                 gc.CheckWin(checkpoint);
         }
 
-        /// <summary>扫描盘面统计「未完成匹配」的车数（未出库、还有容量没填满的车）。</summary>
+        /// <summary>
+        /// 扫描盘面统计「未完成匹配」的车数（未出库、还有容量没填满的车）。
+        /// 走数据层取值器，**含还没实例化的深排车**——按视图统计会漏掉它们，
+        /// 计数偏小就会让 <see cref="TryCheckWin"/> 的 O(1) 过滤直接放行、误判通关。
+        /// </summary>
         private int CountUnfinishedCars()
         {
-            if (grid == null)
+            if (grid == null && !HasData)
                 return 0;
 
             int n = 0;
             for (int c = 0; c < columns; c++)
                 for (int r = 0; r < rows; r++)
                 {
-                    var item = grid[c, r];
-                    if (item != null && !item.IsEmpty)
+                    if (CarAt(c, r) && !EmptyAt(c, r))
                         n++;
                 }
             return n;
@@ -492,6 +620,8 @@ namespace CrowdMatch
         private void StartContainerExit(ContainerItem gone, int col, bool ropeRearExit = false)
         {
             grid[col, 0] = null;
+            if (HasData)
+                _cells[CellIndex(col, 0)].occupied = false;   // 数据层同步：这一格的车已经走了
 
             // 第二次检查点（复查）：兜住「最后一辆车在完成匹配那一刻没被判到」的情况
             // （例如它是由复活路径直接匹配完成的，那个时点的判胜会被 _transitioning 挡下）。
@@ -502,7 +632,8 @@ namespace CrowdMatch
             var driver = gone.GetComponent<ContainerExitDriver>();
             if (driver == null)
                 driver = gone.gameObject.AddComponent<ContainerExitDriver>();
-            driver.Play(() => RefillColumn(col), ropeRearExit);
+            // onFinished：动画播完后把车交回对象池（从前这里是 driver 内部 Destroy(gameObject)）
+            driver.Play(() => RefillColumn(col), ropeRearExit, () => DespawnCar(gone));
         }
 
         /// <summary>
@@ -672,20 +803,34 @@ namespace CrowdMatch
                 return;   // 已被移走 / 已销毁，幂等兜底
 
             grid[col, row] = null;
+            if (HasData)
+                _cells[CellIndex(col, row)].occupied = false;   // 数据层同步：该格已无车
             DetachFromRopeChain(item);   // 绳组：本车出局，先从链里摘掉，否则剩下的成员永远凑不齐
-            Destroy(item.gameObject);   // 车 + 乘客像素一并销毁（乘客已计入 ClearedPixelCount）
+            DespawnCar(item);            // 车 + 乘客像素一并交回对象池（乘客已计入 ClearedPixelCount）
 
             // 后车瞬间补位（teleport，无动画）：每车向上移一格，与 RefillColumn 同构（保留空格）
             for (int r = row + 1; r < rows; r++)
             {
-                var rear = grid[col, r];
-                if (rear == null)
+                if (!CarAt(col, r))
                     continue;
+
                 int newRow = r - 1;
-                rear.gridZ = newRow;
-                grid[col, newRow] = rear;
-                grid[col, r] = null;
-                rear.transform.localPosition = GetLocalPosition(col, newRow);
+                var rear = GetItem(col, r);
+
+                // 懒实例化：这一格原本在视窗外（无实例），前移后落进视窗 → 按**最终位置**直接实例化
+                // （与 teleport 无动画的补位一致，不需要旧位置）。
+                if (rear == null && newRow < WindowRows)
+                    rear = Materialize(col, r);
+
+                if (rear != null)
+                {
+                    rear.gridZ = newRow;
+                    grid[col, newRow] = rear;
+                    grid[col, r] = null;
+                    rear.transform.localPosition = GetLocalPosition(col, newRow);
+                }
+
+                MoveCell(col, r, newRow);
             }
         }
 
@@ -810,26 +955,80 @@ namespace CrowdMatch
             if (IsWaitingRopeCar(container))
                 return;
 
-            var rear = GetItem(container.gridX, container.gridZ + 1);
+            int col = container.gridX;
+            int row = container.gridZ + 1;
+            var rear = GetItem(col, row);
             if (rear != null)
+            {
                 rear.OpenLid();
+                return;
+            }
+
+            // 懒实例化：正后方那辆车还在视窗外（没有实例）——把开盖状态记到数据层，
+            // 等它补位滚进视窗被实例化时由 ContainerItem.ApplyCell 水合出来，与当场开盖表现一致。
+            if (!CellInRange(col, row))
+                return;
+            int i = CellIndex(col, row);
+            if (!_cells[i].occupied || _cells[i].lidOpened)
+                return;
+            _cells[i].lidOpened = true;
+            if (_cells[i].isQuestion)
+                _cells[i].revealed = true;   // 与 ContainerItem.OpenLid → RevealQuestion 同义
         }
 
-        /// <summary>某列后排容器依次前移一格（补位）。</summary>
+        /// <summary>
+        /// 某列后排容器依次前移一格（补位）。
+        ///
+        /// 懒实例化：原本在视窗外的车补位后会落进视窗——必须**先在旧排位置实例化**，
+        /// 再和全列一起被 <see cref="MoveContainer"/> 前移。若直接按终点位置现造，
+        /// 它会凭空出现在终点格、与还没挪走的车重叠。
+        /// </summary>
         private void RefillColumn(int col)
         {
             for (int row = 1; row < rows; row++)
             {
-                var it = grid[col, row];
-                if (it == null)
+                if (!CarAt(col, row))
                     continue;
 
                 int newRow = row - 1;
-                it.gridZ = newRow;
-                grid[col, newRow] = it;
-                grid[col, row] = null;
-                StartCoroutine(MoveContainer(it, col, newRow));
+                var it = GetItem(col, row);
+
+                if (it == null && newRow < WindowRows)
+                    it = Materialize(col, row);         // 先在旧排位置出现，随后与全列一起前移
+
+                if (it != null)
+                {
+                    it.gridZ = newRow;
+                    grid[col, newRow] = it;
+                    grid[col, row] = null;
+                }
+
+                MoveCell(col, row, newRow);
+
+                if (it != null)
+                    StartCoroutine(MoveContainer(it, col, newRow));
             }
+        }
+
+        /// <summary>
+        /// 数据层同步：把某格的数据搬到另一格（补位 / 原地销毁后的前移）。
+        /// 只有未实例化的格子有实际内容，但整体搬移能让数据层始终与列布局对齐。
+        /// 只改 <c>col</c> / <c>row</c>（当前格）；<c>originCol</c> / <c>originRow</c>（出生格）随结构体原样带走
+        /// ——那是这辆车的身份，前移多少次都不该变（见 <see cref="ContainerCell.originCol"/>）。
+        /// </summary>
+        private void MoveCell(int col, int fromRow, int toRow)
+        {
+            if (!HasData || fromRow == toRow)
+                return;
+            if (!IsInRange(col, fromRow) || !IsInRange(col, toRow))
+                return;
+
+            int from = CellIndex(col, fromRow);
+            int to = CellIndex(col, toRow);
+            _cells[to] = _cells[from];
+            _cells[to].col = col;
+            _cells[to].row = toRow;
+            _cells[from] = default(ContainerCell);
         }
 
         private IEnumerator MoveContainer(ContainerItem item, int col, int row)
@@ -865,7 +1064,7 @@ namespace CrowdMatch
             OnCarArrivedFront(item, col);
         }
 
-        /// <summary>清空所有 ContainerItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
+        /// <summary>清空所有 ContainerItem 子物体（播放中交回对象池；编辑器下先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
         public void ClearContainers()
         {
             consumingCount = 0;
@@ -877,15 +1076,29 @@ namespace CrowdMatch
                 var it = items[i];
                 if (it == null)
                     continue;
-                it.transform.SetParent(null, true);
+
                 if (Application.isPlaying)
-                    Destroy(it.gameObject);
+                {
+                    DespawnCar(it);   // 池化：交回对象池（未注册池时 DespawnCar 自己销毁）
+                }
                 else
+                {
+                    it.transform.SetParent(null, true);
                     DestroyImmediate(it.gameObject);
+                }
             }
+
+            // 数据层整体作废，下一关由 ApplyContainerData 重建。
+            // （grid 这里不清，与改动前一致——调用方随后都会 RebuildGrid。）
+            _cells = null;
+            _dataAuthoritative = false;
         }
 
-        /// <summary>在指定格子生成一个 ContainerItem 并应用颜色/容量（供运行时关卡加载使用）。</summary>
+        /// <summary>
+        /// 在指定格子生成一个 ContainerItem 并应用颜色/容量。
+        /// 供**编辑器工具**（生成 / 拖移 / 修复）使用；运行模式的关卡加载走
+        /// <see cref="ApplyContainerData"/>（只实例化前几排，其余留在数据层）。
+        /// </summary>
         public ContainerItem SpawnContainer(int col, int row, int colorId, int capacity, ColorConfig config, bool isQuestion = false, int ropeGroupId = 0)
         {
             GameObject go = containerPrefab != null
@@ -915,6 +1128,268 @@ namespace CrowdMatch
             return item;
         }
 
+        // ===== 懒实例化（运行模式）=====
+
+        /// <summary>
+        /// 运行模式的关卡加载入口：建立**数据层**并只实例化前 <see cref="WindowRows"/> 排。
+        ///
+        /// 与 <see cref="SpawnContainer"/> 的分工：后者逐格实例化，供编辑器工具（生成 / 拖移 / 修复）使用；
+        /// 这里把没进视窗的车留在 <see cref="ContainerCell"/> 里，等它们补位滚进视窗时再现造。
+        /// </summary>
+        public void ApplyContainerData(IList<ContainerCell> cells, ColorConfig config)
+        {
+            _containerConfig = config;
+            _cells = new ContainerCell[Mathf.Max(1, columns * rows)];
+            grid = new ContainerItem[columns, rows];
+
+            if (cells != null)
+                for (int i = 0; i < cells.Count; i++)
+                {
+                    var c = cells[i];
+                    if (!IsInRange(c.col, c.row))
+                        continue;
+
+                    // 原始格坐标 = 关卡数据里的出生格。补位前移只改 col/row，这两个始终是身份的锚点
+                    // （车实例化时按它命名，见 Materialize）。
+                    c.originCol = c.col;
+                    c.originRow = c.row;
+
+                    // 第一排的车开局就该是「已开盖」：与 SpawnContainer 里 `row == 0 → HideLid()` 同一口径
+                    // （HideLid 会连带揭晓问号车）。
+                    if (c.row == 0)
+                    {
+                        c.lidOpened = true;
+                        if (c.isQuestion)
+                            c.revealed = true;
+                    }
+
+                    _cells[CellIndex(c.col, c.row)] = c;
+                }
+
+            EnsureWindowOrSpawnAll();
+            _unfinishedCars = CountUnfinishedCars();
+        }
+
+        /// <summary>
+        /// 关卡数据落地后的实例化分流。
+        ///
+        /// · **运行模式**：只实例化前 <see cref="WindowRows"/> 排（数据层权威），其余车留给补位时现造；
+        /// · **编辑模式**（编辑器里导入 / 应用 JSON）：**全部实例化**。策划要在 Scene 视图里直接看到、
+        ///   选中、手工调整每一辆车，懒实例化在编辑器里既没有对象池也没有「帧」去驱动补位；
+        ///   此时数据层退化为视图的镜像（每格都有实例 ⇒ 取值器的「有实例读实例」恒成立），
+        ///   于是所有编辑器工具（拖移 / 生成 / 修复）照旧靠 RebuildGrid 重建，不存在陈旧数据。
+        /// </summary>
+        private void EnsureWindowOrSpawnAll()
+        {
+            if (Application.isPlaying)
+            {
+                _dataAuthoritative = true;
+                EnsureWindow();
+                return;
+            }
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    int i = CellIndex(col, row);
+                    if (_cells[i].occupied)
+                        SpawnFromCell(col, row, _cells[i], row);
+                }
+
+            _dataAuthoritative = false;   // 交给随后的 RebuildGrid → BuildCellsFromView 重建镜像
+        }
+
+        /// <summary>
+        /// 补齐视窗：每列 <c>row &lt; WindowRows</c> 的有车之格，缺实例就补上（幂等）。
+        /// </summary>
+        /// <param name="onlyCol">≥ 0 时只补该列。</param>
+        private void EnsureWindow(int onlyCol = -1)
+        {
+            if (!_dataAuthoritative || _cells == null)
+                return;
+
+            int depth = Mathf.Min(WindowRows, rows);
+            for (int col = 0; col < columns; col++)
+            {
+                if (onlyCol >= 0 && col != onlyCol)
+                    continue;
+
+                for (int row = 0; row < depth; row++)
+                {
+                    if (grid != null && grid[col, row] != null)
+                        continue;
+                    if (!CarAt(col, row))
+                        continue;
+                    Materialize(col, row);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 把某格的车实例化出来并水合到数据层状态——懒实例化的**唯一入口**（该格已有实例时直接返回它）。
+        /// 新实例先摆在 <paramref name="row"/> 那一排的位置上：补位前移时调用方传的是**旧排**，
+        /// 于是它会跟着全列一起滑进视窗，而不是凭空出现在终点。
+        /// </summary>
+        private ContainerItem Materialize(int col, int row)
+        {
+            if (!IsInRange(col, row))
+                return null;
+            if (grid == null)
+                grid = new ContainerItem[columns, rows];
+            if (grid[col, row] != null)
+                return grid[col, row];
+            if (!CellInRange(col, row))
+                return null;
+
+            var cell = _cells[CellIndex(col, row)];
+            if (!cell.occupied)
+                return null;
+
+            return SpawnFromCell(col, row, cell, row);
+        }
+
+        /// <summary>
+        /// 实例化一辆车到指定格并水合数据层状态。
+        /// 运行模式从对象池取、编辑模式走 <see cref="PrefabSpawner"/>（保住与预制体的关联）。
+        /// </summary>
+        /// <param name="placeRow">新实例先摆放的排。补位前移时传**旧排**（见 <see cref="RefillColumn"/>），
+        /// 好让它跟着全列一起滑进视窗，而不是凭空出现在终点。</param>
+        private ContainerItem SpawnFromCell(int col, int row, ContainerCell cell, int placeRow)
+        {
+            GameObject go = null;
+            if (PoolReady)
+                go = Pool.Spawn(containerPoolTag, transform);
+            bool fromPool = go != null;
+
+            if (go == null)
+            {
+                if (Application.isPlaying)
+                    WarnNoPoolOnce();   // 编辑模式本来就没有池，不刷这条 warning
+                go = containerPrefab != null
+                    ? PrefabSpawner.Instantiate(containerPrefab.gameObject, transform)
+                    : null;
+                if (go == null)
+                    go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.transform.SetParent(transform, false);
+            }
+
+            // 按**原始格坐标**命名，而不是实例化那一刻的排号：补位前移时新进窗的车是按旧排实例化的
+            // （为了带出滑动入场，见 RefillColumn），拿旧排命名会得到「名字写 row 5、车在 row 4」的误导。
+            // 用出生格则名字就是这辆车的稳定身份，查 Hierarchy 时能直接对回关卡数据。
+            go.name = "Container_" + cell.originCol + "_" + cell.originRow;
+
+            var item = go.GetComponent<ContainerItem>();
+            if (item == null)
+                item = go.AddComponent<ContainerItem>();
+
+            // 复用复位：**只有从池里取出来的才需要**（新实例本来就是干净的）。
+            // 这同时避开了两个编辑期隐患：对 PrefabSpawner 生成的实例做复位会把预制体实例标脏，
+            // 而编辑模式下既没有协程 / tween 也没有对象池可清。
+            //
+            // 层级还原必须在这里做一次：SpawnPool.GC 与返回主界面的绕过路径会把「换轴换到一半」的车
+            // 直接丢进池里，那些车没经过 DespawnCar 的还原，只有取出时补一次才能保证干净。
+            if (fromPool)
+            {
+                item.ResetForReuse();
+
+                // 出库驱动的 _playing 也必须是 false，否则这辆车再也出不了库（Play 被它拦掉）。
+                var driver = go.GetComponent<ContainerExitDriver>();
+                if (driver != null)
+                    driver.ResetForReuse();
+
+                RestoreViewToPrefab(item);
+            }
+
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = GetLocalPosition(col, placeRow);
+
+            item.ApplyCell(col, row, cell.colorId, cell.capacity, cell.remaining,
+                           cell.isQuestion, cell.revealed, cell.lidOpened, cell.ropeGroupId,
+                           _containerConfig);
+            item.group = this;
+
+            grid[col, row] = item;
+            return item;
+        }
+
+        /// <summary>
+        /// 把一辆车交回对象池（未注册池 / 池已 GC 过 → 直接销毁，避免泄漏在场景里）。
+        ///
+        /// 归还前先还原层级：换轴期间**车身是挂在某根轴下面的**，直接改车身父物体到池根
+        /// 会把那根轴遗留在容器组里（永生残留）。还原后整棵树才完整地进池。
+        /// </summary>
+        private void DespawnCar(ContainerItem item)
+        {
+            if (item == null)
+                return;   // Unity 伪空：已销毁的车在这里就被挡掉
+
+            var go = item.gameObject;
+
+            var driver = go.GetComponent<ContainerExitDriver>();
+            if (driver != null)
+                driver.PrepareForPool();
+
+            RestoreViewToPrefab(item);
+            item.ResetForReuse();
+
+            item.transform.SetParent(null, true);   // 先脱离容器组，免得同帧 GetComponentsInChildren 又捡到它
+
+            if (PoolReady && Pool.TryDespawn(go))
+                return;
+
+            Destroy(go);
+        }
+
+        /// <summary>把车身的层级还原成预制体原样（池化复用）。快照首次需要时从 containerPrefab 抓取。</summary>
+        private void RestoreViewToPrefab(ContainerItem item)
+        {
+            var tpl = GetViewTemplate();
+            if (tpl == null || item == null)
+                return;
+            tpl.Apply(item.transform, transform);
+        }
+
+        /// <summary>取（并首次抓取）预制体层级快照；预制体为空时返回 null 并只警告一次。</summary>
+        private ContainerViewTemplate GetViewTemplate()
+        {
+            if (_viewTemplate == null)
+            {
+                if (containerPrefab == null)
+                {
+                    if (!_warnedNoTemplate)
+                    {
+                        _warnedNoTemplate = true;
+                        Debug.LogWarning("[ContainerGroup] containerPrefab 为空：池化复用无法还原车体层级，" +
+                            "换轴 / 盖子 / 缩放可能残留在下一趟车上。", this);
+                    }
+                    return null;
+                }
+                _viewTemplate = ContainerViewTemplate.Capture(containerPrefab.transform);
+            }
+            return _viewTemplate.IsValid ? _viewTemplate : null;
+        }
+
+        private SpawnPool Pool
+        {
+            get { return GameManager.Instance != null ? GameManager.Instance.spawnPool : null; }
+        }
+
+        /// <summary>对象池可用（已初始化且注册了 <see cref="containerPoolTag"/>）。</summary>
+        private bool PoolReady
+        {
+            get { return Pool != null && Pool.HasTag(containerPoolTag); }
+        }
+
+        private void WarnNoPoolOnce()
+        {
+            if (_warnedNoPoolTag)
+                return;
+            _warnedNoPoolTag = true;
+            Debug.LogWarning("[ContainerGroup] SpawnPool 里没有 tag \"" + containerPoolTag +
+                "\"（或 spawnPool 尚未初始化）：容器回退为直接 Instantiate + Destroy，不复用。" +
+                "请把车预制体加进 Assets/Configs/SpawnPoolConfig 并把 tag 改成该值。", this);
+        }
+
         /// <summary>是否存在同色且可匹配的容器（前排或已开放的后排，最多 maxOpenRows 排）。用于失败判定。</summary>
         public bool HasMatchableContainerOfColor(int colorId)
         {
@@ -942,12 +1417,12 @@ namespace CrowdMatch
             for (int col = 0; col < columns; col++)
                 for (int row = 0; row < rows; row++)
                 {
-                    var it = grid[col, row];
-                    if (it == null)
-                        continue;
-                    if (it.isRefilling)
-                        return true;
-                    if (row >= 1 && it.lidOpened && IsFrontCleared(col, row))
+                    var it = GetItem(col, row);
+                    if (it != null && it.isRefilling)
+                        return true;                                  // 补位移动中的车必然有实例
+                    // 盖子已打开这一条要走数据层：复活路径可能给视窗外的深排车开过盖，
+                    // 状态记在 ContainerCell 上，只读实例会漏。
+                    if (row >= 1 && LidOpenedAt(col, row) && IsFrontCleared(col, row))
                         return true;
                 }
             return false;
@@ -962,7 +1437,7 @@ namespace CrowdMatch
         {
             for (int r = 0; r < row; r++)
             {
-                if (!IsRowReleased(GetItem(col, r)))
+                if (!IsRowReleased(col, r))
                     return false;
             }
             return true;
@@ -987,11 +1462,25 @@ namespace CrowdMatch
                 if (pixel == null)
                     continue;
 
-                var car = FindCarForColor(pixel.colorId);
-                if (car == null)
+                if (!FindCarForColor(pixel.colorId, out int carCol, out int carRow))
                 {
                     unmatched.Add(pixel);
                     continue;
+                }
+
+                var car = GetItem(carCol, carRow);
+                if (car == null)
+                {
+                    // 懒实例化：命中了一个**还没实例化**的深排车格。
+                    // 数据层早已记着这格（颜色 / 容量 / 已扣过的账），这里把它现造出来并水合到数据状态，
+                    // 之后走与从前完全相同的上车 / 出库链路——表现与「它早就在那儿」逐字一致；
+                    // 若这辆车的容量就此填满且深到视窗外，销毁与瞬间补位也照旧走 DestroyContainerInPlace。
+                    car = Materialize(carCol, carRow);
+                    if (car == null)
+                    {
+                        unmatched.Add(pixel);
+                        continue;
+                    }
                 }
 
                 car.OpenLid();              // 有车被匹配 → 播放开盖 tween（幂等）
@@ -1003,20 +1492,32 @@ namespace CrowdMatch
             return unmatched;
         }
 
-        /// <summary>从全排（gridZ 0..rows-1）按「前排优先、同排列小优先」找第一个同色、非空、非补位中的车；无则 null。</summary>
-        private ContainerItem FindCarForColor(int colorId)
+        /// <summary>
+        /// 从全排（0..rows-1）按「前排优先、同排列小优先」找第一个同色、非空、非补位中的车。
+        ///
+        /// **走数据层、覆盖全部排**——未实例化的深排车也在候选之列（这正是复活要填的「后排车」）：
+        /// 只扫实例会漏掉它们，那些像素会被误判成「无车可匹配」而销毁，还会留下被掏空的前排车堵死整列。
+        /// </summary>
+        private bool FindCarForColor(int colorId, out int carCol, out int carRow)
         {
             for (int row = 0; row < rows; row++)
                 for (int col = 0; col < columns; col++)
                 {
+                    if (!CarAt(col, row) || EmptyAt(col, row) || ColorAt(col, row) != colorId)
+                        continue;
+
                     var it = GetItem(col, row);
-                    if (it == null || it.IsEmpty || it.isRefilling)
-                        continue;
-                    if (it.colorId != colorId)
-                        continue;
-                    return it;
+                    if (it != null && it.isRefilling)
+                        continue;   // 补位移动中的车不接客（只有实例才可能处于补位中）
+
+                    carCol = col;
+                    carRow = row;
+                    return true;
                 }
-            return null;
+
+            carCol = -1;
+            carRow = -1;
+            return false;
         }
 
         // ===== 绳子连接 =====
