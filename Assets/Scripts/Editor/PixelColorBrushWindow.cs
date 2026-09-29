@@ -401,7 +401,12 @@ namespace CrowdMatch
             // （Unity 不序列化 Dictionary），而 BindFromSelection 在「还是同一个 group」时会早退 →
             // 不重建就会「打开窗口什么都没有」：管道没有粗描边、删墙模式反查不到墙。这里强制重建一次。
             if (_group != null)
+            {
+                // 窗口关着的时候按 Ctrl+Z（例如在 Scene 视图里撤销建墙）不会走到 OnUndoRedoPerformed，
+                // 邻居墙上可能留着陈旧的 T / 十字块 —— 重开窗口时顺手整组重建一次。
+                _group.RebuildWallVisuals();
                 RefreshSnapshot();
+            }
         }
 
         private void OnDisable()
@@ -476,6 +481,9 @@ namespace CrowdMatch
                 _iceDirty = false;
             }
 
+            // 撤销「建墙 / 删墙」会左右**邻居墙**的墙块类型，而邻居的墙块是邻居自己的子物体、
+            // 不随被撤销的那面墙一起消失 → 这里必须整组重建，否则会留下陈旧的 T / 十字块。
+            _group.RebuildWallVisuals();
             RefreshSnapshot();
             SceneView.RepaintAll();
             Repaint();
@@ -1359,13 +1367,31 @@ namespace CrowdMatch
                     text += "　｜　首尾相邻 → 创建为**闭环**墙体（补段已用淡色预览）";
                 if (_wallStroke.Count > 0)
                 {
-                    text += TryValidateWallStroke(_wallStrokeCells, out string reason, out _)
-                        ? "　｜　可生成 ✓ 松手即创建（化简后 " + PendingWallPoints().Count + " 个端点）"
-                        : "　｜　✗ " + reason;
+                    if (TryValidateWallStroke(_wallStrokeCells, out string reason, out _))
+                    {
+                        text += "　｜　可生成 ✓ 松手即创建（化简后 " + PendingWallPoints().Count + " 个端点）";
+
+                        // 交叉预览：这一笔会在哪儿形成 T / 十字（与判定、与真正建出来的同一趟掩码口径）
+                        CountPendingJunctions(out int tee, out int cross);
+                        if (tee > 0 || cross > 0)
+                        {
+                            text += "　｜　将形成交叉：";
+                            if (tee > 0)
+                                text += "T 字 " + tee + " 处";
+                            if (tee > 0 && cross > 0)
+                                text += "、";
+                            if (cross > 0)
+                                text += "十字 " + cross + " 处";
+                        }
+                    }
+                    else
+                    {
+                        text += "　｜　✗ " + reason;
+                    }
                 }
                 else
                 {
-                    text += "　｜　按住左键沿行 / 列拖出墙线，**松手即创建**（合法才建）";
+                    text += "　｜　按住左键沿行 / 列拖出墙线（**单击 = 1×1 墙**），**松手即创建**（合法才建）";
                     if (_lastStrokeError != null)
                         text += "　｜　上一笔未创建 ✗ " + _lastStrokeError;
                 }
@@ -2376,22 +2402,98 @@ namespace CrowdMatch
             return cells;
         }
 
+        /// <summary>某格在这组占格里「横向 / 纵向」各有没有邻居 —— 用来判两条墙在这一格是不是同轴。</summary>
+        private static void AxesOf(HashSet<Vector2Int> cells, Vector2Int cell, out bool horiz, out bool vert)
+        {
+            horiz = cells.Contains(new Vector2Int(cell.x - 1, cell.y)) || cells.Contains(new Vector2Int(cell.x + 1, cell.y));
+            vert  = cells.Contains(new Vector2Int(cell.x, cell.y - 1)) || cells.Contains(new Vector2Int(cell.x, cell.y + 1));
+        }
+
+        /// <summary>端点列表 → 整格集合（规则 B「端点不许落在已有墙体端点上」用）。</summary>
+        private static HashSet<Vector2Int> VertexCells(IList<Vector2> points)
+        {
+            var set = new HashSet<Vector2Int>();
+            if (points == null)
+                return set;
+            for (int i = 0; i < points.Count; i++)
+                set.Add(WallItem.ToCell(points[i]));
+            return set;
+        }
+
+        /// <summary>
+        /// 规则 C：同一面墙内是否有**同轴**的两条线段压在同一批格上（= 折返画线）。
+        /// 不同轴的线段至多共一个格，那是「自身的两根线段交叉」，允许 —— 所以只在同轴之间比。
+        /// </summary>
+        private static bool HasSelfSegmentOverlap(IList<Vector2> points, out string error)
+        {
+            error = null;
+            if (points == null || points.Count < 3)
+                return false;   // 一段（或零段）线段不可能自重叠
+
+            int segCount = points.Count - 1;
+            var segCells = new HashSet<Vector2Int>[segCount];
+            var segAxis = new int[segCount];   // 1 = 横 / 2 = 纵 / 0 = 退化（两端点同一格）
+
+            for (int i = 0; i < segCount; i++)
+            {
+                var cells = new HashSet<Vector2Int>();
+                WallItem.CollectOccupiedCells(new List<Vector2> { points[i], points[i + 1] }, cells);
+                segCells[i] = cells;
+
+                bool horiz = !Mathf.Approximately(points[i].x, points[i + 1].x);
+                bool vert  = !Mathf.Approximately(points[i].y, points[i + 1].y);
+                segAxis[i] = horiz && !vert ? 1 : (vert && !horiz ? 2 : 0);
+            }
+
+            for (int i = 0; i < segCount; i++)
+            {
+                if (segAxis[i] == 0)
+                    continue;
+
+                for (int j = i + 1; j < segCount; j++)
+                {
+                    if (segAxis[j] != segAxis[i])
+                        continue;
+
+                    foreach (var cell in segCells[i])
+                    {
+                        if (!segCells[j].Contains(cell))
+                            continue;
+
+                        error = "墙内线段重叠：第 " + (i + 1) + " 段与第 " + (j + 1) + " 段叠在 (" +
+                                cell.x + "," + cell.y + ")。同一面墙的线段不许重叠（折返画线）——" +
+                                "要交叉请画成两面墙。";
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// 待创建墙线的体检：能否生成 + 不能生成的原因。<paramref name="occupied"/> 是它的占格集合
         /// （由调用方传入，好让一帧内的按钮判据 / 画布高亮 / 状态行共用同一份，不重复算）。
         ///
-        /// 判据三条：≥ 2 格；相邻两格必须同行或同列（拖太快跳成对角就不行）；
-        /// **不与已有墙体重叠** —— 重叠等于让新墙的墙块压在旧墙上（z-fighting）且同一条线变成两面墙，
-        /// 而「已有墙体只能由『删除墙体』移除」是这套编辑的既定口径。
+        /// 判据五条：
+        /// ① ≥ 1 格（**1 格 = 1×1 墙**）；
+        /// ② 相邻两格必须同行或同列（拖太快跳成对角就不行；1 格时无事可判）；
+        /// ③ **规则 C · 同一面墙内不许线段重叠**（同轴的两条线段压在同一批格上 = 折返画线）；
+        /// ④ **规则 A · 不与已有墙体同轴贴合** —— 垂直穿过是「交叉」，放行；顺着已有墙走是「重复画线」，拒绝；
+        /// ⑤ **规则 B · 端点不许落在已有墙体的端点上**。
+        ///
+        /// 注意规则 C 只禁**同轴**重叠：**垂直自交是允许的**（=「自身的两根线段交叉」，会判成 T / 十字）。
+        /// 相邻但**不重叠**的墙互不影响，各自独立绘制、各留自己的端点块 —— 完整口径见
+        /// Docs/WallJunctionDesign.md §3、§4。
         /// </summary>
         private bool TryValidateWallStroke(HashSet<Vector2Int> occupied, out string error, out int overlapCells)
         {
             error = null;
             overlapCells = 0;
 
-            if (_wallStroke.Count < 2)
+            if (_wallStroke.Count < 1)
             {
-                error = "至少需要 2 格才能构成一段墙体。";
+                error = "至少需要 1 格才能构成墙体（1 格 = 1×1 墙）。";
                 return false;
             }
 
@@ -2407,20 +2509,133 @@ namespace CrowdMatch
                 }
             }
 
-            if (occupied != null)
+            // 规则 C：墙内线段不许重叠。化简已经把「同向延续」的多余拐点去掉了，但折返（A→B→A）
+            // 会留下两条压在同一批格上的同轴线段 —— 那种墙的数据是退化的（一个格被两条同向线段各走一遍）。
+            if (HasSelfSegmentOverlap(PendingWallPoints(), out string selfOverlap))
             {
-                foreach (var cell in occupied)
-                    if (_wallCells.ContainsKey(cell))
-                        overlapCells++;
+                error = selfOverlap;
+                return false;
+            }
+
+            var walls = _group != null ? _group.GetComponentsInChildren<WallItem>() : null;
+
+            // 规则 A：逐面已有墙比「轴向是否相交」。**不能取已有墙的轴向并集** ——
+            // 两道已有墙各占一个轴时并集是「横+纵」，任何穿过该格的新墙都会被误判。
+            //
+            // 1×1 墙（_wallStroke 只有 1 格）没有线段、谈不了轴向，所以把它视为「横 + 纵都占」：
+            // 只要该格已被任一已有墙占用就算冲突 —— 否则点一下就能在已有墙身上叠出一面 1×1 墙，
+            // 变成两墙同格（删一条另一条还在），正是本规则要拦的东西。
+            bool singleCell = _wallStroke.Count == 1;
+            Vector2Int firstOverlap = default;
+            bool hasOverlap = false;
+
+            if (occupied != null && walls != null)
+            {
+                foreach (var wall in walls)
+                {
+                    if (wall == null)
+                        continue;
+
+                    var wallCells = new HashSet<Vector2Int>(wall.EnumerateOccupiedCells());
+
+                    foreach (var cell in occupied)
+                    {
+                        if (!wallCells.Contains(cell))
+                            continue;
+
+                        AxesOf(occupied, cell, out bool sh, out bool sv);    // 新墙在这一格
+                        if (singleCell)
+                        {
+                            sh = true;
+                            sv = true;
+                        }
+                        AxesOf(wallCells, cell, out bool wh, out bool wv);   // 这道已有墙在这一格
+
+                        if ((sh && wh) || (sv && wv))
+                        {
+                            overlapCells++;
+                            if (!hasOverlap)
+                            {
+                                firstOverlap = cell;
+                                hasOverlap = true;
+                            }
+                        }
+                    }
+                }
             }
 
             if (overlapCells > 0)
             {
-                error = "与已有墙体重叠 " + overlapCells + " 格（已有墙体只能由「删除墙体」移除）。";
+                error = singleCell
+                    ? "(" + firstOverlap.x + "," + firstOverlap.y + ") 已有墙体 —— 1×1 墙不能叠在已有墙体上。"
+                    : "沿已有墙体重叠 " + overlapCells + " 格（同轴贴合 = 重复画线，删掉一条另一条还在）。" +
+                      "要交叉请**垂直穿过**它。";
                 return false;
             }
 
+            // 规则 B：端点撞端点。正交的端点相接看起来像正常墙角，实际是两面独立的墙（删一面另一面还在），
+            // 所以与既有口径一致地禁止。
+            if (walls != null)
+            {
+                var strokeVerts = VertexCells(PendingWallPoints());
+                if (strokeVerts.Count > 0)
+                {
+                    foreach (var wall in walls)
+                    {
+                        if (wall == null || wall.points == null)
+                            continue;
+
+                        foreach (var p in wall.points)
+                        {
+                            var v = WallItem.ToCell(p);
+                            if (!strokeVerts.Contains(v))
+                                continue;
+
+                            error = "端点 (" + v.x + "," + v.y + ") 落在已有墙体端点上（墙体端点不许重合）。";
+                            return false;
+                        }
+                    }
+                }
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// 待创建墙线会**真正形成**的交叉格有几处（状态行预览用）。
+        /// 口径与 <c>PixelGroup.RebuildWallVisuals</c> 完全一致：两边都按**线段连接关系**累加臂掩码
+        /// （`WallItem.AccumulateArms`）—— 所以「相邻但不重叠」不会被误算成交叉，
+        /// 而「同一面墙折返贴着自己」也不算（那是贴着，不是连着）。
+        /// 只统计新墙自己经过的格，免得把「已有墙之间的交叉」也算进来。
+        /// </summary>
+        private void CountPendingJunctions(out int tee, out int cross)
+        {
+            tee = 0;
+            cross = 0;
+
+            if (_group == null || _wallStroke.Count == 0)
+                return;
+
+            // 全组共用一份臂掩码；「新墙」用待创建的那份端点（与真正建出来的一致）
+            var arms = new Dictionary<Vector2Int, int>();
+            WallItem.AccumulateArms(PendingWallPoints(), ShouldCloseStroke(), arms, _group.IsInRange);
+
+            foreach (var wall in _group.GetComponentsInChildren<WallItem>())
+            {
+                if (wall == null)
+                    continue;
+                WallItem.AccumulateArms(wall.points, wall.closed, arms, _group.IsInRange);
+            }
+
+            foreach (var cell in CollectStrokeCells())
+            {
+                arms.TryGetValue(cell, out int mask);
+                var type = WallItem.ClassifyMask(mask, out _);
+                if (type == WallPieceType.Tee)
+                    tee++;
+                else if (type == WallPieceType.Cross)
+                    cross++;
+            }
         }
 
         /// <summary>
@@ -2525,6 +2740,8 @@ namespace CrowdMatch
             Undo.CollapseUndoOperations(undoGroup);
 
             _deletePendingWall = null;
+            // 删墙会让**邻居墙**的墙块类型退回（十字 → T、T → 端点），所以整组重建一次
+            _group.RebuildWallVisuals();
             RefreshSnapshot();
             SceneView.RepaintAll();
             Repaint();
@@ -2535,14 +2752,14 @@ namespace CrowdMatch
         /// <summary>
         /// 「添加墙体」松手：体检通过就**直接建**（已取消「创建墙体」按钮），不通过就把原因写进
         /// <see cref="_lastStrokeError"/> 交给状态行显示。轨迹无论成败都清掉 —— 一笔就是一笔，想改只能删了重拖。
-        /// 单击（1 格）不算「想建墙」，不报错。
+        /// **单击（1 格）也是一笔有效输入 = 建一面 1×1 墙**，所以失败的 1 格笔画同样要报出原因。
         /// </summary>
         private void FinishWallStroke()
         {
             var occupied = CollectStrokeCells();
             bool ok = TryValidateWallStroke(occupied, out string reason, out _);
 
-            _lastStrokeError = ok || _wallStroke.Count < 2 ? null : reason;
+            _lastStrokeError = ok ? null : reason;
 
             if (ok)
                 CreateWallFromStroke();   // 内部会清轨迹 + 重建快照
