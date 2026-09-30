@@ -19,13 +19,25 @@ namespace CrowdMatch
     ///   3. 扣完之后若某色剩余像素 &lt; 0（这类车吃掉的容量超过该色像素数）或不再是 3 的倍数，**中止**点名——
     ///      这两种情形用容量 3 的车无法精确对齐，硬修只会再造出容量≠3 的车。
     ///   4. 逐色比较「容量 = 3 的车数」与「剩余像素数 / 3」，记下未对齐的颜色与差额（以车数计，多 = 正）。
-    ///   5. 修复：先按总数把车数对齐（多则从尾部删「多出的颜色」的车，少则从尾部向后补「缺少的颜色」的车），
-    ///      再从尾部把「多出的颜色」的车改色成「缺少的颜色」。
+    ///   5. 修复：先按总数把车数对齐（多则从尾部删「多出的颜色」的车，少则**从最前排的空格往后**补「缺少的颜色」的车），
+    ///      再**逐列压紧**（见下），最后从尾部把「多出的颜色」的车改色成「缺少的颜色」。
     ///
-    /// 「尾部」= **行大优先、同行列大优先**（后排 → 前排，同一排从右到左）。补车的落位是**先按尾部顺序填空格，
-    /// 空格用尽再在末尾加行**（新行同样从大列往小列填）。
+    /// 「尾部」= **行大优先、同行列大优先**（后排 → 前排，同一排从右到左），这是**删车 / 改色**的挑选顺序。
+    /// 补车的落位**相反**：**最前排的空格优先（行升序、列升序，与「生成 Containers」的布局顺序一致）**，
+    /// 空格用尽再在末尾加行（新行从左往右填）—— 只有当新车的行号 ≤ 该列现有车数时才保持压紧。
     ///
-    /// 修复只动容量 = 3 的车：不改像素、不碰容量≠3 的车、不改 columns；只有补车不够放时才加 rows。全程走 Undo。
+    /// **收尾必做「逐列压紧」**：删车那一支因为「只删多出的颜色」会**跳过同一列里颜色不符的车**，
+    /// 于是可能从列的**中间**挖掉一辆、留下洞；补车也可能落到更靠后的空格上。
+    /// 列内不留洞是运行时的硬不变量（<see cref="ContainerGroup.DescribeColumnHoles"/> 把「洞之后又有车」当成问题，
+    /// <c>RefillColumn</c> / <c>DestroyContainerInPlace</c> 也都在维持它），所以修复的最后一步是
+    /// 把每列的车按行序重铺到 row 0..k-1（列内前后顺序不变）—— **本来就压紧的列一辆都不会动**。
+    ///
+    /// 修复只动容量 = 3 车的**颜色 / 存亡**：不给容量≠3 的车改色改容量、不改像素、不改 columns；
+    /// 只有补车不够放时才加 rows。压紧会把车（含容量≠3 的）往前挪行号 —— 那是补回不变量，不是「修复内容」。
+    /// 全程走 Undo。
+    ///
+    /// 颜色**已经对齐、但列内有洞**（多半是旧版本「补车往深排空格填」留下的）时，工具会单独问一次
+    /// 「是否逐列压紧」—— 那一步不删车、不补车、不改色，只挪行号，同样可 Undo。
     /// </summary>
     public static class ContainerColorRepair
     {
@@ -97,6 +109,9 @@ namespace CrowdMatch
             public int totalPixels;
             public int normalCarCount;
             public int neededCars;
+
+            /// <summary>列内「洞之后又有车」的格数（0 = 每列都从最前排起压紧）。</summary>
+            public int holes;
         }
 
         /// <summary>工具入口：检查 → 弹窗 → （确认后）修复。全程只在编辑模式下可用（修复走 Undo）。</summary>
@@ -139,9 +154,25 @@ namespace CrowdMatch
 
             if (report.mismatches.Count == 0)
             {
-                Debug.Log(Tag + " 颜色已对齐，无需修复。\n" + BuildReportLog(report, config));
-                EditorUtility.DisplayDialog("检查并修复容器颜色",
-                    BuildNoFixText(report, config), "确定");
+                if (report.holes == 0)
+                {
+                    Debug.Log(Tag + " 颜色已对齐，无需修复。\n" + BuildReportLog(report, config));
+                    EditorUtility.DisplayDialog("检查并修复容器颜色",
+                        BuildNoFixText(report, config), "确定");
+                    return;
+                }
+
+                // 颜色已对齐、但列内有洞（多半是「补车往深排空格填」的老毛病留下的）：单独问一次要不要压紧。
+                // 不顺手做掉 —— 这一步会挪车的行号，得让使用者自己点头。
+                bool compact = EditorUtility.DisplayDialog("检查并修复容器颜色",
+                    "颜色已经对齐，但有 " + report.holes + " 处「列内空洞」（洞之后又有车）。\n\n" +
+                    "列必须从最前排起压紧：有洞会让运行时的补位 / 出库判定出问题。\n\n" +
+                    "是否逐列压紧？（只把每列的车按行序前移到最前排起 —— 列内前后顺序、颜色、容量都不动）",
+                    "压紧", "取消");
+                if (!compact)
+                    return;
+
+                CompactExistingColumns(group);
                 return;
             }
 
@@ -232,6 +263,7 @@ namespace CrowdMatch
                     r.oddCars.Add(car);
             }
             r.normalCarCount = r.normalCars.Count;
+            r.holes = CountHoles(group);
 
             // ---- 第 3 步：把这些车占的容量从各自颜色的像素数里扣掉 ----
             var oddCapacityByColor = new Dictionary<int, int>();
@@ -316,6 +348,31 @@ namespace CrowdMatch
             return b.col.CompareTo(a.col);
         }
 
+        /// <summary>
+        /// 列内空洞处数 = 「洞之后又有车」的那种格有多少（与 <see cref="ContainerGroup.DescribeColumnHoles"/>
+        /// 同一判据）。列必须从最前排起压紧，所以这个数不为 0 就是坏数据。
+        /// </summary>
+        private static int CountHoles(ContainerGroup group)
+        {
+            int holes = 0;
+            for (int col = 0; col < group.columns; col++)
+            {
+                int firstEmpty = -1;
+                for (int row = 0; row < group.rows; row++)
+                {
+                    if (group.GetItem(col, row) == null)
+                    {
+                        if (firstEmpty < 0)
+                            firstEmpty = row;
+                        continue;
+                    }
+                    if (firstEmpty >= 0)
+                        holes++;
+                }
+            }
+            return holes;
+        }
+
         // ===== 修复 =====
 
         /// <summary>执行修复，返回给弹窗的摘要文本。前提：<see cref="Inspect"/> 未中止。</summary>
@@ -352,14 +409,25 @@ namespace CrowdMatch
                     removedCount++;
                 }
             }
-            // 5a-2) 车少了：从尾部向后用「缺少的颜色」补到数量一致
+            // 5a-2) 车少了：用「缺少的颜色」补到数量一致（落位见 AddCars —— 最前排的空格优先）
             else if (extra < 0)
             {
                 addedCount = AddCars(group, r, needed, counts, config, -extra);
             }
 
-            // 5b) 颜色对齐：从尾部抓「多出的颜色」的车，改成「缺少的颜色」。
+            // 5b) 逐列压紧：删车可能从列中间挖掉一辆（同列颜色不符的车会被跳过），补车也可能填在更靠后的空格上。
+            //     列内不留洞是运行时的硬不变量，这里统一补回来；本来就压紧的列一辆都不会动。
+            //     （放在改色之前：改色日志里的坐标就是最终位置。）
+            var refs = new Dictionary<ContainerItem, CarRef>();
+            foreach (var car in r.cars)
+                if (car.item != null)
+                    refs[car.item] = car;
+            int compactedCount = CompactColumns(group, refs);
+            group.RebuildGrid();   // 后面的改色与报告都基于压紧后的位置（顺带把新落到 row 0 的车的盖子隐藏）
+
+            // 5c) 颜色对齐：从尾部抓「多出的颜色」的车，改成「缺少的颜色」。
             //     5a 之后 Σ(车数) == Σ(需要的车数)，所以只要还有缺色就一定还有多色，循环必然收敛。
+            //     挑车的顺序来自 Inspect 排好的 normalCars（尾部顺序），与压紧后的行号无关。
             var recolored = new StringBuilder();
             while (true)
             {
@@ -398,7 +466,8 @@ namespace CrowdMatch
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine("修复完成：删车 " + removedCount + " 辆，增车 " + addedCount + " 辆，改色 " + recoloredCount + " 辆。");
+            sb.AppendLine("修复完成：删车 " + removedCount + " 辆，增车 " + addedCount + " 辆，改色 " + recoloredCount +
+                          " 辆，列内压紧 " + compactedCount + " 辆。");
             if (recoloredCount > 0)
             {
                 sb.AppendLine();
@@ -423,8 +492,74 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 补 <paramref name="count"/> 辆车：颜色取「缺少」中 colorId 最小者；位置按尾部顺序**先填空格**，
-        /// 空格用尽再在末尾加行（新行同样从大列往小列填）。返回实际创建数。
+        /// 「颜色已对齐但有洞」时的那一步：**只压紧**，不删车不补车不改色。整步一个 Undo 组。
+        /// </summary>
+        private static void CompactExistingColumns(ContainerGroup group)
+        {
+            const string undoName = "压紧容器列";
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+
+            int moved = CompactColumns(group, null, undoName);
+
+            group.RebuildGrid();
+            EditorUtility.SetDirty(group);
+            Undo.CollapseUndoOperations(undoGroup);
+            SceneView.RepaintAll();
+
+            Debug.Log(Tag + " 已逐列压紧：前移 " + moved + " 辆车的行号，列内不再留洞。");
+            EditorUtility.DisplayDialog("检查并修复容器颜色",
+                "已逐列压紧：前移 " + moved + " 辆车的行号（列内前后顺序、颜色、容量都没动）。", "确定");
+        }
+
+        /// <summary>
+        /// 把每一列的车**压紧**到 row 0..k-1（列内前后顺序不变），返回被挪动的车数 —— 修复的收尾，
+        /// 见类文档「逐列压紧」。挪动的车会同步更新 <paramref name="refs"/> 里的行号（后面的改色报告要用新位置；
+        /// 传 null 表示不需要更新，例如只压紧不修复那条路径）。
+        /// </summary>
+        private static int CompactColumns(ContainerGroup group, Dictionary<ContainerItem, CarRef> refs,
+                                          string undoName = "修复容器颜色")
+        {
+            int moved = 0;
+            for (int col = 0; col < group.columns; col++)
+            {
+                var cars = new List<ContainerItem>();
+                for (int row = 0; row < group.rows; row++)
+                {
+                    var item = group.GetItem(col, row);
+                    if (item != null)
+                        cars.Add(item);
+                }
+
+                for (int i = 0; i < cars.Count; i++)
+                {
+                    var car = cars[i];
+                    if (car.gridX == col && car.gridZ == i)
+                        continue;   // 位置没变：不动它（也就不会记空 Undo）
+
+                    Undo.RecordObject(car, undoName);
+                    Undo.RecordObject(car.transform, undoName);
+                    car.gridX = col;
+                    car.gridZ = i;
+                    car.transform.localPosition = group.GetLocalPosition(col, i);
+                    EditorUtility.SetDirty(car);
+
+                    if (refs != null && refs.TryGetValue(car, out CarRef carRef))
+                        carRef.row = i;
+                    moved++;
+                }
+            }
+            return moved;
+        }
+
+        /// <summary>
+        /// 补 <paramref name="count"/> 辆车：颜色取「缺少」中 colorId 最小者；位置**最前排的空格优先**
+        /// （行升序、列升序 —— 与「生成 Containers」的布局顺序一致），空格用尽再在末尾加行（新行从左往右填）。
+        /// 返回实际创建数。
+        ///
+        /// 为什么不是「从尾部往前填」：每列的车必须从 row 0 起压紧。往深排的空格里填，会在**浅排空格**
+        /// 与新车之间留下洞（列 = 车、空、车）——这正是本工具曾经出洞的原因。
         ///
         /// 注意：加行只改 <see cref="ContainerGroup.rows"/> 字段，grid 数组要等 Apply 结束后
         /// <see cref="ContainerGroup.RebuildGrid"/> 才重建 —— 所以这里算完空格后**不再调用 GetItem**，
@@ -436,14 +571,14 @@ namespace CrowdMatch
             ColorConfig config, int count)
         {
             var free = new List<Vector2Int>();
-            for (int row = group.rows - 1; row >= 0; row--)
-                for (int col = group.columns - 1; col >= 0; col--)
+            for (int row = 0; row < group.rows; row++)
+                for (int col = 0; col < group.columns; col++)
                     if (group.GetItem(col, row) == null)
                         free.Add(new Vector2Int(col, row));
 
             int freeIdx = 0;
             int newRow = group.rows;            // 待新增的行号
-            int newCol = group.columns - 1;     // 新行内下一个待填的列
+            int newCol = 0;                     // 新行内下一个待填的列
             int created = 0;
 
             for (int i = 0; i < count; i++)
@@ -459,10 +594,10 @@ namespace CrowdMatch
                 }
                 else
                 {
-                    if (newCol < 0)
+                    if (newCol >= group.columns)
                     {
                         newRow++;
-                        newCol = group.columns - 1;
+                        newCol = 0;
                     }
                     if (newRow >= group.rows)
                     {
@@ -470,7 +605,7 @@ namespace CrowdMatch
                         group.rows = newRow + 1;   // 行数不够放：末尾加行（列数不动）
                     }
                     cell = new Vector2Int(newCol, newRow);
-                    newCol--;
+                    newCol++;
                 }
 
                 var go = ContainerGroupEditor.InstantiateTemplate(group.containerPrefab, group.transform);
@@ -622,6 +757,13 @@ namespace CrowdMatch
             sb.AppendLine("修复只动容量 = " + NormalCapacity + " 的车：从尾部（后排 → 前排、同行从右到左）");
             sb.AppendLine("先删/补使车数一致，再把「多出的颜色」改色成「缺少的颜色」。");
             sb.AppendLine("像素与容量≠" + NormalCapacity + " 的车都不动；补车不够放时会在末尾加行。全程可 Undo。");
+
+            if (r.holes > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("另：检测到列内空洞 " + r.holes + " 处（洞之后又有车 —— 列必须从最前排起压紧）。");
+                sb.AppendLine("修复的最后会逐列压紧：把每列的车按行序重排到最前排起，列内前后顺序与颜色 / 容量都不变。");
+            }
 
             return sb.ToString().TrimEnd();
         }
