@@ -27,8 +27,17 @@ namespace CrowdMatch
     ///   ④ 别的组若路线**依赖**某条管道（只把该管道轨道当障碍就到不了首排），
     ///   其层级 += 该管道「单波容量 × 波数」。
     ///
-    /// · **箱子**（简化口径）：只要箱体四邻存在「空且通首排」的格即视为可释放，**不看容量 / 空位数**；
-    ///   释放后箱体不再算障碍，箱内像素不占格、不挡别人、不与箱外同色连通。
+    /// · **箱子**：**可释放判定**是简化口径 —— 只要箱体四邻存在「空且通首排」的格即视为可释放，
+    ///   **不看容量 / 空位数**（运行时要「可用格 ≥ 容量」）；释放后箱体不再算障碍，
+    ///   箱内像素不占格、不挡别人、不与箱外同色连通。
+    ///   **层级**不靠贪心轮次，另按两条口径算：
+    ///   ① **盒内统一层级** —— 盒内每个颜色一组，共享一个层级 = min over「直接相邻箱体的组 h」
+    ///      （**排除**路线要经过本箱其他邻组的 h：那种 h 排在别的邻组之后才走掉，当不了触发者）
+    ///      of (h.层级 + h.元素数)，物理含义是「某个邻组整组彻底走完」的那一刻；
+    ///   ② **箱子代价** —— 某组的路线若**必须**经过「箱子释放后会重新占满的那一带」
+    ///      （试探集合 = **箱体格 ∪ 某个箱子邻组与箱体相邻的格**；把它们当障碍就到不了首排、放开就能到），
+    ///      则箱子的像素会落回来挡路，该组层级 **+= 该箱子总容量**（一个箱子只加一次；箱子没有邻组时只试箱体格）。
+    ///   注：② 不作用于管道波次（层级是顺推公式）；① ② 都不作用于箱内颜色组自己（没有格子 ⇒ 没有路线）。
     ///
     /// · **倍乘门**：区域内的格按各门倍数连乘（<see cref="GateMultiplierMap"/>），
     ///   影响元素数量与 Record 的重复条数。
@@ -67,6 +76,12 @@ namespace CrowdMatch
             /// <summary>为了绕开管道轨道而加进来的代价（= 各挡路管道的「单波容量 × 波数」之和）；0 = 不经过管道。</summary>
             public int pipePenalty;
 
+            /// <summary>为了绕开「箱子释放后重新占回的那一带」而加进来的代价（= 沿途各箱子总容量之和）；0 = 不经过箱子邻格。</summary>
+            public int boxPenalty;
+
+            /// <summary>本组路线**必须**经过其邻组的箱子下标（口径 ② 据此加代价；口径 ① 靠它判「排在本箱别的邻组之后」）。在 Remove 之前算。</summary>
+            internal readonly List<int> routeViaBoxes = new List<int>();
+
             /// <summary>贪心轮里始终走不掉（死局）。</summary>
             public bool stuck;
 
@@ -80,6 +95,27 @@ namespace CrowdMatch
             public int anchorC, anchorR;
             public bool opened;
             public readonly List<Vector2Int> ring = new List<Vector2Int>();
+
+            /// <summary>实际会释放出来的隐藏像素数（= min(capacity, colorIds.Length)，与 <see cref="BuildBoxGroups"/> 同口径）。</summary>
+            public int hiddenCount;
+
+            /// <summary>箱体格本身（口径 ② 要和邻组的格一起当障碍试）。</summary>
+            public readonly HashSet<Vector2Int> bodyCells = new HashSet<Vector2Int>();
+
+            /// <summary>直接相邻箱体（4 邻、不含四角）的组 —— 规则 ① 的 min 就取在它们身上。</summary>
+            public readonly List<BoxNeighbour> neighbours = new List<BoxNeighbour>();
+
+            /// <summary>本箱的盒内颜色组（规则 ① 要把统一层级写回它们）。</summary>
+            public readonly List<Group> colorGroups = new List<Group>();
+        }
+
+        /// <summary>一个「直接相邻箱体」的组，连同口径 ② 的试探集合。</summary>
+        private sealed class BoxNeighbour
+        {
+            public Group group;
+
+            /// <summary>口径 ② 的试探集合 = **箱体格 ∪ 该组与箱体相邻的格**（箱子释放后这一带会重新被占满）。</summary>
+            public HashSet<Vector2Int> zone;
         }
 
         private sealed class CrateState
@@ -294,6 +330,7 @@ namespace CrowdMatch
             _initRevealed = (bool[,])_revealed.Clone();
 
             BuildGroups();
+            BuildBoxNeighbours();
 
             TotalLines = 0;
             for (int i = 0; i < _groups.Count; i++) TotalLines += _groups[i].elements;
@@ -339,6 +376,13 @@ namespace CrowdMatch
                     colors = b.colorIds != null ? b.colorIds : new int[0],
                     anchorC = c0, anchorR = r0,
                 };
+
+                // 实际释放的隐藏像素数：与 BuildBoxGroups 同口径按 min(容量, 颜色数) 取（capacity 偏大时按小的算）
+                st.hiddenCount = Mathf.Min(Mathf.Max(0, st.capacity), st.colors.Length);
+
+                for (int c = c0; c <= c1; c++)
+                    for (int r = r0; r <= r1; r++)
+                        st.bodyCells.Add(new Vector2Int(c, r));
 
                 // 箱体四邻（矩形外圈）：只要有一格空且通首排即可释放
                 for (int c = c0 - 1; c <= c1 + 1; c++)
@@ -586,6 +630,7 @@ namespace CrowdMatch
             for (int bi = 0; bi < _boxes.Count; bi++)
             {
                 var box = _boxes[bi];
+                box.colorGroups.Clear();
                 int count = Mathf.Min(box.capacity, box.colors.Length);
                 var perColor = new Dictionary<int, int>();
                 var order = new List<int>();
@@ -600,24 +645,67 @@ namespace CrowdMatch
                 for (int i = 0; i < order.Count; i++)
                 {
                     int color = order[i];
-                    _groups.Add(new Group
+                    var g = new Group
                     {
                         kind = GroupKind.BoxColor,
                         color = color,
                         boxIndex = bi,
                         materialized = true,
                         elements = perColor[color] * mult,
-                        note = "箱子#" + bi + " 颜色" + color,
-                    });
+                        note = "箱子#" + bi + "（容量" + box.hiddenCount + "）颜色" + color,
+                    };
+                    _groups.Add(g);
+                    box.colorGroups.Add(g);
                 }
             }
+        }
+
+        /// <summary>
+        /// 给每个箱子找「直接相邻箱体（4 邻、不含四角）的组」。分组在开局定死、格子不再变，
+        /// 所以这里只算一次。箱内颜色组没有格子，天然不会成为邻组。
+        /// </summary>
+        private void BuildBoxNeighbours()
+        {
+            for (int bi = 0; bi < _boxes.Count; bi++)
+            {
+                var box = _boxes[bi];
+                box.neighbours.Clear();
+
+                for (int gi = 0; gi < _groups.Count; gi++)
+                {
+                    var g = _groups[gi];
+                    if (g.cells.Count == 0) continue;
+
+                    var zone = new HashSet<Vector2Int>(box.bodyCells);
+                    for (int i = 0; i < g.cells.Count; i++)
+                        if (TouchesBoxBody(box, g.cells[i]))
+                            zone.Add(g.cells[i]);
+                    if (zone.Count == box.bodyCells.Count) continue;   // 没有相邻格 ⇒ 不算这个邻组
+
+                    box.neighbours.Add(new BoxNeighbour { group = g, zone = zone });
+                }
+            }
+        }
+
+        /// <summary>该格是否与箱体 4 邻（不含四角）。</summary>
+        private static bool TouchesBoxBody(BoxState box, Vector2Int cell)
+        {
+            for (int d = 0; d < 4; d++)
+            {
+                int c = cell.x + DC[d], r = cell.y + DR[d];
+                if (c >= box.c0 && c <= box.c1 && r >= box.r0 && r <= box.r1)
+                    return true;
+            }
+            return false;
         }
 
         // ===== 求解 =====
 
         /// <summary>
-        /// 贪心推进：每轮取走全部可走组，据此给出每组的层级（= 之前移出的像素总数 + 该组绕管道的代价）。
-        /// 管道波次**不参与**轮次推进，层级单独按公式顺推（见 <see cref="AssignPipeTiers"/>）。
+        /// 贪心推进：每轮取走全部可走组，据此给出每组的层级
+        /// （= 之前移出的像素总数 + 该组绕管道 / 绕箱子那一带的代价）。
+        /// 管道波次**不参与**轮次推进，层级单独按公式顺推（见 <see cref="AssignPipeTiers"/>）；
+        /// 箱内颜色组的层级也不按轮次，另按口径 ① 重算（见 <see cref="AssignBoxTiers"/>）。
         /// </summary>
         public void Solve()
         {
@@ -654,11 +742,16 @@ namespace CrowdMatch
                 }
                 if (ready.Count == 0) break;
 
+                // 路径依赖要在「本组即将腾空、别的组还按原样挡着」时判 —— 和 PipePenalty 同一时机
+                for (int i = 0; i < ready.Count; i++)
+                    ComputeBoxDeps(ready[i]);
+
                 for (int i = 0; i < ready.Count; i++)
                 {
                     var g = ready[i];
                     g.pipePenalty = PipePenalty(g);
-                    g.tier = cumulative + g.pipePenalty;
+                    g.boxPenalty = BoxPenalty(g);
+                    g.tier = cumulative + g.pipePenalty + g.boxPenalty;
                     g.round = round;
                 }
                 for (int i = 0; i < ready.Count; i++) Remove(ready[i]);
@@ -677,6 +770,84 @@ namespace CrowdMatch
             }
 
             AssignPipeTiers(cumulative, round);
+            AssignBoxTiers();
+        }
+
+        /// <summary>
+        /// 口径 ② 的前半：记下本组路线**必须**经过哪些箱子「释放后会重新占满的那一带」
+        /// （判据与 <see cref="PipePenalty"/> 同构 —— 把试探集合当障碍后就到不了首排、放开就能到）。
+        /// 试探集合 = 箱体格 ∪ 该邻组与箱体相邻的格；这两者在「箱子已开 / 邻组已腾空」之前本来就挡着，
+        /// 阻塞它们等于没变 ⇒ 自然判不出依赖；只有它们已经腾空，才判得出「路线非走那几格不可」。
+        /// 箱子一个邻组都没有时，退回只试箱体格。        /// </summary>
+        private void ComputeBoxDeps(Group g)
+        {
+            g.routeViaBoxes.Clear();
+            if (g.cells.Count == 0) return;   // 箱内颜色组没有路线，谈不上经过谁
+
+            for (int bi = 0; bi < _boxes.Count; bi++)
+            {
+                var box = _boxes[bi];
+
+                // 没有邻组的箱子（四周都是墙/管/空格）没有「邻格」可试，就把箱体格自己当集合试
+                bool depends = box.neighbours.Count == 0 && !CanReachFront(g, box.bodyCells);
+
+                for (int i = 0; !depends && i < box.neighbours.Count; i++)
+                {
+                    // 本组自己就是邻组时：阻塞它自己的格对 BFS 是空操作（本组所有格都是种子、直接算已访问），
+                    // 于是这个试探等价于「只挡箱体格」—— 正好就是「本组路线非穿过箱体不可」那个情形。
+                    depends = !CanReachFront(g, box.neighbours[i].zone);
+                }
+
+                if (depends) g.routeViaBoxes.Add(bi);
+            }
+        }
+
+        /// <summary>
+        /// 口径 ②：路线经过某个「箱子邻组」⇒ 箱子释放的像素会重新占回这一带，层级另加该箱子**总容量**
+        /// （一个箱子只加一次：经过它的多个邻组也只算一次）。
+        /// </summary>
+        private int BoxPenalty(Group g)
+        {
+            int penalty = 0;
+            for (int i = 0; i < g.routeViaBoxes.Count; i++)
+                penalty += _boxes[g.routeViaBoxes[i]].hiddenCount;
+            return penalty;
+        }
+
+        /// <summary>
+        /// 口径 ①：盒内每个颜色组共享**一个**层级 = min over「直接相邻箱体的组 h」
+        /// （排除路线要经过本箱其他邻组的 h —— 那种 h 排在别的邻组之后才走掉，当不了触发者）
+        /// of (h.层级 + h.元素数)，即「某个邻组整组彻底走完」的那一刻。
+        /// 箱子没开（整组卡死）、或一个可用邻组都没有（比如四周本来就是空的，开局即释放）时，
+        /// 沿用贪心轮次算出来的值。
+        /// </summary>
+        private void AssignBoxTiers()
+        {
+            for (int bi = 0; bi < _boxes.Count; bi++)
+            {
+                var box = _boxes[bi];
+                if (box.colorGroups.Count == 0) continue;
+                if (box.colorGroups[0].stuck) continue;
+
+                int best = int.MaxValue;
+                for (int i = 0; i < box.neighbours.Count; i++)
+                {
+                    var h = box.neighbours[i].group;
+                    if (h.stuck || h.tier < 0) continue;
+                    if (DependsOnOtherNeighbour(h, bi)) continue;
+                    best = Mathf.Min(best, h.tier + h.elements);
+                }
+                if (best == int.MaxValue) continue;
+
+                for (int i = 0; i < box.colorGroups.Count; i++)
+                    box.colorGroups[i].tier = best;
+            }
+        }
+
+        /// <summary>h 的路线是否要经过「本箱的另一个邻组」的格（⇒ h 在本箱别的邻组之后才走掉）。</summary>
+        private static bool DependsOnOtherNeighbour(Group h, int boxIndex)
+        {
+            return h.routeViaBoxes.Contains(boxIndex);
         }
 
         /// <summary>
@@ -1116,6 +1287,10 @@ namespace CrowdMatch
         /// </summary>
         private int PipePenalty(Group g)
         {
+            // 没有格子的组（箱内颜色组）没有路线：CanReachFront 对它恒返回 false，
+            // 会把「每条管道都依赖」都算上（曾经的实际 bug：四个箱子全部 +110）。
+            if (g.cells.Count == 0) return 0;
+
             int penalty = 0;
             for (int i = 0; i < _pipes.Count; i++)
             {
