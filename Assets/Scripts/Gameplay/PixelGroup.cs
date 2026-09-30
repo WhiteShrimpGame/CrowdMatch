@@ -431,6 +431,14 @@ namespace CrowdMatch
             return min;
         }
 
+        /// <summary>
+        /// 箱子释放（<see cref="BoxItem.TryOpen"/>）判定用的「空」：无像素 / 非障碍，
+        /// **且不被「还有未释放波次」的管道轨迹覆盖** —— 那几格是管道下一波要占的，**管道优先**：
+        /// 箱子若把释放出来的像素放到轨道上，管道就该因轨道被占而放不出下一波了（两者抢同一批空格）。
+        /// 判据与 <see cref="IsEmptyForExposure"/> 相同（活跃管道轨迹 = 阻挡，理由见那里的注释）。
+        /// </summary>
+        public bool IsEmptyForBoxRelease(int col, int row) => IsEmptyForExposure(col, row);
+
         /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
         public bool IsEmptyForExposure(int col, int row)
         {
