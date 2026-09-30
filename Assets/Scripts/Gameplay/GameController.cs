@@ -182,6 +182,12 @@ namespace CrowdMatch
             pixelGroup.recordRevealCrates = recordMode;
 
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
+
+            // 建绳必须在 Apply 之后（依赖已重建的网格与车的列位置）；洗牌开启时不建绳、绳组不生效。
+            // 绳组成员由 BuildRopes 整组实例化出来（懒实例化下不能只实例化落进视窗的那部分）。
+            if (containerGroup != null)
+                containerGroup.BuildRopes(!data.container.lockContainer);
+
             pixelGroup.RefreshExposed();
             RefreshFrame();
 
