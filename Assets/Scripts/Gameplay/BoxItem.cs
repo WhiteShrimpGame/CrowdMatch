@@ -885,9 +885,14 @@ namespace CrowdMatch
             FinalizeRelease(assignments);
         }
 
-        /// <summary>全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。</summary>
+        /// <summary>
+        /// 全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）；
+        /// 最后把这批刚放出来的像素交给 <see cref="SameColorMergeWatcher"/> —— 与旁边同色已显色区域
+        /// 连成一片时播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。
+        /// </summary>
         private void FinalizeRelease(List<(PixelItem pixel, Vector2Int cell)> assignments)
         {
+            var released = new List<PixelItem>(assignments.Count);
             for (int i = 0; i < assignments.Count; i++)
             {
                 var pixel = assignments[i].pixel;
@@ -896,12 +901,19 @@ namespace CrowdMatch
                 // 已被后续匹配移出网格：不再处理（其 placing 标记无副作用，交由匹配流程接管）
                 if (!group.IsInRange(pixel.gridX, pixel.gridZ) || group.grid[pixel.gridX, pixel.gridZ] != pixel)
                     continue;
+                released.Add(pixel);
                 pixel.MarkPlaced();
                 pixel.SetClickable(true);
             }
 
             if (group != null)
+            {
                 group.RefreshExposed();
+
+                // 就位之后才判：此刻这批像素才算「已显色」，别的生产者还没落地的像素由
+                // 判定器的 placing 守卫排除在外（不会被误当成本次的「原有区域」）。
+                SameColorMergeWatcher.Notify(group, released);
+            }
         }
 
         /// <summary>

@@ -570,7 +570,14 @@ namespace CrowdMatch
             _nextGroupIndex++;
 
             if (group != null)
+            {
                 group.RefreshExposed();
+
+                // 本组就位 = 一批像素刚被放进网格：与地面上的同色已显色像素连成一片时播惊讶表情
+                // （见 Docs/EmojiSurpriseMergeDesign.md）。pixels 是本组的全部像素，
+                // 期间已被匹配移出的那些由判定器按 grid 引用复核剔掉。
+                SameColorMergeWatcher.Notify(group, pixels);
+            }
         }
 
         private void OpenDoor()

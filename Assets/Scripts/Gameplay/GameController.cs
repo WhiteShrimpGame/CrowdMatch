@@ -181,6 +181,11 @@ namespace CrowdMatch
             // 而 SetCovered 是幂等的（同值直接返回），事后再改这个开关不会重刷。
             pixelGroup.recordRevealCrates = recordMode;
 
+            // 关卡加载期间抑制「同色连成一片」惊讶表情：随后的 RebuildGrid 与首次 RefreshExposed 会把
+            // 开局就贴着首排 / 连着出口空格的问号像素当场揭晓 —— 那不是动态事件，不该撒一片表情。
+            // 必须在 LevelLoader.Apply **之前**写入（那一步的 RebuildGrid 与随后的 RefreshExposed 都会读它）。
+            pixelGroup.suppressMergeSurprise = true;
+
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
 
             // 建绳必须在 Apply 之后（依赖已重建的网格与车的列位置）；洗牌开启时不建绳、绳组不生效。
@@ -189,6 +194,9 @@ namespace CrowdMatch
                 containerGroup.BuildRopes(!data.container.lockContainer);
 
             pixelGroup.RefreshExposed();
+
+            // 开局的问号揭晓已经过去了：复位抑制开关，之后的动态事件照常判定
+            pixelGroup.suppressMergeSurprise = false;
             RefreshFrame();
 
 #if UNITY_EDITOR
