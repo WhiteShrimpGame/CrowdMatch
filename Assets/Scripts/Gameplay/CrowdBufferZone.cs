@@ -171,6 +171,32 @@ namespace CrowdMatch
         /// </summary>
         private readonly List<ExtractState> _exitingBuffer = new List<ExtractState>();
 
+        // ===== SweepOnce 的复用缓冲（见那里的注释）=====
+        // 这些缓冲只在 SweepOnce 及其私有被调方（CanExit / IsObstacle / ComputeExitDistance / PickBestPixel）
+        // 内部使用，每次调用开头重置，所以按需扩容后反复复用是安全的。**前提：SweepOnce 不可重入** ——
+        // 它全程同步、不 yield，调出去的 StartCellMove / SpawnGateClone 只写字段与开协程，不会回调回它。
+        private int[,] _sweepDist;                  // 静态距离场（每 sweep 重算）
+        private ExtractState[,] _sweepStateAt;      // 网格内像素的位置查找表
+        private bool[,] _sweepVacated;              // 本 tick 被腾出的格
+        private bool[,] _sweepClaimed;              // 本 tick 被移入的格
+        private int[,] _sweepSnakeRank;             // 蛇格 rank；-1 = 非蛇格
+        private readonly List<ExtractState> _sweepSeeds = new List<ExtractState>();
+        private readonly List<ExtractState> _sweepExits = new List<ExtractState>();
+        private readonly List<ExtractState> _sweepMovers = new List<ExtractState>();
+        private readonly List<Vector2Int> _sweepFrontier = new List<Vector2Int>();
+        private readonly List<Vector2Int> _sweepFrontierNext = new List<Vector2Int>();
+        private readonly Queue<Vector2Int> _sweepDistQueue = new Queue<Vector2Int>();
+
+        /// <summary>frontier 层内排序的比较器实例。缓存它，是为了让 <c>List.Sort</c> 不再每次新建委托 ——
+        /// 原地 lambda 还会额外捕获局部变量、每进一层就多一个闭包对象（见 <see cref="CompareFrontier"/>）。</summary>
+        private System.Comparison<Vector2Int> _frontierCompare;
+
+        /// <summary>4 邻偏移。提成静态只读 —— 写成方法内的 <c>int[] dx = {…}</c> 局部数组字面量会每次调用都分配一次，
+        /// 而 <see cref="PickBestPixel"/> 每个 frontier 格就调一次，是这段里分配最多的地方。
+        /// **顺序与原来两处方法内的字面量逐字一致**（{沿 row 的 ±1, 沿 col 的 ±1}），不要重排。</summary>
+        private static readonly int[] Dx4 = { 0, 0, 1, -1 };
+        private static readonly int[] Dz4 = { 1, -1, 0, 0 };
+
         /// <summary>提取期间引用的 PixelGroup（唯一，所有批次共享）</summary>
         private PixelGroup _extractGroup;
 
@@ -650,6 +676,23 @@ namespace CrowdMatch
             int cols = _extractGroup.columns;
             int rows = _extractGroup.TotalRows;
 
+            // —— 复用缓冲（见字段区说明）：这次调用开头全部重置 ——
+            var dist = EnsureIntGrid(ref _sweepDist, cols, rows);
+            var stateAt = EnsureStateGrid(ref _sweepStateAt, cols, rows);
+            var vacated = EnsureBoolGrid(ref _sweepVacated, cols, rows);
+            var claimed = EnsureBoolGrid(ref _sweepClaimed, cols, rows);
+            var snakeRank = EnsureIntGrid(ref _sweepSnakeRank, cols, rows);
+            var seeds = _sweepSeeds;
+            var exits = _sweepExits;
+            var movers = _sweepMovers;
+            seeds.Clear();
+            exits.Clear();
+            movers.Clear();
+            System.Array.Clear(stateAt, 0, stateAt.Length);
+            System.Array.Clear(vacated, 0, vacated.Length);
+            System.Array.Clear(claimed, 0, claimed.Length);
+            _frontierCompare ??= CompareFrontier;
+
             // 重置本 tick 决策
             foreach (var st in batch.extracting)
             {
@@ -661,11 +704,9 @@ namespace CrowdMatch
 
             // 静态距离场：dist[c,r] = 到前排出口的最短步数（只把未匹配球当墙，忽略本批匹配球）。
             // 它只表达"该往哪走"的方向信息，不受本 tick 腾出/抢占影响，故每个 sweep 算一次即可。
-            int[,] dist = ComputeExitDistance(cols, rows, batch);
+            ComputeExitDistance(dist, cols, rows, batch);
 
             // 网格内像素：位置查找表（快照，逐 sweep 重建，与 matchedOccupied 一致）+ 参与决策列表
-            var stateAt = new ExtractState[cols, rows];
-            var seeds = new List<ExtractState>();
             foreach (var st in batch.extracting)
             {
                 if (st.item == null || st.exiting)
@@ -674,12 +715,9 @@ namespace CrowdMatch
                 seeds.Add(st);
             }
 
-            // vacated：本 tick 被腾出的格；claimed：本 tick 被移入的格（一格只填一次）
-            var vacated = new bool[cols, rows];
-            var claimed = new bool[cols, rows];
-
-            var exits = new List<ExtractState>();
-            var movers = new List<ExtractState>();
+            // 「正在释放的管道轨迹」占据的最小 row：一个 sweep 内与本次的腾出/抢占无关，所以提到这里算一次
+            // 就够 —— 原来放在 CanExit 里，等于每颗像素重算一遍（§3.5 的 P9）。它只在步骤 0 里被读。
+            int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
 
             // 步骤 0：退出者（CanExit）无条件离开，腾出各自格子（不参与 wait 竞争）。
             // 按"前到后"排序，保证同一列前方退出后，后方也能在同一次 pass 里连锁退出。
@@ -692,7 +730,7 @@ namespace CrowdMatch
             });
             foreach (var st in seeds)
             {
-                if (CanExit(st.col, st.row, vacated, claimed, batch.matchedOccupied, batch))
+                if (CanExit(st.col, st.row, vacated, claimed, batch, minTrackRow))
                 {
                     exits.Add(st);
                     st.resolved = true;
@@ -710,7 +748,14 @@ namespace CrowdMatch
             // 蛇格：正在释放管道的轨道格（蛇形生成中的格子），按蛇头→蛇尾给出 rank。
             // 寻路时把蛇格降级为低优先级：优先用非蛇格（含迭代腾出的新空格），
             // 非蛇格全部判定完仍有 wait 块时，才按蛇头→蛇尾顺序允许进入蛇格。
-            var snakeOrder = new Dictionary<Vector2Int, int>();
+            // 用**按格索引的 int 掩码**（-1 = 非蛇格）而不是 Dictionary：层内排序的**每次比较**都要问
+            // 「这格是不是蛇格 / rank 多少」，字典查找在那里是最重的一项，掩码只是数组读。
+            // rank 的赋值顺序与原来逐字一致（按 pipes → snakeCells 的顺序，先到先得）；
+            // 多的那条 IsInRange 守卫只是掩码不能越界写 —— 原来进字典的越界格，排序时永远不会被问到
+            // （frontier 里的格必然在范围内），所以不影响结果。
+            for (int c = 0; c < cols; c++)
+                for (int r = 0; r < rows; r++)
+                    snakeRank[c, r] = -1;
             {
                 int rank = 0;
                 foreach (var pipe in _extractGroup.pipes)
@@ -720,14 +765,19 @@ namespace CrowdMatch
                     for (int i = 0; i < pipe.snakeCells.Count; i++)   // snakeCells 已按蛇头→蛇尾顺序
                     {
                         var c = pipe.snakeCells[i];
-                        if (!snakeOrder.ContainsKey(c))
-                            snakeOrder[c] = rank++;
+                        if (!_extractGroup.IsInRange(c.x, c.y))
+                            continue;
+                        if (snakeRank[c.x, c.y] >= 0)
+                            continue;
+                        snakeRank[c.x, c.y] = rank++;
                     }
                 }
             }
 
             // 种子：所有"当前可被填"的格（起始空位 + 退出者刚腾出的格）。IsObstacle 取反 = 可填。
-            var frontier = new List<Vector2Int>();
+            var frontier = _sweepFrontier;
+            var nextFrontier = _sweepFrontierNext;
+            frontier.Clear();
             for (int c = 0; c < cols; c++)
                 for (int r = 0; r < rows; r++)
                     if (!IsObstacle(c, r, vacated, claimed, batch.matchedOccupied, batch))
@@ -738,31 +788,13 @@ namespace CrowdMatch
             // 填入后，像素腾出的旧格进入下一层，形成波前连续推进。
             while (frontier.Count > 0)
             {
-                frontier.Sort((a, b) =>
-                {
-                    bool sa = snakeOrder.ContainsKey(a);
-                    bool sb = snakeOrder.ContainsKey(b);
-                    if (sa != sb)
-                        return sa ? 1 : -1;                     // 非蛇格优先
+                // 层内顺序：非蛇格优先 → 蛇格按蛇头→蛇尾 → 距出口更近 → row → col。
+                // 比较器提成缓存的实例方法：原来的原地 lambda 捕获了 snakeOrder 与 dist，
+                // **每进一层 while 就新建一个闭包 + 一个委托**；比较键逐字未改，所以层内顺序不变。
+                frontier.Sort(_frontierCompare);
 
-                    if (sa)                                      // 蛇格内部：蛇头→蛇尾
-                    {
-                        int ra = snakeOrder[a];
-                        int rb = snakeOrder[b];
-                        if (ra != rb)
-                            return ra.CompareTo(rb);
-                    }
-
-                    int d = dist[a.x, a.y].CompareTo(dist[b.x, b.y]);
-                    if (d != 0)
-                        return d;
-                    int z = a.y.CompareTo(b.y);
-                    if (z != 0)
-                        return z;
-                    return a.x.CompareTo(b.x);
-                });
-
-                var next = new List<Vector2Int>();
+                var next = nextFrontier;
+                next.Clear();
                 foreach (var cell in frontier)
                 {
                     if (claimed[cell.x, cell.y])
@@ -802,7 +834,9 @@ namespace CrowdMatch
                     winner.pendingNext = cell;
                     claimed[cell.x, cell.y] = true;
                 }
+                var swap = frontier;
                 frontier = next;
+                nextFrontier = swap;   // 下一次迭代的 next 就是刚腾出来的那个缓冲
             }
 
             // 未解决的球：等待计数 +1（公平性：被挡得越久，下次越优先）
@@ -872,7 +906,7 @@ namespace CrowdMatch
         }
 
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
-        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, bool[,] matchedOccupied, Batch batch)
+        private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, Batch batch, int minTrackRow)
         {
             // 【离场时机 · 可选模式】exitOnlyFromRow0：只有站在最前排（row 0）才允许离场 —— 先把像素
             // 一路导到最前排，再从那里飞出去。关上（默认）是现状：同列前方全空就能在任意 row 直接离场。
@@ -890,7 +924,7 @@ namespace CrowdMatch
             // 只有 row 小于「正在释放管道」轨迹占据的 row 最小值时才离场：
             // 提取球必须走到管道轨迹的最前排之前（row 更小）才算真正越过管道，方可离场。
             // 不再考虑像素是否恰好落在某条管道轨迹格上。
-            int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
+            // ↑ 下面这行现在由 SweepOnce 开头算一次后传进来（本 sweep 内它恒定），不再每颗像素重算一遍。
             // 管道轨迹触及首排（minTrackRow == 0）时，「越过管道（row < 0）」不可能成立，
             // 放宽为仅按前方无障碍判定离场，避免整批像素死锁（此时由蛇头 WaitUntilCellFree 协调冲突）。
             if (minTrackRow > 0 && row >= minTrackRow)
@@ -899,7 +933,7 @@ namespace CrowdMatch
             for (int r = 0; r < row; r++)
             {
                 // 前方任何一格对本批是障碍（含「不是本批来路的倍乘门门格」）→ 不能从这里离场
-                if (IsObstacle(col, r, vacated, claimed, matchedOccupied, batch))
+                if (IsObstacle(col, r, vacated, claimed, batch.matchedOccupied, batch))
                     return false;
             }
             return true;
@@ -1055,15 +1089,16 @@ namespace CrowdMatch
         /// 这是"移动方向"的唯一依据——像素每 tick 只朝 dist 更小的邻格走一步，从而在拐角处
         /// 紧跟前面刚腾出的格子，而不是等整条走廊都清空才动。
         /// </summary>
-        private int[,] ComputeExitDistance(int cols, int rows, Batch batch)
+        private void ComputeExitDistance(int[,] dist, int cols, int rows, Batch batch)
         {
             const int INF = 1000000;
-            var dist = new int[cols, rows];
+            // 直接写进调用方给的那张复用网格（下面的初始化会把每格都写成 INF，所以复用不需要额外清尾）。
             for (int c = 0; c < cols; c++)
                 for (int r = 0; r < rows; r++)
                     dist[c, r] = INF;
 
-            var queue = new Queue<Vector2Int>();
+            var queue = _sweepDistQueue;
+            queue.Clear();
             for (int c = 0; c < cols; c++)
             {
                 if (IsEmptyForExtraction(c, 0, batch))
@@ -1073,15 +1108,13 @@ namespace CrowdMatch
                 }
             }
 
-            int[] dx = { 0, 0, 1, -1 };
-            int[] dz = { 1, -1, 0, 0 };
             while (queue.Count > 0)
             {
                 var cur = queue.Dequeue();
                 for (int d = 0; d < 4; d++)
                 {
-                    int nx = cur.x + dx[d];
-                    int nz = cur.y + dz[d];
+                    int nx = cur.x + Dx4[d];
+                    int nz = cur.y + Dz4[d];
                     if (!_extractGroup.IsInRange(nx, nz))
                         continue;
                     if (dist[nx, nz] != INF)
@@ -1092,7 +1125,6 @@ namespace CrowdMatch
                     queue.Enqueue(new Vector2Int(nx, nz));
                 }
             }
-            return dist;
         }
 
         /// <summary>
@@ -1105,12 +1137,10 @@ namespace CrowdMatch
             ExtractState best = null;
             int myDist = dist[col, row];
 
-            int[] dx = { 0, 0, 1, -1 };
-            int[] dz = { 1, -1, 0, 0 };
             for (int d = 0; d < 4; d++)
             {
-                int nx = col + dx[d];
-                int nz = row + dz[d];
+                int nx = col + Dx4[d];
+                int nz = row + Dz4[d];
                 if (!_extractGroup.IsInRange(nx, nz))
                     continue;
 
@@ -1143,6 +1173,58 @@ namespace CrowdMatch
             if (dc != 0)
                 return dc;
             return a.col.CompareTo(b.col);
+        }
+
+        /// <summary>
+        /// <see cref="SweepOnce"/> 里 frontier 的层内排序：非蛇格优先 → 蛇格按蛇头→蛇尾 → 距出口更近 → row → col。
+        /// **比较键与原来那段原地 lambda 逐字一致**，所以层内顺序（进而每格被谁填）不变。
+        /// 提成实例方法的原因：原来那个 lambda 捕获了 snakeOrder 与 dist，**每进一层 while 就新建一个闭包 + 一个委托**；
+        /// 状态改放 <see cref="_sweepDist"/> / <see cref="_sweepSnakeRank"/> 后，一个缓存的委托就能反复用。
+        /// 蛇格那两项也从 <c>Dictionary&lt;Vector2Int,int&gt;</c> 的两次查找换成了数组读。
+        /// </summary>
+        private int CompareFrontier(Vector2Int a, Vector2Int b)
+        {
+            int ra = _sweepSnakeRank[a.x, a.y];
+            int rb = _sweepSnakeRank[b.x, b.y];
+            bool sa = ra >= 0;
+            bool sb = rb >= 0;
+            if (sa != sb)
+                return sa ? 1 : -1;                     // 非蛇格优先
+
+            if (sa && ra != rb)                          // 蛇格内部：蛇头→蛇尾
+                return ra.CompareTo(rb);
+
+            int d = _sweepDist[a.x, a.y].CompareTo(_sweepDist[b.x, b.y]);
+            if (d != 0)
+                return d;
+            int z = a.y.CompareTo(b.y);
+            if (z != 0)
+                return z;
+            return a.x.CompareTo(b.x);
+        }
+
+        /// <summary>取一张尺寸正确的复用 int 网格（尺寸不符就重建；内容由调用方自己重置）。</summary>
+        private static int[,] EnsureIntGrid(ref int[,] buf, int cols, int rows)
+        {
+            if (buf == null || buf.GetLength(0) != cols || buf.GetLength(1) != rows)
+                buf = new int[cols, rows];
+            return buf;
+        }
+
+        /// <summary>取一张尺寸正确的复用 bool 网格（尺寸不符就重建；内容由调用方自己重置）。</summary>
+        private static bool[,] EnsureBoolGrid(ref bool[,] buf, int cols, int rows)
+        {
+            if (buf == null || buf.GetLength(0) != cols || buf.GetLength(1) != rows)
+                buf = new bool[cols, rows];
+            return buf;
+        }
+
+        /// <summary>取一张尺寸正确的复用 <see cref="ExtractState"/> 网格（尺寸不符就重建；内容由调用方自己清空）。</summary>
+        private static ExtractState[,] EnsureStateGrid(ref ExtractState[,] buf, int cols, int rows)
+        {
+            if (buf == null || buf.GetLength(0) != cols || buf.GetLength(1) != rows)
+                buf = new ExtractState[cols, rows];
+            return buf;
         }
 
         /// <summary>计算入口边落位点：保持横向位置、按入口宽度 clamp（不瞬移）</summary>

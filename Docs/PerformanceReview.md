@@ -1,10 +1,10 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**分析 + 已落地 9 处改动**（P3 / P4 / P5 / P6 / P7 / P10 / P11 / P12，见下）。
+> 状态：**分析 + 已落地 11 处改动**（P3 / P4 / P5 / P6 / P7 / P8 / P9 / P10 / P11 / P12，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **已改码（9 处，两个程序集离线编译均 0 错误）**：
+> - **已改码（11 处，两个程序集离线编译均 0 错误）**：
 >   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
 >   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
 >   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
@@ -25,7 +25,12 @@
 >   那两行只在**真有冰组融化**时才走到（§2.5 的 ⚠️），该条**作废**；
 >   **P6** `SameColorMergeWatcher.Notify`：新增「无新像素↔同色可见旧像素 4 邻对就返回」的**等价早退**、
 >   连通块标号改**按格索引**（内层 2400 次哈希查找 → 数组读）、全部缓冲（含每标签的成员列表）**static 复用**
->   —— 每次事件的分配与哈希都降到 0（§2.6）。
+>   —— 每次事件的分配与哈希都降到 0（§2.6）；
+>   **P8 + P9** `CrowdBufferZone.SweepOnce` / `CanExit`（同一段代码，一起做）：`int[]{…}` 提静态只读、
+>   `snakeOrder` 字典改**按格 `int[,]` 掩码**、比较器从 lambda 提成**实例方法**（消掉每层的闭包 + 委托）、
+>   该段全部容器改成员复用，`ComputeExitDistance` 改成填调用方给的缓冲；`CanExit` 的 `minTrackRow`
+>   提到 sweep 开头算一次 —— **每 sweep 的分配与哈希都降到 0，且层内顺序逐字不变**（§3.4 / §3.5）。
+>   `MustWalkToGate` 那半**经核对是负优化，未做**（§3.5 更正）。
 >   **P4 的回溯预算那部分（原 §7 第 13 条）未做** —— 每关最多跑 4 次，先量化再定。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
@@ -64,8 +69,8 @@
 | P5 | `PixelGroup.RefreshExposed()` 每次点击整盘重算（6 个全网格 pass + 每同色连通块一对容器） | 每次点击 | ✅ **已处理**：`O(格数×管道数)` 那层已消（管道掩码）＋ 全部缓冲改成员复用（每次点击分配 63~195 个容器 → 0） | §2.5 |
 | P6 | `SameColorMergeWatcher.Notify()` 每次事件整盘重算（全网格扫描 + 两遍连通块 + ~10~15 KB） | 每次动态事件（每关 10~40 次） | ✅ **已处理**：早退 + 标签改按格索引 + 缓冲全复用（哈希与分配降到 0）；「第二遍只跑受影响分量」未做 | §2.6 |
 | P7 | `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent<Rigidbody>()` | 每物理帧 × 每个物理像素 | ✅ **已处理**：改读 `PixelItem.bufferBody` 缓存 | §3.2 |
-| P8 | `SweepOnce()` 每次 sweep 大块分配 + 在 `while` 里 `Sort` | 每个提取 tick | 🟠 | §3.4 |
-| P9 | `CanExit()` 逐 seed 重算 `MinActivePipeTrackRow()` / `MustWalkToGate()` | 每个提取 tick × 每个像素 | 🟡 | §3.5 |
+| P8 | `SweepOnce()` 每次 sweep 的容器/`int[]` 分配 + 层内排序里每比较 2 次字典查找 + 每层闭包 | 每个提取 tick（~5 次/秒） | ✅ **已处理**：`int[]{…}` 提静态、`snakeOrder` 字典改按格掩码 + 比较器提成实例方法、容器全复用 —— 分配与哈希都降到 0，**层内顺序不变** | §3.4 |
+| P9 | `CanExit()` 逐 seed 重算 `MinActivePipeTrackRow()` / `MustWalkToGate()` | 每个提取 tick × 每个像素 | ✅ **已处理**：`minTrackRow` 提到 sweep 开头算一次；`MustWalkToGate` 那半**经核对是负优化，不做**（§3.5 更正） | §3.5 |
 | P10 | `ContainerGroup.Update → ProcessConsumption` 每帧扫车盘 —— **原判定的复杂度与建议均已更正**（实际远小于原估，且原建议的早退会破坏开盖） | 每帧 | ✅ **已处理**：外层循环裁到 `maxOpenRows` | §3.1 |
 | P11 | `GameController.UpdateCountText` 每帧字符串拼接 + 写 UI `Text` | 每帧 | ✅ **已处理**：值没变就不拼串 / 不赋值 | §3.6 |
 | P12 | `StepExtracting` 提取期间每帧 `new List<ExtractState>` + 同一像素重复读 `transform.position` | 提取期间每帧 | ✅ **已处理**：复用快照缓冲 + 位置读取 6→2 次（O(E²) 那层未做） | §3.3 |
@@ -84,7 +89,7 @@
 |---|---|---|
 | `ConveyorBelt.Update` | 推进相位 + 逐槽写 carrier / cell 的 position+rotation | `O(槽数 × 轨迹段数)` |
 | `ConveyorBeltZone.Update` | 逐槽圈数统计（+ 间隔触发的犯困 / 排队生气检查） | `O(槽数)` |
-| `CrowdBufferZone.Update` | `StepExtracting()` + `TryRelease()`（已改：快照缓冲复用 + 位置少读） | `O(批次×像素)`，见 §3.3 |
+| `CrowdBufferZone.Update` | `StepExtracting()` + `TryRelease()`（已改：快照缓冲复用 + 位置少读）；其中每 ~0.2 s（`extractSpeed=5`）会跑一次 `SweepOnce` 并行寻路（已改：分配与哈希归零，见 §3.4） | `O(批次×像素)`，见 §3.3 / §3.4 |
 | `CrowdBufferZone.FixedUpdate` | 逐物理像素设速度 + 转向（已改：读缓存的刚体，不再 `GetComponent`） | `O(物理像素)`，见 §3.2 |
 | `ContainerGroup.Update` | `ProcessConsumption()` 扫车盘（已改：只扫前 `maxOpenRows` 排） | `O(列×maxOpenRows²)`，见 §3.1 |
 | `GameController.Update` | 每帧刷两个 UI 文本（已改：值没变就不写） | 见 §3.6 |
@@ -174,7 +179,7 @@ Roslyn 会把它提到 `<PrivateImplementationDetails>` 里缓存，**不产生�
 | `debugOpenLog` | `BoxItem.cs:68` | **每次开箱尝试**（见 §2.4） | 中 |
 | `debugLog` | `ElevatorItem.cs:56` | 每次升降台推进 | 中 |
 
-**最严重的是 `debugMoveLog`**（`CrowdBufferZone.cs:760-772`）：
+**最严重的是 `debugMoveLog`**（`CrowdBufferZone.cs:807-818`）：
 
 ```csharp
 if (debugMoveLog && winner.item != null)
@@ -550,7 +555,7 @@ int rowLimit = Mathf.Min(rows, Mathf.Max(0, maxOpenRows));
 
 ### 3.2 P7 · `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent` ✅ **已处理**
 
-**位置**：`Gameplay/CrowdBufferZone.cs:455-503`
+**位置**：`Gameplay/CrowdBufferZone.cs:489-537`
 
 ```csharp
 private void FixedUpdate()
@@ -600,7 +605,7 @@ private void FixedUpdate()
 
 ### 3.3 P12 · `StepExtracting` 每帧分配 ✅ **已处理（并补齐了原判定漏掉的主项）**
 
-**位置**：`Gameplay/CrowdBufferZone.cs:517-626`
+**位置**：`Gameplay/CrowdBufferZone.cs:543-652`
 
 > **补充（2026-10-08）**：本节原来只写了那个 `List` 分配。重读调用链后发现，
 > **提取期间真正的主项是 `ApplyEntryQueue` 的 O(E²) 次 `transform.position` 读取**，不是那个 `List`。
@@ -673,83 +678,55 @@ exiting.Clear();
 
 ---
 
-### 3.4 P8 · `SweepOnce()` 每次 sweep 大块分配 + 在 `while` 里 `Sort` 🟠
+### 3.4 P8 · `SweepOnce()` 每次 sweep 的分配与层内排序 ✅ **已处理**
 
-**位置**：`Gameplay/CrowdBufferZone.cs:633-846`
+**位置**：`Gameplay/CrowdBufferZone.cs:675` 起（`SweepOnce`）
+**频率**：`_extractTickInterval = CellSizeZ / extractSpeed`（`extractSpeed` 默认 `5f`，未读 YAML）⇒ 约 **0.2 s 一次、即 ~5 次/秒**；只在有像素提取中时跑（`StepExtracting` 里 `tickTimer >= interval && !HasMovingPixel` 才调）。
 
-每次 sweep（每个提取 tick，默认 `_extractTickInterval` 一次）分配：
+**原来每次 sweep 的开销**：
 
-| 行 | 分配 |
+| 项 | 量级 |
 |---|---|
-| `:649` | `ComputeExitDistance` → `int[,] dist`（`cols × rows`，`:1043`） |
-| `:652` | `new ExtractState[cols, rows]` |
-| `:663` | `new bool[cols, rows]`（vacated） |
-| `:664` | `new bool[cols, rows]`（claimed） |
-| `:666-667` | `seeds` / `exits` / `movers` 三个 `List` |
-| `:698` | `new Dictionary<Vector2Int, int>`（snakeOrder） |
-| `:715` | `new List<Vector2Int>`（frontier） |
-| `:750` | 每一层波前再 `new List<Vector2Int>()`（next） |
+| 容器分配 | `ComputeExitDistance` 的 `int[,]` + `Queue`、`new ExtractState[,]`、`vacated`/`claimed` 两个 `bool[,]`、三个 `List`、`snakeOrder` 字典、`frontier` + **每层**一个 `next` ⇒ **每 sweep 8~20 个** |
+| **`int[]{…}` 局部数组字面量** | `ComputeExitDistance` 里 2 个；**`PickBestPixel` 里 2 个，而它每个 frontier 格调一次** ⇒ **每 sweep 几百次分配**（这一段数字最大的一项，原文档漏了） |
+| **`frontier.Sort` 的 lambda** | 捕获了 `snakeOrder` 与 `dist` ⇒ **每进一层 `while` 就新建一个闭包 + 一个委托**（层数十几层） |
+| **比较函数里的字典查找** | 每次比较 **2 次 `Dictionary<Vector2Int,int>`**；`snakeOrder` 通常为空，但 `ContainsKey` 仍要算 `Vector2Int` 的哈希 ⇒ 每 sweep 数千次 |
 
-**更值得注意的是算法结构**：`frontier.Sort(...)` 在 `:724` 的 `while (frontier.Count > 0)` **里面**（`:726`）：
+**（已改）三件，都逐字等价**：
 
-```csharp
-while (frontier.Count > 0)
-{
-    frontier.Sort((a, b) => {              // ← 每层重排整个 frontier
-        bool sa = snakeOrder.ContainsKey(a);   // ← 每次比较 2 次字典查找
-        bool sb = snakeOrder.ContainsKey(b);
-        ...
-        int d = dist[a.x, a.y].CompareTo(dist[b.x, b.y]);
-        ...
-    });
-    ...
-    frontier = next;                        // ← 换上一层
-}
-```
+1. **4 处 `int[]{…}` → `static readonly Dx4` / `Dz4`**（字段区 `:186`）。顺序**按原字面量原样保留**（那两处方法用的本来就是同一套 `{0,0,1,-1}` / `{1,-1,0,0}`）。
+2. **`snakeOrder` 字典 → 按格索引的 `int[,] snakeRank`**（`-1` = 非蛇格），并且**比较器从原地 lambda 提成实例方法 `CompareFrontier`**，委托实例缓存进 `_frontierCompare`。
+   比较键逐字未改（非蛇格优先 → 蛇格 rank → `dist` → row → col），**rank 的赋值顺序也没改**，所以**层内顺序不变** ⇒ 每格被谁填、进而落点与时序都不变。
+   唯一多出来的是给掩码补了一条 `IsInRange` 守卫（掩码不能越界写）—— 原来进字典的越界格在排序里永远不会被问到（`frontier` 里的格必然在范围内），所以无影响。
+3. **容器全部改成员复用**（字段区 `:175` 起）：`_sweepDist` / `_sweepStateAt` / `_sweepVacated` / `_sweepClaimed` / `_sweepSnakeRank` + `_sweepSeeds` / `_sweepExits` / `_sweepMovers` / `_sweepFrontier` / `_sweepFrontierNext` / `_sweepDistQueue`；`ComputeExitDistance` 改成**填调用方给的缓冲**（不再返回新数组）。
+   每次调用开头统一重置；`frontier` / `next` 用**两块缓冲互换引用**（`SweepOnce` 末尾 swap）。
+   前提是 **`SweepOnce` 不可重入** —— 它全程同步、不 yield，调出去的 `StartCellMove` / `SpawnGateClone` 只写字段与开协程，不会回调回它（这条写进了字段区注释）。
 
-- 每次 `Sort` 都**新建一个闭包对象 + 委托**（`(a,b)=>…` 捕获了 `snakeOrder` 和 `dist`）；
-- 比较函数里 **2 次 `Dictionary<Vector2Int,int>` 查找**，所以比较次数 × 2 次哈希；
-- 波前有 D 层就 `Sort` D 次，单次 `O(W log W)`。
-
-**另外**：`:698-712` 每 sweep 重建一次 `snakeOrder`，而它只随管道状态变化 —— 可以缓存到管道变化时。
-
-**建议（分两档）**：
-- **低风险档**：`dist` / `stateAt` / `vacated` / `claimed` 改成成员字段 + `Array.Clear` 复用；
-  `frontier` / `next` / `seeds` / `exits` / `movers` 改成员 `List` 复用。
-- **中等档**：把 `Sort` 移出 `while`（改成整个 sweep 一次排序 + 按层过滤），
-  或换成分层 bucket（`dist` 已经是整数，本身就适合按 `dist` 分桶，根本不需要比较排序）。
-  比较函数里把 `snakeOrder` 的字典查找换成「预先把 snake rank 写进一个 `int[,]`」。
-  这需要你先确认可以动这段逻辑。
+**没做、也不建议做**：把 `frontier.Sort` 换成分桶（`dist` 是整数，看起来很适合）。因为层内的**处理顺序是承重的** —— 循环里逐格 `if (claimed[...]) continue`、赢了就 `claimed[...] = true`，所以谁先处理决定了哪些格被谁占。换成任何「等价但不完全相同的排序」都会**改落点与时序**。
 
 ---
 
-### 3.5 P9 · `CanExit()` 里逐 seed 重算全 pipe / 全 gate 扫描 🟡
+### 3.5 P9 · `CanExit()` 里逐 seed 重算 ✅ **已处理（一半；另一半经核对是负优化）**
 
-**位置**：`Gameplay/CrowdBufferZone.cs:860-891`
+**位置**：`Gameplay/CrowdBufferZone.cs`（改动前 `:875-906`）
 
-`CanExit` 在 `:680` 的 `foreach (var st in seeds)` 里**每颗像素调一次**，而它内部每次都要：
+`CanExit` 在 `foreach (var st in seeds)` 里**每颗像素调一次**，原来内部每次都要重算三项：
 
-```csharp
-if (!exitOnlyFromRow0 && _extractGroup != null && _extractGroup.MustWalkToGate(col, row, out _))
-    return false;                                   // ← MustWalkToGate: 遍历所有门 (PixelGroup.cs:594-614)
+| 项 | 每次成本 | 处理 |
+|---|---|---|
+| `MustWalkToGate(col,row,out _)` | `O(门数)` 次**数组读**（`regionMask` / `cellMask`）—— 实测门 ≤ 4（14/166 关有门，总数 36） | **保留原样**，见下 |
+| `MinActivePipeTrackRow()` | `O(管道数 × 折点数)` —— 实测总折点 ≤ 50，且无管道在释放时只花 `O(管道数)` | **✅ 已提到 `SweepOnce` 开头算一次**，作为参数传进 `CanExit` |
+| `for (r < row) IsObstacle(...)` | `row × (4 次数组读 + 门格上的 1 次哈希)` | 不动（读 `vacated` / `claimed`，而它们在同一 tick 内会变，本来就不能预计算） |
 
-int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
-                                                    // ← MinActivePipeTrackRow: 遍历所有管道 × 所有点 (PixelGroup.cs:494-512)
+> **⚠️ 更正**：本节原文建议「`MustWalkToGate` 的『本格需不需要绕门』结果同样在 sweep 开头对全网格算一次掩码」——
+> 我算了一遍，**那是负优化，所以没做**。原写法每颗像素只花 `O(门数)` 次数组读，全 sweep 是 `E × 门数`；
+> 而一份全网格掩码要问 `cols × rows` 次。按 15×15、门 4、`E`（提取中像素数）三四十一档估：
+> **`E × 4 ≈ 120` 次读 vs `225 × 4 = 900` 次读** —— 掩码反而慢好几倍。而且 `CanExit` 只在「不勾 row0」
+> 模式下才需要这一条，掩码还得无条件建。同一段说明也写进了 `CanExit` 的注释，免得以后有人照旧文档改回去。
 
-for (int r = 0; r < row; r++)                       // ← 前方逐格 IsObstacle
-    if (IsObstacle(col, r, vacated, claimed, matchedOccupied, batch)) return false;
-```
-
-`IsObstacle`（`:986`）每格会调 `IsBlocked`（4 次数组查，便宜）+
-`IsGateBlockedFor`（`PixelGroup.cs:655`，内部 `HashSet<GateItem>.Contains`）。
-
-**合计**：`O(像素数 × (门数 + 管道数×点数 + 排数))` **每个 sweep**。其中
-`MinActivePipeTrackRow()` 的结果在一次 sweep 内是**常量**（vacated/claimed 不影响它），
-却每颗像素重算一遍。
-
-**建议**：把 `minTrackRow` 提到 sweep 开头算一次（纯搬移，零风险）；
-`MustWalkToGate` 的「本格需不需要绕门」结果同样在 sweep 开头对全网格算一次掩码。
-这两条都是搬移 + 缓存，**不改语义**。
+**顺带更正量级**：原文把这条写成 `O(像素数 × (门数 + 管道数×点数 + 排数))` —— 量级没错，但代进真实数值后，
+它是 P8/P9 里**较小**的一项（门 ≤ 4、管道总折点 ≤ 50，而且全是数组读）。这条里真正有价值的就是
+`minTrackRow` 那一处搬移；`IsObstacle` 的逐格扫描是必须的。
 
 ---
 
@@ -982,11 +959,12 @@ private void UpdateCountText()
 ## 7. 建议的动手顺序
 
 > **状态更新（2026-10-08）**：
-> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）、第 9 条（P4）、
->   第 10 条（P3）、第 14 条（P5）、第 16 条（P5）、第 17 条（P6）—— 见各条的 §
+> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 6 条（P9）、第 7 条（P12）、
+>   第 9 条（P4）、第 10 条（P3）、第 12 条（P8）、第 14 条（P5）、第 16 条（P5）、第 17 条（P6）—— 见各条的 §
 > - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
-> - **✅ 原描述作废、不做**：第 4 条（P5）—— 「`NotifyClickMovedOut` 每次点击重复算冰状态」不成立，
->   那两行只在真有冰组融化时才走到（§2.5 更正）
+> - **✅ 原描述作废、不做**：第 4 条（P5，「每次点击重复算冰状态」不成立，§2.5 更正）；
+>   第 11 条（P8，`frontier.Sort` 移出 `while` 会改层内处理顺序 ⇒ 改落点与时序，§3.4）；
+>   第 6 条的另一半（P9，`MustWalkToGate` 对全网格算掩码是**负优化**，§3.5 更正）
 > - **已定方案、未改码**：第 15 条（P13，`IceItem` 仅关卡开始重建，见 §4.1）
 > - **只做了一半**：第 7 条（P12）的 `ApplyEntryQueue` O(E²) 那层**未做**，先测 E 再定（§3.3）；
 >   第 9·13 条（P4）的回溯预算那层**未做**，同上先量化（§2.4）
@@ -1011,9 +989,9 @@ private void UpdateCountText()
 
 | # | P# | 改动 | 位置 |
 |---|---|---|---|
-| 5 | **P7** | `PixelItem` 缓存 `Rigidbody`，消掉物理帧里的 `GetComponent` —— **✅ 已处理**（§3.2） | `CrowdBufferZone.cs:472` + `PixelItem.cs` + `:1421` |
-| 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 | `CrowdBufferZone.cs:878` |
-| 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/534` |
+| 5 | **P7** | `PixelItem` 缓存 `Rigidbody`，消掉物理帧里的 `GetComponent` —— **✅ 已处理**（§3.2） | `CrowdBufferZone.cs:1349` + `PixelItem.cs` + `:1518` |
+| 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 —— **✅ 已处理**；另一半「`MustWalkToGate` 全网格掩码」**经核对是负优化，不做**（§3.5 更正） | `CrowdBufferZone.cs:720` |
+| 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/560` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |
 | 9 | **P4** | ~~「把空格判定提到建容器之前」~~ —— **原描述不成立**：`available` 本身要靠 `connected` 的 BFS 数出来，判定提不上去（§2.4 更正）。实做三件：`score` 字典（`:392`）与 `body` 格子列表（`:390`）挪到就绪判定之后、计数改用 `BodyCount` ＋ `CollectConnectedEmpty` 加 `adjacent.Count == 0` 早退（`:471`）＋ `IsActivePipeBlocked` 缓存掩码（与第 14 条同一改动）—— **✅ 已处理** | `BoxItem.cs:363-392`、`:471` + `PixelGroup.cs:441` |
 | 10 | **P3** | ~~`LevelLoader` 合并为一次 `RebuildGrid`~~ **原方案作废**（中间两步承重，见 §2.3）。实做：删掉「无读者」的四步刷新 —— **✅ 已处理**，每次进关 `RebuildGrid` 8 → 4 次 | `LevelLoader.cs:48-80` |
@@ -1022,8 +1000,8 @@ private void UpdateCountText()
 
 | # | P# | 改动 | 需要你确认什么 |
 |---|---|---|---|
-| 11 | **P8** | `SweepOnce` 的 `Sort` 移出 `while`、`dist`/`snakeOrder` 预计算 | 允许改这段寻路结构？ |
-| 12 | **P8** | `SweepOnce` 的数组改复用 / 按 `dist` 分桶代替比较排序 | 同上 |
+| 11 | **P8** | ~~`SweepOnce` 的 `Sort` 移出 `while`~~ —— **不做**：层内的处理顺序是承重的（`claimed` 栅栏决定哪个格被哪个像素占），换排序会改落点与时序（§3.4） | — |
+| 12 | **P8** | `SweepOnce` 的容器/数组改复用 + `snakeOrder` 字典改按格掩码 + 比较器提成实例方法 —— **✅ 已处理**（§3.4）。~~按 `dist` 分桶代替比较排序~~ **不做**（同第 11 条） | `CrowdBufferZone.cs:675` |
 | 13 | **P4** | `BoxItem` 的 `CanonicalKey` 去分配 —— **未做**。①「给 `TryOpen` 加结果缓存」**已否决**（每次点击盘面必变，命中率 0）；② 先加「本次回溯消耗了多少预算」的计数，跑几关看是否真被打满（每关最多跑 4 次，见 §2.4 更正） | 允许改回溯的键编码？ |
 | 14 | **P5** | ~~`RefreshExposed` 的活跃管道掩码预计算~~ —— **✅ 已处理**（`PixelGroup._activePipeMask` + `EnsureActivePipeMask`），与第 9 条是**同一处改动**：P4 的箱内 BFS、P5 的整盘 BFS、`GameController:1126` 的邻域扫描同时受益，**语义逐字不变**（§2.4 的 (a′) + §2.5） | `PixelGroup.cs:441` |
 | 15 | **P13 · P14** | **P13 已定方案**：`IceItem` 改为**仅关卡开始时重建一次，去掉融化路径上的动态重建**（保留「化完移除冰面」，见 §4.1 定案）。`EmojiManager` / `IceItem` 另可把层级解析结果缓存到实例 | P13 见 §4.1；P14 需先确认池化回收时不清组件（§6.4） |
@@ -1056,8 +1034,8 @@ private void UpdateCountText()
 | 同色合并判定 | `Gameplay/SameColorMergeWatcher.cs` | `Notify`(74) / `AnyMergePair`(227) / `LabelComponents`(259) |
 | 每帧车盘扫描 | `Gameplay/ContainerGroup.cs` | `Update`(357) / `ProcessConsumption`(362) / `IsOpen`(315) / `IsRowReleased`(337) |
 | 物理帧驱动 | `Gameplay/CrowdBufferZone.cs` | `FixedUpdate`(455) / `DetachPhysics`(1421) |
-| 提取推进 | `Gameplay/CrowdBufferZone.cs` | `StepExtracting`(507) / `HasGridPathfindingPixels`(200) |
-| 寻路 sweep | `Gameplay/CrowdBufferZone.cs` | `SweepOnce`(633) / `ComputeExitDistance`(1043) / `PickBestPixel`(1088) / `CanExit`(860) / `IsObstacle`(986) |
+| 提取推进 | `Gameplay/CrowdBufferZone.cs` | `StepExtracting`(543) / `HasGridPathfindingPixels`(234) |
+| 寻路 sweep | `Gameplay/CrowdBufferZone.cs` | `SweepOnce`(674) / `CompareFrontier`(1185) / `ComputeExitDistance`(1092) / `PickBestPixel`(1135) / `CanExit`(909) / `IsObstacle`(1035) |
 | 门 / 管道全扫 | `Gameplay/PixelGroup.cs` | `MustWalkToGate`(594) / `MinActivePipeTrackRow`(494) / `GateAt`(565) / `IsGateBlockedFor`(655) / **`IsActivePipeBlocked`(441) + `EnsureActivePipeMask`(457)**（缓存掩码，见 §2.4 (a′)）/ `RebuildGrid`(205) |
 | UI 每帧文本 | `Gameplay/GameController.cs` | `Update`(871) / `UpdateCountText`(881) |
 | 传送带驱动 | `Gameplay/Conveyor/ConveyorBelt.cs` | `Update`(212) / `ApplyPositions`(276) / `ApplyCellPositions`(321) / `CheckLeave`(355) / `OccupiedCount`(443) |
