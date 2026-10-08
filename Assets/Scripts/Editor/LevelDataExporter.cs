@@ -281,8 +281,8 @@ namespace CrowdMatch
             var walls = new List<LevelData.WallData>();
             foreach (var wall in pg.GetComponentsInChildren<WallItem>())
             {
-                if (wall == null || wall.points == null || wall.points.Count < 2)
-                    continue;
+                if (wall == null || wall.points == null || wall.points.Count < 1)
+                    continue;   // 1 个端点 = 1×1 墙，也要导出
                 walls.Add(new LevelData.WallData { points = wall.points.ToArray(), closed = wall.closed });
             }
             data.walls = walls.ToArray();

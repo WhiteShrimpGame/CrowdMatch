@@ -48,9 +48,9 @@ namespace CrowdMatch
                 colorId => GridFillUtility.RemoveAndFillPixels(
                     wallGo, group, cells, colorId, "移除墙体并填充 Pixel"));
 
-            if (wall.points == null || wall.points.Count < 2)
+            if (wall.points == null || wall.points.Count < 1)
             {
-                EditorGUILayout.HelpBox("至少需要 2 个端点才能构成一段墙体。", MessageType.Info);
+                EditorGUILayout.HelpBox("至少需要 1 个端点：1 个端点 = 1×1 墙，2 个及以上 = 线段墙体。", MessageType.Info);
                 return;
             }
 
@@ -121,6 +121,7 @@ namespace CrowdMatch
 
             wall.closed = true;
             group.RebuildGrid();
+            group.RebuildWallVisuals();   // 闭合段可能正好接到别的墙上 → 整组重判墙块
             if (Application.isPlaying)
                 group.RefreshExposed();
             EditorUtility.SetDirty(wall);
@@ -146,6 +147,7 @@ namespace CrowdMatch
             if (group != null)
             {
                 group.RebuildGrid();
+                group.RebuildWallVisuals();   // 去掉闭合段后，接在它上面的交叉块要退回
                 if (Application.isPlaying)
                     group.RefreshExposed();
                 EditorUtility.SetDirty(group);

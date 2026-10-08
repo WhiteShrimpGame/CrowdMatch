@@ -59,6 +59,12 @@ namespace CrowdMatch
         [Tooltip("墙体独立 1×1 预制体（占一格，无相邻墙格，可视觉溢出边界）")]
         public GameObject wallSinglePrefab;
 
+        [Tooltip("墙体 T 字交叉预制体（占一格，三向有墙；0° 朝向约定见 Docs/WallJunctionDesign.md §10-Q1）")]
+        public GameObject wallTeePrefab;
+
+        [Tooltip("墙体十字交叉预制体（占一格，四向有墙；按四向对称设计，不旋转）")]
+        public GameObject wallCrossPrefab;
+
         [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
         public GameObject pipePrefab;
 
@@ -425,6 +431,14 @@ namespace CrowdMatch
             return min;
         }
 
+        /// <summary>
+        /// 箱子释放（<see cref="BoxItem.TryOpen"/>）判定用的「空」：无像素 / 非障碍，
+        /// **且不被「还有未释放波次」的管道轨迹覆盖** —— 那几格是管道下一波要占的，**管道优先**：
+        /// 箱子若把释放出来的像素放到轨道上，管道就该因轨道被占而放不出下一波了（两者抢同一批空格）。
+        /// 判据与 <see cref="IsEmptyForExposure"/> 相同（活跃管道轨迹 = 阻挡，理由见那里的注释）。
+        /// </summary>
+        public bool IsEmptyForBoxRelease(int col, int row) => IsEmptyForExposure(col, row);
+
         /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
         public bool IsEmptyForExposure(int col, int row)
         {
@@ -729,6 +743,9 @@ namespace CrowdMatch
         ///   · 「使之暴露的那一次点击」也不消耗 —— 那一刻按点击前的状态它仍未暴露。
         ///
         /// 只有真有冰组融化到 0 时才重建（冰面 / 冻结掩码 / 暴露），避免每次点击都跑全网格刷新。
+        ///
+        /// **刚化开的组内像素**算一次「新揭示」（它们的颜色之前被冰盖着看不见）：交给
+        /// <see cref="SameColorMergeWatcher"/> 判定是否与旁边的同色已显色区域连成一片，命中就播惊讶表情。
         /// </summary>
         public void NotifyClickMovedOut()
         {
@@ -736,6 +753,7 @@ namespace CrowdMatch
                 return;
 
             bool anyMelted = false;
+            List<PixelItem> thawed = null;       // 本次刚化开的组内像素（颜色才变可见）
             for (int i = 0; i < iceGroups.Count; i++)
             {
                 var ice = iceGroups[i];
@@ -749,6 +767,7 @@ namespace CrowdMatch
                 {
                     anyMelted = true;
                     ice.PlayMeltEffect();        // 刚化开：生成融化特效 + 播音效（冰上自己配 tag）
+                    CollectIcePixels(ice, ref thawed);
                 }
                 else
                     ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
@@ -762,6 +781,28 @@ namespace CrowdMatch
                 if (iceGroups[i] != null)
                     iceGroups[i].BuildVisual(this);
             RefreshExposed();   // 冰化开后组内像素要立刻恢复可点
+
+            // 冰化开 = 一批像素的颜色刚变可见：与旁边同色已显色区域连成一片时播惊讶表情。
+            // 放在 RefreshExposed 之后：那时冻结掩码已撤、这些像素才算「可见」。
+            if (thawed != null)
+                SameColorMergeWatcher.Notify(this, thawed);
+        }
+
+        /// <summary>收集该冰组成员格上当前仍在网格里的像素（融化瞬间用来判定「新揭示的一批」）。</summary>
+        private void CollectIcePixels(IceItem ice, ref List<PixelItem> outPixels)
+        {
+            if (ice == null || grid == null)
+                return;
+
+            foreach (var cell in ice.CellSet)
+            {
+                if (!IsInRange(cell.x, cell.y))
+                    continue;
+                var p = grid[cell.x, cell.y];
+                if (p == null)
+                    continue;
+                (outPixels ??= new List<PixelItem>()).Add(p);
+            }
         }
 
         // ===== 木箱 =====
@@ -780,6 +821,17 @@ namespace CrowdMatch
         /// （Record 模式不走拆箱计数，见 <c>GameController.ResolveMatch</c> 的提前返回）。
         /// </summary>
         [System.NonSerialized] public bool recordRevealCrates;
+
+        /// <summary>
+        /// 「同色连成一片」惊讶表情的**抑制开关**（口径见 Docs/EmojiSurpriseMergeDesign.md）：true 时
+        /// <see cref="SameColorMergeWatcher.Notify"/> 直接返回。
+        ///
+        /// 由 <c>GameController.InitLevel</c> 在关卡加载期间置 true、首次 <see cref="RefreshExposed"/> 之后复位。
+        /// 不抑制的话：开局就贴着首排 / 连着出口空格的问号像素会在首次 <see cref="RefreshExposed"/> 里
+        /// 当场揭晓 —— 那不是「动态事件」，却会撒一片惊讶表情。**必须在 <c>LevelLoader.Apply</c> 之前写入**
+        /// （那一步的 RebuildGrid 与随后的 RefreshExposed 都会读它）。
+        /// </summary>
+        [System.NonSerialized] public bool suppressMergeSurprise;
 
         /// <summary>
         /// 该格所属的木箱（口径与 <see cref="crateMask"/> 一致：已拆掉、且已过放大阶段的木箱不再算）；无则 null。
@@ -1172,6 +1224,11 @@ namespace CrowdMatch
             }
 
             // 4. 应用到各像素
+            //    顺带收集「本次调用里由未揭晓 → 揭晓」的问号像素：揭晓等于把一批颜色显出来，
+            //    若它们与旁边的同色已显色区域连成一片，要各播一个惊讶表情（见 SameColorMergeWatcher）。
+            //    判定放在循环之后（那时 SetExposed 已跑完、材质已换成原色）。isQuestion / revealed 都是托管字段，
+            //    在调用前预判与 SetExposed 内部那一句等价。
+            List<PixelItem> newlyRevealed = null;
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -1179,9 +1236,17 @@ namespace CrowdMatch
                     var item = grid[c, r];
                     if (item == null)
                         continue;
+
+                    bool revealing = item.isQuestion && !item.revealed && active[c, r];
                     item.SetExposed(active[c, r]);
+                    if (revealing)
+                        (newlyRevealed ??= new List<PixelItem>()).Add(item);
                 }
             }
+
+            // 问号揭晓作为一次独立的「新揭示」事件（与生产者自己的那批互不影响，各判各的）
+            if (newlyRevealed != null)
+                SameColorMergeWatcher.Notify(this, newlyRevealed);
         }
 
         /// <summary>清空所有 PixelItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
@@ -1368,8 +1433,63 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 重建所有墙块。
+        ///
+        /// 分类口径（见 <see cref="WallItem.AccumulateArms"/>）：**按线段连接关系给格累加臂掩码** ——
+        /// 只看「哪条线段真的经过这一格」，不看「谁的格子挨着」。于是：
+        /// ① 两面墙真正穿过同一格（或同一面墙的两段穿过）⇒ 叠成 T / 十字；
+        /// ② 相邻但各是各的（两面墙首尾相接、或同一面墙折返贴着自己）⇒ 各自独立成型，端点不会消失。
+        ///
+        /// 为什么要整组重来：新建一面墙会让**已有墙**在共享格上的块类型变化（端点 → T、边 → 十字），
+        /// 删除时反向退回。所以「建墙 / 删墙 / 闭环 / 关卡导入 / 撤销」这几处都要整组重建一次
+        /// （见 Docs/WallJunctionDesign.md §5.4、§6）。
+        ///
+        /// 重叠格归「层级顺序最先出现的那面墙」；归属只决定「块挂在谁名下」，
+        /// 掩码与归属无关，所以删掉归属者后重建会自动补回。
+        ///
+        /// ⚠️ 不要挂进 PixelColorBrushWindow.RefreshSnapshot：那个函数由 hierarchyChanged 置脏驱动，
+        /// 而本函数会新建 / 销毁子物体、又触发 hierarchyChanged，会变成每帧重建（见文档 §5.5）。
+        /// </summary>
+        public void RebuildWallVisuals()
+        {
+            var walls = GetComponentsInChildren<WallItem>();
+            if (walls.Length == 0)
+                return;
+
+            // 全组共用一份臂掩码：跨墙与墙内同一条口径，不需要「谁覆盖了哪格」的簿记
+            var arms = new Dictionary<Vector2Int, int>();
+            foreach (var w in walls)
+            {
+                if (w == null)
+                    continue;
+                WallItem.AccumulateArms(w.points, w.closed, arms, IsInRange);
+            }
+
+            var rendered = new HashSet<Vector2Int>();
+            foreach (var w in walls)
+            {
+                if (w == null)
+                    continue;
+
+                w.ClearPieces();
+
+                foreach (var cell in w.EnumerateOccupiedCells())
+                {
+                    if (!IsInRange(cell.x, cell.y))
+                        continue;   // 越界格不画
+                    if (!rendered.Add(cell))
+                        continue;   // 已被前面的墙画过 → 一格只画一块
+
+                    arms.TryGetValue(cell, out int mask);   // 没有臂 = 1×1 墙 / 退化段 ⇒ 掩码 0
+                    var type = WallItem.ClassifyMask(mask, out float yaw);
+                    w.SpawnPiece(this, cell, type, yaw);
+                }
+            }
+        }
+
+        /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
-        /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
+        /// 并整组重建墙块（角/边/端点/独立 1×1/T 字/十字六类预制体）。
         /// closed = true 时额外补首尾闭合段。
         /// </summary>
         public WallItem SpawnWall(IList<Vector2> points, bool closed = false)
@@ -1381,7 +1501,8 @@ namespace CrowdMatch
             var wall = go.AddComponent<WallItem>();
             wall.points = new List<Vector2>(points);
             wall.closed = closed;
-            wall.BuildVisual(this);
+            wall.group = this;
+            RebuildWallVisuals();
             return wall;
         }
 

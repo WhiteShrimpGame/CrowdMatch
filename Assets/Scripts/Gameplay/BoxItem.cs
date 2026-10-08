@@ -10,6 +10,9 @@ namespace CrowdMatch
     /// 箱子（Box）：网格内一块矩形区域（左上 + 右下），内含若干隐藏 Pixel 并标注容量。
     /// 开箱前区域是障碍；当可用格（本体 + 相邻 + 连通）≥ 容量时开箱，把隐藏 Pixel 整体规划
     /// 释放到这些候选格（优先级：本体 > 相邻 > 连通距离），确保同色像素各自 4 方向连通。
+    /// **可用格的「相邻 / 连通」部分必须把「还有未释放波次的管道轨迹」排除在外（管道优先）**：
+    /// 那些格正是管道下一波要占的，箱子若先占上，管道就会因轨道被占而放不出下一波；
+    /// 排除之后若可用格 &lt; 容量，则本次不开箱，等管道这一波走完 / 波次耗尽再判。
     ///
     /// 释放表现（两段同一套节奏）：数字**在开箱那一刻**先隐藏；本体外与本体内 Pixel 都按
     /// 「从**箱子中心下方**出现 + Jump 跳到目标格」逐个冒出，**起跳点、Jump 参数、起跳间隔全部共用**
@@ -335,6 +338,8 @@ namespace CrowdMatch
         /// 尝试开箱：收集候选格（本体 + 相邻 4 方向 + 连通），满足触发条件（可用格 ≥ 容量）则
         /// 整体规划分配位置（同色像素各自连通），立即把释放的 Pixel 落到 grid
         /// （供多箱串行判定与后续逻辑看到），并启动两段开箱动画。返回是否实际开箱。
+        /// 「空」按 <see cref="PixelGroup.IsEmptyForBoxRelease"/> 判：**活跃管道的轨迹格不算可用**
+        /// （管道优先，见类注释）—— 于是管道要放的格子抢不走，管道不会被箱子堵住。
         /// </summary>
         public bool TryOpen()
         {
@@ -352,6 +357,7 @@ namespace CrowdMatch
             }
 
             // 1. 收集候选格：本体 + 相邻（上下左右 4 方向）+ 连通（相邻出发 4 方向 BFS 的空格）
+            //    「空」按 IsEmptyForBoxRelease 判：活跃管道的轨迹格不算 —— 管道优先（见类注释）
             var body = new List<Vector2Int>();
             EnumerateBody(body);
             var adjacent = CollectAdjacentEmpty();
@@ -415,7 +421,7 @@ namespace CrowdMatch
             return true;
         }
 
-        /// <summary>收集直接相邻空格（仅上下左右 4 方向，不含四角）。</summary>
+        /// <summary>收集直接相邻空格（仅上下左右 4 方向，不含四角）。活跃管道轨迹格不算（管道优先，见类注释）。</summary>
         private List<Vector2Int> CollectAdjacentEmpty()
         {
             var result = new List<Vector2Int>();
@@ -434,7 +440,7 @@ namespace CrowdMatch
                             continue;
                         if (IsInBody(nx, nz))
                             continue;
-                        if (!group.IsEmpty(nx, nz))
+                        if (!group.IsEmptyForBoxRelease(nx, nz))
                             continue;
                         var cell = new Vector2Int(nx, nz);
                         if (!result.Contains(cell))
@@ -448,6 +454,7 @@ namespace CrowdMatch
         /// <summary>
         /// 收集「连通空格」：从相邻格出发、只经上下左右 4 方向的空 BFS 扩散可达的空格
         /// （不含本体与相邻格本身）。返回每个格及其到相邻格的最短距离（0 起跳）。
+        /// 活跃管道轨迹格不算（管道优先，见类注释）。
         /// </summary>
         private List<(Vector2Int cell, int distance)> CollectConnectedEmpty(IReadOnlyList<Vector2Int> adjacent)
         {
@@ -483,7 +490,7 @@ namespace CrowdMatch
                         continue;
                     if (visited.Contains(nb))
                         continue;
-                    if (!group.IsEmpty(nx, nz))
+                    if (!group.IsEmptyForBoxRelease(nx, nz))
                         continue;
                     visited.Add(nb);
                     result.Add((nb, cur.dist + 1));
@@ -878,9 +885,14 @@ namespace CrowdMatch
             FinalizeRelease(assignments);
         }
 
-        /// <summary>全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。</summary>
+        /// <summary>
+        /// 全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）；
+        /// 最后把这批刚放出来的像素交给 <see cref="SameColorMergeWatcher"/> —— 与旁边同色已显色区域
+        /// 连成一片时播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。
+        /// </summary>
         private void FinalizeRelease(List<(PixelItem pixel, Vector2Int cell)> assignments)
         {
+            var released = new List<PixelItem>(assignments.Count);
             for (int i = 0; i < assignments.Count; i++)
             {
                 var pixel = assignments[i].pixel;
@@ -889,12 +901,19 @@ namespace CrowdMatch
                 // 已被后续匹配移出网格：不再处理（其 placing 标记无副作用，交由匹配流程接管）
                 if (!group.IsInRange(pixel.gridX, pixel.gridZ) || group.grid[pixel.gridX, pixel.gridZ] != pixel)
                     continue;
+                released.Add(pixel);
                 pixel.MarkPlaced();
                 pixel.SetClickable(true);
             }
 
             if (group != null)
+            {
                 group.RefreshExposed();
+
+                // 就位之后才判：此刻这批像素才算「已显色」，别的生产者还没落地的像素由
+                // 判定器的 placing 守卫排除在外（不会被误当成本次的「原有区域」）。
+                SameColorMergeWatcher.Notify(group, released);
+            }
         }
 
         /// <summary>

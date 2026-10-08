@@ -429,22 +429,167 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 一次「上车」的待播条目：由 <see cref="PrepareBoarding"/> 登记（扣容量 / 开盖 / 计数都已同步做完），
+        /// 之后既可立刻起播，也可排进复活队列按间隔延后起播（<see cref="PlayBoarding"/>）。
+        /// </summary>
+        public struct BoardingEntry
+        {
+            public PixelItem     pixel;
+            public ContainerItem car;             // null = 复活时无同色后排车：pop 后销毁
+            public int           col;             // 登记那一刻的车列（container.gridX）
+            public int           row;             // 登记那一刻的车行（container.gridZ）——复活跳跃组的排序主键
+            public int           seatIndex;       // 登记时预占的落点下标（-1 = 没抢到，回退旧处理）
+            public bool          jump;            // true = 跳车；false = 原地 pop 消失
+            public bool          isLast;          // 该车最后一颗
+            public bool          destroyInPlace;  // 装完即原地销毁 + 瞬间补位（仅 jump = false 时有意义）
+        }
+
+        /// <summary>
+        /// 复活批次的表现时长（全部来自 GameController 的「复活表现 · 单颗时长」）。
+        /// **每项 &lt;= 0 表示「用该处自己的既有默认值」**：正常玩法（传送带路径）传 <c>default</c>，
+        /// 于是逐字沿用 <c>ContainerItem</c> 预制体上的 <c>boardJumpDuration</c> / 弹性两段时长，
+        /// 以及 <c>DisappearWithPop</c> 的 0.2 / 0.2 —— 所以加这套参数不会动到正常玩法。
+        /// </summary>
+        public struct BoardingTiming
+        {
+            public float popDuration;              // 消失·放大阶段
+            public float shrinkDuration;           // 消失·缩小阶段
+            public float jumpDuration;             // 跳跃（DOLocalJump / DOLocalRotate）
+            public float elasticScaleDuration;     // 落地弹性放大
+            public float elasticRecoverDuration;   // 弹性复原
+        }
+
+        /// <summary>消失两段时长的兜底值（与 <c>DisappearWithPop</c> 的默认参数一致）。</summary>
+        private const float DefaultPopDuration = 0.2f;
+        private const float DefaultShrinkDuration = 0.2f;
+
+        /// <summary>
         /// 传送带推送模式：吸收一个像素——扣容量 → 像素上车（有空闲落点则 LocalJump + 弹性缩放并保留为乘客，否则回退 Lerp 后销毁）→ 若耗尽则补位。
-        /// 开头用 IsEmpty 兜底（见 review H1/M1），避免同帧竞态下重复消费。
+        /// 等价于「登记 + 立刻起播」（<see cref="PrepareBoarding"/> + <see cref="PlayBoarding"/>），行为与拆分前逐字一致。
         /// </summary>
         public void ConsumePixel(PixelItem pixel, ContainerItem container)
         {
-            if (pixel == null || container == null || container.IsEmpty)
+            var entry = default(BoardingEntry);
+            if (!PrepareBoarding(pixel, container, jump: true, ref entry))
                 return;
+            PlayBoarding(entry);
+        }
+
+        /// <summary>
+        /// 吸收一个像素的**登记部分**：扣容量 → 记「完成匹配」→ 耗尽则开后盖（跳车时还要通知最后一个像素准备上车）→
+        /// 上车计数 +1。**不起播任何动画**——动画统一由 <see cref="PlayBoarding"/> 负责。
+        ///
+        /// 复活路径正是靠这个拆分做到「匹配全部同步完成、动画按间隔依次起播」：
+        /// <see cref="MatchPixelsToCars"/> 只调本方法，把条目交给 GameController 排进队列错开起播。
+        /// **车行 / 车列 / 座位与两个判定（isLast / destroyInPlace）都在这一刻定死**：复活队列的起播可能
+        /// 延后若干秒，期间同列别的车出库会把本车挪走，届时再读 <c>container.gridX / gridZ</c> 就不对了。
+        /// 跳跃条目还要在这里把落点**预占**下来（<see cref="ContainerItem.ReserveSeatIndex"/>）——
+        /// 复活跳跃组要按「车行 → 车列 → 空位」排序依次起播，座位必须先于起播可知。
+        ///
+        /// 开头用 IsEmpty 兜底（见 review H1/M1），避免同帧竞态下重复消费；返回 false 表示本次未登记。
+        /// </summary>
+        private bool PrepareBoarding(PixelItem pixel, ContainerItem container, bool jump, ref BoardingEntry entry)
+        {
+            entry = default;
+            entry.pixel = pixel;
+            entry.car = container;
+            entry.jump = jump;
+
+            if (pixel == null || container == null || container.IsEmpty)
+                return false;
 
             bool isLast = ConsumeCar(container);
-            if (isLast)
+            if (jump)
             {
-                OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
-                OnLastBoarding(container, pixel);   // 最后一个像素准备上车
+                if (isLast)
+                {
+                    OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
+                    OnLastBoarding(container, pixel);   // 最后一个像素准备上车
+                }
+            }
+            else
+            {
+                // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车要再收紧一层，见 RopeCarBlocksInstantDestroy。
+                entry.destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !RopeCarBlocksInstantDestroy(container);
+                if (isLast)
+                    OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
             }
             consumingCount++;
-            StartCoroutine(MovePixelToContainer(pixel, container, container.gridX, isLast));
+
+            entry.isLast = isLast;
+            entry.col = container.gridX;
+            entry.row = container.gridZ;
+            entry.seatIndex = jump ? container.ReserveSeatIndex() : -1;
+            return true;
+        }
+
+        /// <summary>
+        /// 起播一个上车条目。三种形态：
+        /// · <c>car == null</c> —— 复活时无同色后排车：原地 pop 后销毁并计入已清除（<see cref="GameController.Revive"/> 的并入项）；
+        /// · <c>jump</c> —— 跳车（<see cref="MovePixelToContainer"/>：LocalJump + 弹性缩放，保留为乘客）；
+        /// · 其余 —— 深排原地消失后瞬移到目标车落点出现（<see cref="PlayInstantBoarding"/>）。
+        /// 对已销毁的像素做空守卫：复活队列的起播可能跨若干秒。
+        /// </summary>
+        /// <param name="timing">
+        /// 表现时长覆盖。正常玩法（传送带路径）不传（= <c>default</c>），逐字沿用预制体与扩展方法自己的默认值；
+        /// 复活路径传 GameController 上的复活专属参数，见 <see cref="BoardingTiming"/>。
+        /// </param>
+        public void PlayBoarding(BoardingEntry entry, BoardingTiming timing = default)
+        {
+            if (entry.pixel == null)
+                return;
+
+            if (entry.car == null)
+            {
+                // 原地消失（pop 1.1× → 缩到 0）后销毁：与深排上车的消失表现一致
+                PlayDisappear(entry.pixel, timing, () =>
+                {
+                    if (entry.pixel == null)
+                        return;
+                    GameData.ClearedPixelCount++;
+                    Destroy(entry.pixel.gameObject);
+                });
+                return;
+            }
+
+            if (entry.jump)
+                StartCoroutine(MovePixelToContainer(entry.pixel, entry.car, entry.col, entry.isLast, entry.seatIndex, timing));
+            else
+                PlayInstantBoarding(entry.pixel, entry.car, entry.col, entry.isLast, entry.destroyInPlace, timing);
+        }
+
+        /// <summary>
+        /// 按 <paramref name="timing"/> 播「消失」（&lt;= 0 的项退回 <c>DisappearWithPop</c> 的默认 0.2 / 0.2）。
+        ///
+        /// **完成消失才把像素从来源（传送带槽位 / 缓冲区）摘下来** —— 消失期间保持原来的父物体，
+        /// 继续跟随传送带移动 / 被缓冲区物理推挤；摘除之后才执行 <paramref name="onComplete"/>
+        /// （切父物体上车 / 销毁）。复活口径见 GameController.Revive 的注释。
+        /// </summary>
+        private static void PlayDisappear(PixelItem pixel, BoardingTiming timing, System.Action onComplete)
+        {
+            pixel.transform.DisappearWithPop(
+                () =>
+                {
+                    ReleaseReviveSource(pixel);
+                    onComplete?.Invoke();
+                },
+                timing.popDuration > 0f ? timing.popDuration : DefaultPopDuration,
+                timing.shrinkDuration > 0f ? timing.shrinkDuration : DefaultShrinkDuration);
+        }
+
+        /// <summary>
+        /// 复活保留的像素：交回 GameController 从传送带 / 缓冲区摘下来（<b>非保留像素是空操作</b>，
+        /// 所以传送带路径也会经过这里但什么也不做）。
+        /// 与跳跃路径的不对称是刻意的：跳跃在**起跳前**释放（由 GameController 做），
+        /// 这样像素能一直待在带上直到轮到自己；消失则是**播完之后**才释放。
+        /// </summary>
+        private static void ReleaseReviveSource(PixelItem pixel)
+        {
+            if (pixel == null || !pixel.reviveReserved)
+                return;
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.ReleaseRevivePixel(pixel);
         }
 
         /// <summary>
@@ -523,28 +668,17 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 复活深排上车（gridZ &gt;= maxOpenRows）：像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
-        /// 仍走 Consume 扣容量 → OpenRearLid → consumingCount 计数 → OnPixelConsumed（失败判定 + 出库）完整链路，只是省略 jump。
-        /// gridZ &gt;= maxOpenRows + 1（视野外更严格 1 排）的车完成匹配时，直接原地销毁并瞬间补位，避免后期大量已匹配车开走产生垃圾时间。
-        /// 绳组车另有一条门槛：**整组**都装满、且都在可消失范围内，才整组一起消失（见 <see cref="RopeCarBlocksInstantDestroy"/>）。
+        /// 起播一个「原地消失」条目（<see cref="PrepareBoarding"/> 以 <c>jump = false</c> 登记之后调）：
+        /// 像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
+        /// 仍走 OnPixelConsumed（失败判定 + 出库 / 原地销毁）完整链路，只是省略 jump。
         /// </summary>
-        public void ConsumePixelInstant(PixelItem pixel, ContainerItem container)
+        private void PlayInstantBoarding(PixelItem pixel, ContainerItem container, int col, bool isLast,
+            bool destroyInPlace, BoardingTiming timing)
         {
-            if (pixel == null || container == null || container.IsEmpty)
-                return;
-
-            bool isLast = ConsumeCar(container);
-            // 视野外更严格 1 排：完成匹配 → 原地销毁。绳组车要再收紧一层，见 RopeCarBlocksInstantDestroy。
-            bool destroyInPlace = isLast && container.gridZ >= maxOpenRows + 1 && !RopeCarBlocksInstantDestroy(container);
-            if (isLast)
-                OpenRearLidAfterMatch(container);   // 播放移入动画前，先开后盖（绳组在整组装满这一刻整组一起开）
-            consumingCount++;
-
-            int col = container.gridX;
             System.Action onConsumed = () => OnPixelConsumed(container, col, isLast, destroyInPlace);
 
             // 原地消失（pop 1.1× → 缩到 0，与开盖同一 tween）后，瞬移到目标车落点出现
-            pixel.transform.DisappearWithPop(() =>
+            PlayDisappear(pixel, timing, () =>
             {
                 if (pixel == null)
                     return;
@@ -556,12 +690,17 @@ namespace CrowdMatch
             });
         }
 
-        private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast)
+        private IEnumerator MovePixelToContainer(PixelItem pixel, ContainerItem container, int col, bool isLast,
+            int seatIndex = -1, BoardingTiming timing = default)
         {
             // 新上车表现：有空闲落点时由 ContainerItem 接管（挂落点 → DOLocalJump 到 0 → 弹性缩放），
             // 每个上车像素弹回完成后触发 OnPixelConsumed（失败判定 + 出库）；无空闲落点则回退到下面的旧 Lerp。
+            // seatIndex >= 0 表示座位已在登记那一刻预占（复活队列，见 PrepareBoarding），直接用该下标；否则就地抢。
             System.Action onConsumed = () => OnPixelConsumed(container, col, isLast);
-            if (container != null && container.TryBoardPixel(pixel, onConsumed))
+            bool boarded = seatIndex >= 0
+                ? container != null && container.TryBoardPixelAt(pixel, seatIndex, onConsumed, timing)
+                : container != null && container.TryBoardPixel(pixel, onConsumed, timing);
+            if (boarded)
                 yield break;
 
             Vector3 start = pixel.transform.position;
@@ -945,8 +1084,16 @@ namespace CrowdMatch
         /// 打开某容器正后方（gridZ + 1）容器的盖子，让它随后可接收像素。
         /// 前排 / 已开放的后排容器共用此逻辑——耗尽谁的容量就开谁后面的盖子。
         ///
-        /// 例外：该车「装满但同组还有车没装满」时**不开**——它仍压着同组的像素需求
+        /// 例外一：该车「装满但同组还有车没装满」时**不开**——它仍压着同组的像素需求
         /// （<see cref="IsWaitingRopeCar"/>），打开后盖就等于绕过 <see cref="IsOpen"/> 对后排的堵截。
+        ///
+        /// 例外二（**开盖口径**）：目标格必须满足「**它前方所有车都已放行**」（<see cref="IsFrontCleared"/>）
+        /// 才开盖。正常玩法里这条恒成立——匹配只认 <see cref="IsOpen"/> 的车，能被喂满的车前方必然都已放行。
+        /// 但**复活路径不走 <c>IsOpen</c>**（<c>MatchPixelsToCars</c> 按颜色找任意排的车），
+        /// 于是会出现「第 z 排被喂满、而它前面第 z−1 排还没匹配完」——此时不该开第 z+1 排的盖。
+        ///
+        /// 顺着这条口径还要**继续往深排走**：只要第 z+1 排自己也已装满，第 z+2 排的前方就同样全都放行了。
+        /// 只开一格的话，「本该开、但当时前方还没放行因而被跳过」的深排盖会永远等不到人来开。
         /// </summary>
         private void OpenRearLid(ContainerItem container)
         {
@@ -956,16 +1103,34 @@ namespace CrowdMatch
                 return;
 
             int col = container.gridX;
-            int row = container.gridZ + 1;
-            var rear = GetItem(col, row);
-            if (rear != null)
+            for (int row = container.gridZ + 1; row < rows; row++)
             {
-                rear.OpenLid();
+                if (!IsFrontCleared(col, row))
+                    break;                  // 前方还有没匹配完的车：这一排及更深处都不该开
+                if (!CarAt(col, row))
+                    break;                  // 这一列到头了
+
+                OpenLidAt(col, row);
+
+                if (!EmptyAt(col, row))
+                    break;                  // 这一排自己还没装满：再往深处，前方就不全放行了
+            }
+        }
+
+        /// <summary>
+        /// 打开某格的盖子：有实例走 <see cref="ContainerItem.OpenLid"/>；
+        /// 视窗外的深排车没有实例，就把开盖状态记到数据层，等它补位滚进视窗时由
+        /// <see cref="ContainerItem.ApplyCell"/> 水合出来，与当场开盖表现一致。
+        /// </summary>
+        private void OpenLidAt(int col, int row)
+        {
+            var item = GetItem(col, row);
+            if (item != null)
+            {
+                item.OpenLid();
                 return;
             }
 
-            // 懒实例化：正后方那辆车还在视窗外（没有实例）——把开盖状态记到数据层，
-            // 等它补位滚进视窗被实例化时由 ContainerItem.ApplyCell 水合出来，与当场开盖表现一致。
             if (!CellInRange(col, row))
                 return;
             int i = CellIndex(col, row);
@@ -1229,6 +1394,9 @@ namespace CrowdMatch
         /// 把某格的车实例化出来并水合到数据层状态——懒实例化的**唯一入口**（该格已有实例时直接返回它）。
         /// 新实例先摆在 <paramref name="row"/> 那一排的位置上：补位前移时调用方传的是**旧排**，
         /// 于是它会跟着全列一起滑进视窗，而不是凭空出现在终点。
+        ///
+        /// **绳组车整组实例化**：该格属于绳组时，顺带把同组其它成员也实例化出来（见
+        /// <see cref="MaterializeRopeGroup"/>）——绳只能整组在场。
         /// </summary>
         private ContainerItem Materialize(int col, int row)
         {
@@ -1245,7 +1413,52 @@ namespace CrowdMatch
             if (!cell.occupied)
                 return null;
 
-            return SpawnFromCell(col, row, cell, row);
+            var item = SpawnFromCell(col, row, cell, row);
+            MaterializeRopeGroup(cell.ropeGroupId);
+            return item;
+        }
+
+        /// <summary>
+        /// 把某个绳组的**全部**成员整组实例化（<paramref name="ropeGroupId"/> 为 0 时为空操作；幂等）。
+        ///
+        /// 绳在关卡加载时由 <see cref="BuildRopes"/> 按**实例**建好、直接引用两端车（见
+        /// <see cref="ContainerRopeLink"/>），之后不再重建。所以绳组成员必须**整组同时在场**：
+        /// 只实例化落进视窗的那部分，绳链就会缺段、或把本不相邻的两辆连起来。
+        /// 整组成员都在视窗之外的情形由 <see cref="MaterializeAllRopeGroups"/> 在建绳前兜住。
+        /// </summary>
+        private void MaterializeRopeGroup(int ropeGroupId)
+        {
+            if (ropeGroupId == 0 || !HasData)
+                return;
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    int i = CellIndex(col, row);
+                    if (!_cells[i].occupied || _cells[i].ropeGroupId != ropeGroupId)
+                        continue;
+                    if (grid != null && grid[col, row] != null)
+                        continue;
+                    SpawnFromCell(col, row, _cells[i], row);
+                }
+        }
+
+        /// <summary>
+        /// 把所有绳组**整组**实例化出来（数据层里每个 ropeGroupId 各来一次），供
+        /// <see cref="BuildRopes"/> 在建绳之前调用：整组成员都在视窗之外的绳组，只有这一遍能把它建起来。
+        /// </summary>
+        private void MaterializeAllRopeGroups()
+        {
+            if (!HasData)
+                return;
+
+            var ids = new HashSet<int>();
+            for (int i = 0; i < _cells.Length; i++)
+                if (_cells[i].occupied && _cells[i].ropeGroupId != 0)
+                    ids.Add(_cells[i].ropeGroupId);
+
+            foreach (var id in ids)
+                MaterializeRopeGroup(id);
         }
 
         /// <summary>
@@ -1322,6 +1535,8 @@ namespace CrowdMatch
         {
             if (item == null)
                 return;   // Unity 伪空：已销毁的车在这里就被挡掉
+
+            ReleaseRopesFor(item);   // 先撤掉以它为端点的绳根：池化后车不再被销毁，绳不会再自毁
 
             var go = item.gameObject;
 
@@ -1444,13 +1659,18 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 复活：把一批像素按颜色直接匹配到车（非空、非补位中），
-        /// 优先前排（gridZ 小，含第 0 排）、同排优先列小。复用 ConsumePixel（扣容量 → 跳车 → 出库链路），
-        /// 有车被匹配即播放开盖 tween（OpenLid，幂等）。返回未找到同色车的像素。
+        /// 复活第一步：按颜色把一批像素匹配到车（非空、非补位中），
+        /// 优先前排（gridZ 小，含第 0 排）、同排优先列小。**只登记、不起播任何动画**——
+        /// 命中前 maxOpenRows 排的进 <paramref name="jumps"/>（跳车），更深的进 <paramref name="disappears"/>
+        /// （原地消失 → 瞬移上车）。起播交给调用方 <see cref="GameController.Revive"/>：消失组在 t=0
+        /// 一次性播完，跳跃组按「车行 → 车列 → 空位」升序依次起播。跳跃条目在这里就把落点**预占**下来
+        /// （<see cref="ContainerItem.ReserveSeatIndex"/>），座位因此先于起播可知。
+        /// 有车被匹配即播放开盖 tween（OpenLid，幂等）。返回未找到同色车的像素（**不销毁**，由调用方并入消失组）。
         /// 说明：失败仅保证「传送带上的像素不匹配」，缓冲区/带溢出里仍可能有匹配前排车的颜色，
         /// 因此必须优先补第 0 排车，否则会把这类像素误判为无车可匹配而销毁，留下被掏空的前排车堵死整列。
         /// </summary>
-        public List<PixelItem> MatchPixelsToCars(List<PixelItem> pixels)
+        public List<PixelItem> MatchPixelsToCars(List<PixelItem> pixels,
+            List<BoardingEntry> jumps, List<BoardingEntry> disappears)
         {
             var unmatched = new List<PixelItem>();
             if (pixels == null)
@@ -1484,10 +1704,15 @@ namespace CrowdMatch
                 }
 
                 car.OpenLid();              // 有车被匹配 → 播放开盖 tween（幂等）
-                if (car.gridZ < maxOpenRows)
-                    ConsumePixel(pixel, car);        // 前 maxOpenRows 排：复用正常 jump 上车
+
+                bool jump = car.gridZ < maxOpenRows;
+                var entry = default(BoardingEntry);
+                if (!PrepareBoarding(pixel, car, jump, ref entry))
+                    continue;               // IsEmpty 兜底：正常不会发生（FindCarForColor 已滤掉空车）
+                if (jump)
+                    jumps.Add(entry);
                 else
-                    ConsumePixelInstant(pixel, car); // 更后排：原地消失 → 瞬移到目标车落点出现
+                    disappears.Add(entry);
             }
             return unmatched;
         }
@@ -1525,6 +1750,10 @@ namespace CrowdMatch
         /// <summary>
         /// 建立绳子：把 ropeGroupId 相同（且非 0）的车按列升序成链，相邻两车之间生成一条绳。
         /// 由 GameController 在关卡应用完成后调用。
+        ///
+        /// **先把绳组成员整组实例化出来**（<see cref="MaterializeAllRopeGroups"/>）：绳是「此刻按实例建好、
+        /// 直接引用两端车」的静态结构，之后不再重建，所以懒实例化下不能只看到落进视窗的那部分成员
+        /// ——那会让绳链缺段 / 把不相邻的两辆车连起来；整组都在视窗之外时更糟：那一组根本不会建绳。
         /// </summary>
         /// <param name="shuffleEnabled">
         /// 本次关卡是否启用了洗牌。开启时**完全不建绳**、绳组也不参与任何判定——
@@ -1537,6 +1766,7 @@ namespace CrowdMatch
             if (!ropeEnabled || shuffleEnabled)
                 return;
 
+            MaterializeAllRopeGroups();
             CollectRopeGroups();
 
             foreach (var list in _ropeGroups.Values)
@@ -1563,7 +1793,52 @@ namespace CrowdMatch
             _ropeGroups.Clear();
         }
 
-        /// <summary>按 ropeGroupId 归组：只收网格内确有位置的当前车，组内按列（gridX）升序。</summary>
+        /// <summary>
+        /// 撤掉所有以该车为端点的绳根（车进池 / 被销毁之前调用）。
+        ///
+        /// 旧口径靠 <see cref="ContainerRopeLink.LateUpdate"/> 的「端点已销毁 → 绳根自毁」收尾；
+        /// 池化之后车**不再被销毁**（只是停用后进池、还可能被下一辆车复用），那条兜底就永远不触发 ——
+        /// 绳会一直挂着一辆已进池的车，并被拉到池根那边去。所以归还池之前必须显式撤掉
+        /// （观感与改动前一致：整组出库时绳子逐段消失）。
+        /// 先把端点置空再销毁：即使销毁延后一帧，LateUpdate 也不会再拿它去绷直。
+        /// </summary>
+        private void ReleaseRopesFor(ContainerItem item)
+        {
+            if (item == null || _ropeRoots.Count == 0)
+                return;
+
+            for (int i = _ropeRoots.Count - 1; i >= 0; i--)
+            {
+                var root = _ropeRoots[i];
+                if (root == null)
+                {
+                    _ropeRoots.RemoveAt(i);
+                    continue;
+                }
+
+                var link = root.GetComponent<ContainerRopeLink>();
+                if (link != null && link.leftCar != item && link.rightCar != item)
+                    continue;
+
+                _ropeRoots.RemoveAt(i);
+                if (link != null)
+                {
+                    link.leftCar = null;
+                    link.rightCar = null;
+                }
+
+                if (Application.isPlaying)
+                    Destroy(root);
+                else
+                    DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>
+        /// 按 ropeGroupId 归组：只收网格内确有位置的当前车，组内按列（gridX）升序。
+        /// 调用前提：该组成员已被**整组实例化**（<see cref="BuildRopes"/> → <see cref="MaterializeAllRopeGroups"/>）
+        /// ——只实例化了一部分成员时会漏人，链就断了。
+        /// </summary>
         private void CollectRopeGroups()
         {
             var all = GetComponentsInChildren<ContainerItem>();

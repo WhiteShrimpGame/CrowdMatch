@@ -21,8 +21,9 @@
   （像素被点击移出 / 上车 / 复活等）会**提前定向回收**（见 §6.6）。
 - **形态**：预制体可以是粒子/Animator，也可以带 **World Space 的 Canvas**——后者会自动挂
   `EmojiBillboard`，让 UI 始终正对镜头（§4.7）。
-- **独立性**：三类表情（开心 / 犯困 / 生气）的触发、概率、节流各自独立；生气表情的三个来源
+- **独立性**：四类表情（开心 / 犯困 / 生气 / 惊讶）的触发、概率、节流各自独立；生气表情的三个来源
   （点击阻挡 / 插队 / 排队）判定也各自独立，**只共用同一个 emoji（tag / 缩放 / 加速 / 时长）**，且都只播一个表情。
+  「惊讶」的判定算法较特殊（同色连成一片），单独成文：`Docs/EmojiSurpriseMergeDesign.md`。
 
 ---
 
@@ -45,7 +46,7 @@
 | 位置 | 要求 |
 |---|---|
 | 场景 | 建一个物体挂 `EmojiManager`，拖到 `GameManager.emojiManager`（**不再由 GameManager 自动创建**，方便策划调参）；留空则所有表情播放静默跳过 |
-| SpawnPoolConfig | 至少三条：`EmojiHappy`、`EmojiSleep`、`EmojiAngry`（tag 名可在管理器上改） |
+| SpawnPoolConfig | 至少四条：`EmojiHappy`、`EmojiSleep`、`EmojiAngry`、`EmojiSurprise`（tag 名可在管理器上改） |
 | Pixel 预制体 | 挂一个 `emojiNode`（空物体即可，放头顶）；**没配的像素不参与任何表情** |
 | 表情预制体 | 建议按 `scale = 1` 制作（尺寸统一由 `EmojiManager.emojiScale` 控制）；朝向由预制体自身决定，代码不设旋转 |
 | Canvas 表情预制体 | 若用 Canvas 做表情，**Render Mode 必须是 World Space**。Screen Space（Overlay / Camera）的 Canvas 在世界层级里不会跟随锚点、也做不了 billboard——运行时只打一条 warning 指出，不会自动改预制体。UI 的朝向由 `EmojiBillboard` 每帧拨正，不需要手工摆 |
@@ -152,6 +153,10 @@ transform.rotation = Camera.main.transform.rotation
 | **点击受阻生气** | `EmojiAngry` | 点击无法移出的连通组（`GameController.PlayBlockedFeedback`） | **被点的那一个像素**（点谁谁生气；它没配 `emojiNode` 就不播） | **必出**（不掷概率） | **逐像素**：该像素上一张生气未播完则忽略（**无全局 CD**） | ① 像素被点击**成功移出**时（遍历整组）；② 上车时；③ 复活时全清 |
 | **插队生气** | `EmojiAngry` | 某像素上带时，缓冲区里还有**更早点击且颜色不同**的像素在排队（`ConveyorBeltZone.CheckQueueJump`） | 等待队列中 `clickSeq` 更小、颜色不同、有 `emojiNode` 的像素 | `angryJumpChancePerPixel × 被插队人数` | 独立全局 CD `angryJumpCooldown` | 同上 |
 | **排队生气** | `EmojiAngry` | 传送带宿主按随机间隔检测（`UpdateQueueAngryCheck`，**独立计时**） | 等待队列中 `bufferedAt` 距今 ≥ `queueAngryWaitSeconds`、有 `emojiNode` 的像素 | `queueAngryChancePerPixel × 候选数` | 检测间隔（**无 CD**） | 同上 |
+| **同色连成一片惊讶** | `EmojiSurprise` | 一次**动态事件**把一批像素放进网格，或把一批像素的颜色显出来（管道推波 / 箱子放货 / 升降台升起 / 问号揭晓 / 冰化开 / 木箱被拆）之后，若它们与**原本就已显色**的同色像素连成了同一个 4 连通块（`SameColorMergeWatcher`） | **每个「被并进来的原有区域」随机 1 颗** + **本批新像素随机 1 颗**（都要有 `emojiNode`） | **必出**（不掷概率） | **逐像素**：该像素上一张惊讶未播完则忽略（无全局 CD） | 无（到期自动回池） |
+
+**同色连成一片惊讶**的完整口径（触发条件、判定算法、六个接入点、边界豁免）见
+`Docs/EmojiSurpriseMergeDesign.md` —— 它是本表唯一「按连通块判定、一次可能出多个」的触发源。
 
 三条生气来源的判定与节流相互独立，**只共用 emoji**（同一个 tag，因此 `speeds` 加速、`durations` 时长与 `emojiScale` 都一致）。三条都只播**一个**表情：点击受阻必出 + 逐像素抑制，插队是概率 + 独立全局 CD，排队是概率 + 检测间隔。
 
@@ -291,6 +296,7 @@ boarding.clickSeq <= 0 或 CD 中        → 返回
 | `speeds[]`（Manager） | 空 | 按 tag 播放加速 | 动画/粒子更快 | — |
 | `durations[]`（Manager） | 空 | 按 tag 播放时长（覆盖全局 `emojiDuration`） | 该表情留更久 | 更快消失 |
 | `happyChance`（Manager） | 0.8 | 车满且在前排时的触发概率 | 更常见 | 更罕见 |
+| `surpriseTag`（Manager） | `EmojiSurprise` | 同色连成一片惊讶的 tag（**必出** + 逐像素抑制，没有概率 / CD 参数） | — | — |
 | — | — | *点击受阻生气已无参数：必出 + 逐像素抑制（§6.3）* | — | — |
 | `angryJumpChancePerPixel`（Manager） | 0.1 | 插队概率系数（× 被插队人数） | 更常见 | 更罕见 |
 | `angryJumpCooldown`（Manager） | 3 | 插队生气的全局 CD（独立） | 更少刷屏 | 更密 |

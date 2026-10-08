@@ -1,13 +1,35 @@
 # CrowdMatch「墙体 T 字 / 十字交叉」功能设计文档
 
-> 状态：**方案待确认，尚未实现**。本文描述如何把墙体编辑从「任意两墙不得重叠」扩展为
-> 「允许 T 字 / 十字交叉，交叉点用对应的 T 字 / 十字预制体显示」，并保持**端点（节点）不得重合**。
+> 状态：**代码已实现（2026-09-29），预制体与场景接线待做**。本文描述如何把墙体编辑从「任意两墙不得重叠」
+> 扩展为「允许 T 字 / 十字交叉，交叉点用对应的 T 字 / 十字预制体显示」，并保持**端点（节点）不得重合**。
 >
 > 结论先行：**数据模型零改动**（墙仍是「端点序列 `points` + `closed`」），改动集中在
 > **墙块分类/渲染**与**画布校验**两处。`wallGrid` / `IsWall` / `IsBlocked` / 暴露 / 寻路 /
 > 计数 / 关卡 JSON 导入导出**全部零改动**。
 >
-> 文末 §10 有 4 条待确认项，未定之前不动代码。
+> **实施进度**
+>
+> | # | 项 | 状态 |
+> |---|---|---|
+> | 1 | `WallPieceType` 加 `Tee` / `Cross`；`Classify` 改吃四向掩码；`TeeYaw` | ✅ 已做 |
+> | 2 | `WallItem.BuildVisual` 拆成 `ClearPieces` + `SpawnPiece`（分类交给调用方） | ✅ 已做 |
+> | 3 | `PixelGroup.wallTeePrefab` / `wallCrossPrefab` 字段 | ✅ 已做 |
+> | 4 | `PixelGroup.RebuildWallVisuals()`（全组并集分类 + 一格只画一块） | ✅ 已做 |
+> | 5 | `SpawnWall` 改调整组重建 | ✅ 已做 |
+> | 6 | 画布判定换成规则 A（同轴冲突）+ B（端点撞端点） | ✅ 已做 |
+> | 7 | 画布 `DeleteWall` / `OnUndoRedoPerformed` / `OnEnable` 补整组重建 | ✅ 已做 |
+> | 8 | `WallItemEditor` 闭环 / 取消闭环后补整组重建 | ✅ 已做 |
+> | 9 | 状态行交叉预览（Q4 = a） | ✅ 已做 |
+> | 10 | 离线编译两个程序集 | ✅ 0 错误 |
+> | 11 | T / 十字预制体的 0° 朝向（Q1） | ⏳ 见 §10-Q1，**先按 B 实现**，实测反了改一行 |
+> | 12 | 场景 `PixelGroup` 上拖两个新预制体字段 | ⏳ **你在 Unity 里做** |
+> | 13 | §7.1 场景菜单 `WallCreator`（Q2 = b） | ⏳ **本次不动**（保持现状） |
+> | 14 | §7.2 跨墙闭环的 `ComputeInteriorCells` | ⏳ **本次不动**（见 §7.2 的说明） |
+> | 15 | **追加**：1×1 墙（画布单击 = 单格墙） | ✅ 已做，见 §11 |
+> | 16 | **口径修正**：规则 C（墙内线段不许重叠）+ 掩码改为「覆盖本格的墙」并集 | ✅ 已做，见 §3 表第 7/8 行、§4、§5.2 |
+> | 17 | **口径再修正**：分类改为按「**线段连接关系**」累加臂 —— 墙内与跨墙统一到同一条口径 | ✅ 已做，见 §5.2、§3 表第 9 行 |
+>
+> §10 的 4 条待确认项已定：Q1 = 先按 B、Q2 = b、Q3 = a、Q4 = a。
 
 ---
 
@@ -92,7 +114,7 @@ R1–R3 的本质是同一件事：**一个格子上出现 ≥ 3 条臂时，它
 
 | 入口 | 位置 | 是否调 `BuildVisual` |
 |---|---|---|
-| 画布「添加墙体」 | `PixelColorBrushWindow.CreateWallFromStroke` :2431 → `PixelGroup.SpawnWall` | ✅（`SpawnWall` 内 `wall.BuildVisual(this)`，`PixelGroup.cs:1384`） |
+| 画布「添加墙体」 | `PixelColorBrushWindow.CreateWallFromStroke` → `PixelGroup.SpawnWall` | ✅（`SpawnWall` 内整组 `RebuildWallVisuals()`） |
 | 场景菜单「创建 ▸ 墙体」 | `WallCreator.CreateWallFromSelection`（`WallItemEditor.cs:248`） | ❌ **完全没有**（见 §7.1） |
 
 `PixelGroup.SpawnWall`（`PixelGroup.cs:1375`）**只重建新墙自己的墙块**，
@@ -109,12 +131,25 @@ R1–R3 的本质是同一件事：**一个格子上出现 ≥ 3 条臂时，它
 | 1 | 新墙**线段中间**跨过已有墙的**端点**（R1） | 已有 `▫`，新墙竖着穿过 `▫` | 拒绝 | ✅ **T**（3 臂） |
 | 2 | 新墙**端点**落在已有墙的**线段中间**（R2） | 新墙竖笔尾点落在 `▪▪▪` 中间那格 | 拒绝 | ✅ **T** |
 | 3 | 线段跨线段（R3，两墙） | `▪` 横竖各一 | 拒绝 | ✅ **十字**（4 臂） |
-| 4 | 线段跨线段（R3，**同一面墙**） | 一笔折返画出 `▪` | 允许（画成角） | ✅ **十字**（画对） |
+| 4 | 线段跨线段（R3，**同一面墙**） | 一笔画出**不折返**的自交（回环走位） | 允许（画成角） | ✅ **T / 十字**（画对） |
 | 5 | 新墙**端点**落在已有墙**端点**上（**违反 R4**） | 两个 `▫` 撞在同一格 | 拒绝 | ❌ **仍拒绝** |
-| 6 | 新墙**沿着**已有墙同轴贴合 ≥ 1 格 | 两条横线叠在 row 1 | 拒绝 | ❌ **仍拒绝**（见 §10-Q3） |
+| 6 | 新墙**沿着**已有墙同轴贴合 ≥ 1 格 | 两条横线叠在 row 1 | 拒绝 | ❌ **仍拒绝**（Q3 = a） |
+| 7 | **新墙内**线段重叠（一笔折返压线） | 一笔 A→B→A | 允许（数据退化） | ❌ **新增拒绝**（规则 C，见 §4） |
+| 8 | 两面墙**相邻但不重叠** | A 的端点在 (1,1)、B 的端点在 (2,1) | 被并成一条连续墙 | ✅ **各自独立**：各留自己的 `End`（见 §5.2） |
+| 9 | **同一面墙**折返贴着自己（∏ 形：两条竖臂分别走 col 0 / col 1） | 两臂并排、格子相邻但不相连 | 误判成 `Tee`（按格子相邻） | ✅ **各自 `Edge`**：只认线段连接（见 §5.2） |
 
 第 6 条不是需求原话里提到的，是**建议保留的禁止项**。理由：同轴贴合不是「交叉」而是「重复画线」，
-会变成两面完全一样的墙 —— 删掉一条另一条还在，表现为「删不掉」。**待确认（§10-Q3）。**
+会变成两面完全一样的墙 —— 删掉一条另一条还在，表现为「删不掉」。**Q3 定为 a：保留禁止。**
+
+第 7、8 条是 2026-09-29 的口径修正（追加需求）：
+
+- **第 7 条（新规则 C）**：需求原文里「包括自身的另一线段」指的是**垂直自交**那一类（第 4 行）；
+  交点两侧**同轴**压线（折返）不算交叉，是退化数据 —— 一个格被两条同向线段各走了一遍。拒绝。
+  副作用：**「一笔画出的 T / 十字」从此走不通**（一笔要穿过交点必然折返），实践中就是**画两面墙**。
+- **第 8 条**：判定与渲染都只看「**同一格被谁覆盖**」。相邻但不重叠 ⇒ 数据层面没有交叉 ⇒ 各自独立绘制。
+- **第 9 条**：把第 8 条的口径从「跨墙」推进到「**墙内也一样**」—— 相邻不等于连着。
+  一个格的臂只能来自**真的经过它的线段**（在它内部 = 两条臂，在它端点上 = 一条臂），
+  与「谁的格子挨着」无关。第 8、9 条合起来就是 §5.2 的「线段连接」口径。
 
 用四张图把边界钉死（`#` 新墙的格、`▪` 已有墙的格、`▫` 该墙的端点；「交叉格」= 两墙共有的那一格）：
 
@@ -145,12 +180,21 @@ R3  线段跨线段（两墙，或同一面墙的自身两段）
 
 ---
 
-## 4. 判定规则（两条，取代「一律禁止重叠」）
+## 4. 判定规则（三条，取代「一律禁止重叠」）
 
-对笔画占格集合 `occupied` 的每个格 `c`：
+**规则 C 只看这一笔自己的几何**；**规则 A / B 看它与已有墙的关系** —— 对笔画占格集合 `occupied` 的每个格 `c`：
 
 先分别求出**新墙在 `c` 上的轴向**与**已有墙 `W` 在 `c` 上的轴向** —— 轴向 = {横,竖} 的子集，
 由该墙**自己的**相邻占格算出（左右任一 ⇒ 横；前后任一 ⇒ 竖）。
+
+### 规则 C：墙内线段重叠 → 拒绝
+
+> 同一面墙化简后的端点序列里，若存在**两条同轴线段**的占格集合相交（共 ≥ 1 格），
+> 判为「墙内线段重叠」，拒绝该笔画。
+
+**只在同轴线段之间判**：不同轴的两条线段最多共一个格，那是「自身的两根线段交叉」（§3 表第 4 行，允许）。
+化简（`SimplifyPoints`）已经去掉了「同向延续」的多余拐点，剩下能自重叠的只有**折返**：
+`A→B→A` 会产生两条方向相反、压在同一批格上的线段；`(0,1),(2,1),(1,1)` 这种「顶到头再退回来」同理。
 
 ### 规则 A：同轴冲突 → 拒绝
 
@@ -178,17 +222,21 @@ R3  线段跨线段（两墙，或同一面墙的自身两段）
 规则 A 另外还拦得住一个容易漏的坏例子：**新墙在交叉格拐弯后顺着一路压着旧墙走**
 （拐弯点的轴向集合含横+竖，与旧墙的横相交 ⇒ 触发）。
 
+上表不含规则 C：它只与**这一笔自己的线段**比，与已有墙无关 —— 一笔折返（`A→B→A`）被它拦下，
+一笔不折返的自交（回环走位）放行。
+
 ### 状态行提示
 
-`_lastStrokeError`（:183）现有的三类理由扩成四类：`至少需要 2 格` / `跳成对角` /
-`沿已有墙体重叠 N 格` / `端点落在已有墙体端点上`。
+`_lastStrokeError` 的理由现在是这几类（按判定顺序）：
+`至少需要 1 格` / `跳成对角` / `墙内线段重叠（规则 C）` / `沿已有墙体重叠 N 格（规则 A）` /
+`端点落在已有墙体端点上（规则 B）` / `(x,y) 已有墙体 —— 1×1 墙不能叠在已有墙体上`。
 
-**可选增强**：松手前的预览里顺带报「将形成 2 处 T 交叉、1 处十字交叉」——
-与判定同一趟掩码扫描即可算出，代价为零。是否要做见 §10-Q4。
+**已实现（Q4 = a）**：松手前的预览会在「可生成 ✓」后追加「将形成交叉：T 字 2 处、十字 1 处」，
+口径与真正建出来的完全一致（两边都走 `WallItem.ClassifyOwned`，不会发散）。
 
 ---
 
-## 5. 渲染：全局掩码 + 两个新部件
+## 5. 渲染：「覆盖本格的墙」并集掩码 + 两个新部件
 
 ### 5.1 新增两个墙块类型
 
@@ -199,14 +247,36 @@ public enum WallPieceType { Single, End, Edge, Corner, Tee, Cross }   // 只加�
 `WallPieceType` 是运行时 public enum，仅用于当帧分类与子物体命名，**没有任何地方序列化它**，
 加值不会影响已有场景 / 预制体。
 
-### 5.2 分类改成吃「全组并集」
+### 5.2 分类：按**线段连接关系**给格累加「臂」
+
+**不按格子相邻判。** 掩码只有一个来源：**哪条线段真的经过这一格**。
 
 ```csharp
-/// 按「格子的四向邻接」分类，与「这个格属于哪面墙」无关。
-/// occupied = 全组所有 WallItem 占格的并集。
-static void Classify(bool right, bool left, bool front, bool back,
-                     out WallPieceType type, out float yaw)
+/// 把一面墙的臂累加进 arms（格 → 臂掩码）。每条线段逐格登记：
+///   线段**内部**的格 → 前后两条臂；线段**端点**格 → 只贡献朝内那一条。
+/// 可以对多面墙反复调用同一个字典 —— 同一格被各条覆盖它的线段依次 OR，天然合并。
+public static void AccumulateArms(IReadOnlyList<Vector2> points, bool closed,
+                                  Dictionary<Vector2Int, int> arms,
+                                  Func<int,int,bool> inRange = null)
+
+/// 按臂掩码判类型（0 / 1 / 2共线 / 2垂直 / 3 / 4 ⇒ Single / End / Edge / Corner / Tee / Cross）
+public static WallPieceType ClassifyMask(int arms, out float yaw)
 ```
+
+于是「同一格被**两条线段**覆盖」才是交叉 —— 这两条线段可以来自两面墙，也可以来自**同一面墙的两段**：
+
+| 情形 | 按格子相邻（❌ 旧） | 按线段连接（✅ 现） |
+|---|---|---|
+| 两面墙**首尾相接**（A 端点在 (1,1)、B 端点在 (2,1)） | 两格都判 `Edge`，连成一条、端点消失 | 各自 `End`，**独立绘制** |
+| **同一面墙**折返贴着自己（∏ 形：一条竖臂在 col 0，另一条竖臂在 col 1） | (0,1) 看到邻居 (1,1) ⇒ 误判 `Tee` | (0,1) 只被自己那条竖段覆盖 ⇒ `Edge` |
+| 同一格被两条线段真的穿过 | T / 十字 | T / 十字（不变） |
+
+> ⚠️ **两次退回的教训（本节的来历）**：
+> 1. 第一版拿「**全组所有墙的格**」当掩码 ⇒ 相邻的两面墙被连成一条、端点块凭空消失。
+> 2. 第二版改成「**覆盖这一格的墙**的格集并集」⇒ 跨墙修好了，但**墙内**仍按格子相邻，
+>    于是同一面墙折返贴着自己在 ∏ 形里误判成 `Tee`。
+> 3. 现在只认**线段**：一个格的臂完全由「哪些线段经过它、它在这些线段里是内部还是端点」决定。
+>    跨墙与墙内**同一条口径**，没有特例。
 
 | 掩码 | 类型 | yaw |
 |---|---|---|
@@ -220,31 +290,35 @@ static void Classify(bool right, bool left, bool front, bool back,
 ### 5.3 新增全量重建入口（放 `PixelGroup`）
 
 ```csharp
-/// 用全组墙格并集重建所有墙块。交叉格归「层级顺序最先出现的那面墙」——
-/// 与画布 _wallCells 的先到先得同口径，保证交叉格只画一次（不叠块）。
+/// 重建所有墙块：先把**全组所有墙的线段**累加成一份臂掩码，再逐墙把格画出来。
+/// 一格只画一块（归层级顺序最先出现的那面墙），类型按 ClassifyMask 判。
 public void RebuildWallVisuals()
 {
     var walls = GetComponentsInChildren<WallItem>();
 
-    var occ = new HashSet<Vector2Int>();                  // 全组并集：分类的唯一依据
+    // 全组共用一份臂掩码：跨墙与墙内同一条口径，不需要「谁覆盖了哪格」的簿记
+    var arms = new Dictionary<Vector2Int, int>();
     foreach (var w in walls)
-        foreach (var c in w.EnumerateOccupiedCells())
-            if (IsInRange(c.x, c.y)) occ.Add(c);
+        WallItem.AccumulateArms(w.points, w.closed, arms, IsInRange);   // IsInRange 兼作越界过滤
 
-    var done = new HashSet<Vector2Int>();                 // 已渲染的格
-    foreach (var w in walls)                              // 层级顺序 ⇒ 归属确定
+    var rendered = new HashSet<Vector2Int>();                            // 已渲染的格
+    foreach (var w in walls)                                             // 层级顺序 ⇒ 重叠格归属确定
     {
-        w.ClearPieces();                                  // 原来 BuildVisual 开头那段清子物体
+        w.ClearPieces();
         foreach (var c in w.EnumerateOccupiedCells())
         {
-            if (!IsInRange(c.x, c.y) || !done.Add(c)) continue;
-            w.SpawnPiece(this, c, /* 按 occ 掩码分类 */);
+            if (!IsInRange(c.x, c.y) || !rendered.Add(c)) continue;
+            arms.TryGetValue(c, out int mask);                            // 没有臂 = 1×1 墙 ⇒ 掩码 0
+            w.SpawnPiece(this, c, WallItem.ClassifyMask(mask, out float yaw), yaw);
         }
     }
 }
 ```
 
-`WallItem.BuildVisual(pg)` 退化为「只渲染自己的格」的薄封装（或直接删掉、全部改走新入口）。
+> **归属**（重叠格归谁）与**掩码**是两件事：归属只决定「块挂在谁名下」，掩码只由线段决定。
+> 所以重叠格的 T / 十字块不会因为归属而画错。
+
+`WallItem.BuildVisual` 已拆成 `ClearPieces` + `SpawnPiece`，分类交给调用方（见 §11.3）。
 
 预制体字段加两个，与现有 4 个并排（`PixelGroup.cs:51-60`）：
 
@@ -275,9 +349,10 @@ public GameObject wallCrossPrefab;
 
 | 位置 | 改动 |
 |---|---|
-| `PixelGroup.SpawnWall`（:1375） | `wall.BuildVisual(this)` → `RebuildWallVisuals()`。关卡导入逐面调用也自然正确（每关墙 ≤ 十位数，见 §9） |
+| `PixelGroup.SpawnWall` | `wall.BuildVisual(this)` → 整组 `RebuildWallVisuals()` ✅。关卡导入逐面调用也自然正确（每关墙 ≤ 十位数，见 §9） |
+| `PixelGroup.RebuildWallVisuals`（新增） | 全组并集分类 + 一格只画一块（归属 = 层级顺序最先出现的墙） |
 | `PixelColorBrushWindow.CreateWallFromStroke`（:2431） | 校验换成规则 A + B（§4）；渲染由 `SpawnWall` 的全量重建带走 |
-| `PixelColorBrushWindow.DeleteWall`（:2510） | `RefreshSnapshot()` 之后再补一次 `RebuildWallVisuals()`（被删墙的邻居交叉格要退块） |
+| `PixelColorBrushWindow.DeleteWall` | ✅ `RefreshSnapshot()` **之前**补一次整组重建（被删墙的邻居交叉格要退块）。放前面是为了让 `RefreshSnapshot` 末尾记的 `_lastChildCount` 已经包含新墙块，免得下一帧又被「子物体数变了」兜底判脏 |
 | `PixelColorBrushWindow.OnUndoRedoPerformed`（:454） | **必须补一次全量重建** —— 见下方「唯一的真实回归点」 |
 | `PixelColorBrushWindow.OnEnable`（:403 之后） | 补一次：窗口关着时按 Ctrl+Z，重开时才对齐 |
 | `WallItemEditor.CloseLoop` / `CancelLoop`（:66 / :134） | 闭环 / 取消闭环后重建（闭合段可能正好接到别的墙上） |
@@ -322,7 +397,12 @@ public GameObject wallCrossPrefab;
 T / 十字让「两面墙合围一个区域」变得很容易，这时它会把合围区域误判成外部。
 
 修法（1 行语义改动）：障碍判据换成 `group.IsWall(cell)`（即 `RebuildGrid` 之后的并集）。
-**建议一起改**，因为它正好是本需求解锁的用法。
+
+> **决定（2026-09-29）：本次不动。** 原因：判据换成全组并集后，**别的墙也会变成 BFS 的屏障**，
+> 于是「别处墙围出来的封闭区域」一旦落在本墙的包围盒内，就会被算成本墙的内部 ——
+> 连**单面封闭墙**（今天唯一的用法）的 Inspector 闭环弹窗里「包围区域格数 / 含 Pixel 个数」
+> 都会跟着变。这是独立于 T / 十字的一个口径决定，值得单独确认，不该夹在本次改动里顺手改。
+> 现状保持：`ComputeInteriorCells` 仍只把**本墙的格**当障碍。
 
 ---
 
@@ -330,9 +410,9 @@ T / 十字让「两面墙合围一个区域」变得很容易，这时它会把�
 
 | 文件 | 改动 |
 |---|---|
-| `Assets/Scripts/Gameplay/WallItem.cs` | `WallPieceType` 加 `Tee` / `Cross`；`ClassifyPiece` 改为吃全组掩码的静态分类；`CornerYaw` 之后补 `TeeYaw`；`BuildVisual` 拆成 `ClearPieces` + `SpawnPiece` |
-| `Assets/Scripts/Gameplay/PixelGroup.cs` | 加 `wallTeePrefab` / `wallCrossPrefab` 字段；新增 `RebuildWallVisuals()`；`SpawnWall` 改调新入口 |
-| `Assets/Scripts/Editor/PixelColorBrushWindow.cs` | `TryValidateWallStroke` 换成规则 A + B（含新错误文案）；`DeleteWall` / `OnUndoRedoPerformed` / `OnEnable` 补全量重建 |
+| `Assets/Scripts/Gameplay/WallItem.cs` | `WallPieceType` 加 `Tee` / `Cross`；`ClassifyPiece` → 静态 `Classify`（吃四向掩码）；新增 `AccumulateArms`（按线段给格累加臂）+ `ClassifyMask`（见 §5.2）；`CornerYaw` 之后补 `TeeYaw`；`BuildVisual` 拆成 `ClearPieces` + `SpawnPiece`；`CollectOccupiedCells` 支持 1 端点（§11） |
+| `Assets/Scripts/Gameplay/PixelGroup.cs` | 加 `wallTeePrefab` / `wallCrossPrefab` 字段；新增 `RebuildWallVisuals()`（全组线段 → 一份臂掩码 → 逐墙画）；`SpawnWall` 改调新入口 |
+| `Assets/Scripts/Editor/PixelColorBrushWindow.cs` | `TryValidateWallStroke` 换成规则 C（墙内线段重叠）+ A（同轴冲突）+ B（端点撞端点）；`CountPendingJunctions` 预览走同一套 `AccumulateArms` / `ClassifyMask`；`DeleteWall` / `OnUndoRedoPerformed` / `OnEnable` 补全量重建 |
 | `Assets/Scripts/Editor/WallItemEditor.cs` | `CloseLoop` / `CancelLoop` 后补全量重建；**（可选，§10-Q2）** `WallCreator` 接上重建与规则 A/B；**（建议，§7.2）** `ComputeInteriorCells` 障碍判据改用 `group.IsWall` |
 | `Assets/Prefabs/Wall05.prefab` / `Wall06.prefab`（或其它） | **你在 Unity 里做**：确认哪个是 T、哪个是十字，并按 §10-Q1 选定的 0° 朝向摆正 |
 | 场景里的 `PixelGroup` | **你在 Unity 里做**：把两个新预制体拖进新增的 `wallTeePrefab` / `wallCrossPrefab` 字段（3 个场景：`GameScene` / `GameScene_WY` / `GameScene_zy02`，现有 4 个字段在这三个场景里各配了一份：`GameScene.unity:804-807` 等） |
@@ -364,7 +444,7 @@ dotnet build Assembly-CSharp-Editor.csproj
 |---|---|---|
 | 1 | 画一笔 T（起点落在已有墙上） | 交叉格显示 T 块，松手即创建成功 |
 | 2 | 画一笔十字（穿过已有墙） | 交叉格显示十字块 |
-| 3 | 一笔自身画出十字 / T（折返） | 交叉格显示十字 / T（不是角块） |
+| 3 | 一笔画出**不折返**的自交（回环走位） | 交叉格显示 T / 十字（不是角块） |
 | 4 | 反向 T：新墙端点落在已有墙线段中间 | 成功，显示 T |
 | 5 | 试画「端点撞端点」 | 拒绝，状态行写明「端点落在已有墙体端点上」 |
 | 6 | 试画「同轴贴合」（与已有墙叠同一行） | 拒绝，状态行写明「沿已有墙体重叠 N 格」 |
@@ -374,6 +454,10 @@ dotnet build Assembly-CSharp-Editor.csproj
 | 10 | 缺预制体：把 `wallTeePrefab` 留空再画 T | Console 出现明确 warning + 跳过该格，不崩 |
 | 11 | 运行时进关卡 | 墙的阻挡 / 暴露 / 胜负判定与改前逐字一致（交叉不该改变任何玩法） |
 | 12 | 编辑模式回归：`ContainerDragWindow` 拖车、木箱封条、冰组、升降台 | 与改前一致 |
+| 13 | 一笔**折返**（拖出去再原路拖回来） | 拒绝，状态行写明「墙内线段重叠」（规则 C） |
+| 14 | 两面墙**相邻但不重叠**（A 的端点在 (1,1)，B 的端点在 (2,1)） | 两面各自保留自己的 `End` 块、**不被连成一条**，接缝处是两个端头 |
+| 15 | 两面墙在**同一格**相交（T / 十字） | 该格显示 T / 十字块（数据层面真交叉） |
+| 16 | 一笔画出 **∏ 形**（两条竖臂并排相邻，中间横杠连顶） | 两条竖臂各段显示 `Edge`、**不出现 T 块**（相邻不等于连着，见 §5.2） |
 
 ### 9.3 数量参照
 
@@ -397,45 +481,120 @@ dotnet build Assembly-CSharp-Editor.csproj
 T 有三个臂，需要一个「哪个方向是 0°」的约定。因为 T 的四个朝向正好由**唯一缺失的那个方向**
 唯一确定，直接把它列成数值表最不容易搞错：
 
-`DirYaw(dc, dr) = Atan2(dc, -dr)`（既有实现，`WallItem.cs:258`）⇒
-`+X 右 → 90°`、`−X 左 → −90°`、`+Z 后 → 180°`、`−Z 前 → 0°`。
+`DirYaw(dc, dr) = Atan2(dc, -dr)`（既有实现）⇒ 世界方向 = `(dc, -dr)`：
+`+X 右 → 90°`、`−X 左 → −90°`、`+Z 前 → 0°`、`−Z 后 → 180°`。
 
 | 缺失方向（格子） | 世界方向 | `DirYaw` | **(A) 缺口朝本地 +Z** ⇒ yaw | **(B) 主干朝本地 +Z** ⇒ yaw |
 |---|---|---|---|---|
 | `(−1, 0)` | −X（左） | −90° | **−90°** | **90°** |
-| `(0, −1)` | −Z（前） | 0° | **0°** | **180°** |
+| `(0, −1)` | +Z（前） | 0° | **0°** | **180°** |
 | `(1, 0)` | +X（右） | 90° | **90°** | **−90°** |
-| `(0, 1)` | +Z（后） | 180° | **180°** | **0°** |
+| `(0, 1)` | −Z（后） | 180° | **180°** | **0°** |
 
 - **A** = `yaw = DirYaw(缺失方向)`：本地 `+Z` 指向**那个空着的方向**
 - **B** = `yaw = DirYaw(缺失方向) + 180°`：本地 `+Z` 指向**主干**
 
-两种写法只差 180°，但选错就会让所有 T 块朝向全反，**必须按你实际摆预制体的方式定**。
-核对办法：把预制体拖进场景、`rotation.y` 设 0，看**哪个方向是空的**，然后对照上表。
+两种写法只差 180°，选错会让所有 T 块朝向全反。
 
-一个提示：`Corner` 的臂是本地 `+X` 与 `+Z`；若你是「顺着 `Corner` 再加一条 −X 臂」做出 T 的，
-那么 yaw=0 时缺口落在 `−Z`（前）—— 那是 **B**。
+> **决定（2026-09-29）：先按 B 实现。** 即 `WallItem.TeeYaw` 里的
+> `return DirYaw(-gapC, -gapR);` —— 本地 `+Z` 指向缺口对面（主干）。
+> 实测发现整体反了 180° 时，把那行的两个取负去掉（改成 `DirYaw(gapC, gapR)`）即可切成 A，一行的事。
+>
+> 依据：你是「顺着 `Corner` 再加一条臂」做预制体的可能性最大 —— `Corner` 的臂是本地 `+X` 与 `+Z`，
+> 补上一条 `−X` 之后，yaw=0 时缺口落在本地 `−Z`（后），那正是 **B**。
+>
+> 核对办法：把 T 预制体拖进场景、`rotation.y` 设 0，看**哪个方向是空的**，再对照上表。
 
-**另外请确认：十字预制体四向对称、yaw 恒为 0，对吗？**
+**十字预制体**按四向对称处理、`yaw` 恒为 0（`Classify` 里直接返回 0）。
 
 ### Q2：场景菜单 `WallCreator` 是否一起纳入 §7.1
 
 - (a) 一起改：接上 `RebuildWallVisuals` + 复用规则 A/B（推荐，否则两条建墙路径口径不一致）
 - (b) 保持原样不动，只动画布那条路径
 
+> **决定：b** —— 本次不动，`WallCreator` 保持现状（仍不生成墙块、仍无重叠校验）。
+
 ### Q3：第 6 类「同轴贴合」是否保留禁止（§3 表第 6 行）
 
 - (a) **保留禁止**（推荐）：同轴贴合不是交叉，是重复画线，删一条另一条还在
 - (b) 也放行：那就要决定「删墙时点到重合格删哪一面墙」
+
+> **决定：a** —— 保留禁止。判定见 §4 规则 A，状态行文案「沿已有墙体重叠 N 格」。
 
 ### Q4：松手前的预览是否报「将形成 N 处 T 交叉 / M 处十字交叉」
 
 - (a) 报（推荐）：与判定同一趟扫描即可算出，零额外代价，画之前就能看出会在哪里生成交叉
 - (b) 不报，保持状态行文案现状
 
+> **决定：a** —— 已接入状态行（`PixelColorBrushWindow.CountPendingJunctions`），
+> 只在「可生成 ✓」时追加，且仅当确有交叉才显示。
+
 ---
 
-## 11. 已知风险与取舍
+## 11. 追加：1×1 墙（单格墙）
+
+> 2026-09-29 追加需求：「现在画布模式不支持 1×1 墙，改为支持」。
+
+### 11.1 原先卡在四处
+
+| # | 位置 | 原写法 | 后果 |
+|---|---|---|---|
+| 1 | `WallItem.CollectOccupiedCells` | 只枚举**相邻端点对** | **1 个端点 = 占 0 格** —— 墙存在，但什么都挡不住、也不出墙块 |
+| 2 | 画布 `TryValidateWallStroke` | `_wallStroke.Count < 2` → 拒 | 单击直接被判「至少需要 2 格」 |
+| 3 | 画布 `FinishWallStroke` | `_lastStrokeError = ok \|\| Count < 2 ? null : reason` | 单击被当成「不是想建墙」，静默丢弃、连原因都不报 |
+| 4 | `LevelLoader.ApplyWalls` / `LevelDataExporter` | `points.Length < 2` → `continue` | **1×1 墙存不进 JSON、也读不回来** |
+
+第 1 条是根因：即使绕过校验造出一面 1 点墙，它占 0 格 ⇒ 不是障碍、不生成墙块、导入导出也丢。
+第 4 条最隐蔽：编辑器里看着有两面墙，一进关卡就少一面。
+
+### 11.2 口径
+
+- **1 个端点 = 1×1 墙**：那个端点**自己**就是它占据的唯一一格（`CollectOccupiedCells` 特判，不再走线段枚举）。
+- 数据表示就是 `points = [(x,y)]`，与线段墙**同一个字段、同一套导入导出**，没有新字段、没有新类型。
+  `closed` 恒为 false（闭环需要 ≥ 3 个端点，`CheckClosable` 已拦下）。
+- 墙块：这一格只有它自己 ⇒ 四向邻接掩码 = 0 ⇒ `Single`（`wallSinglePrefab` 本来就是为这个形状准备的）。
+  **贴着别的墙**放也是 `Single` —— 掩码只取「覆盖这一格的墙」（§5.2），相邻不重叠就是没有邻接。
+  所以 1×1 墙**恒为 `Single`** —— 它没有任何线段，一个臂都不贡献给掩码。
+  （即使手工改 JSON 把它和别的墙塞在同一格，那一格也只会按**别人那条穿过的线段**来画；
+  1×1 墙本身依旧不贡献臂，不会造成交叉。）
+- 手势：**单击 = 建一面 1×1 墙**，与拖动共用同一条「松手即创建」路径（`FinishWallStroke`）。
+- 重叠口径：1 格笔画没有线段、谈不了轴向，所以在规则 A（§4）里把它视为「横 + 纵都占」——
+  **只要该格已被任一已有墙占用就拒绝**。否则在已有墙身上点一下就能叠出一面同格墙
+  （两墙占同一格，删一条另一条还在），正是规则 A 要拦的东西。
+  与已有墙**相邻**（不同格）照常允许。
+
+### 11.3 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `WallItem.CollectOccupiedCells` | 加 `points.Count == 1` 分支：把那个端点自己计入占格（含 `Count == 0` 早退） |
+| `WallItem` Gizmos | 新增 `DrawSingleCellPanel()`：1 个端点时画一个立柱方框 —— 否则 Scene 里只剩一个扁平的占格标记，看不出是墙；`OnDrawGizmos` / `OnDrawGizmosSelected` 各调一次，顺手补了 `points == null` 的守卫 |
+| `PixelColorBrushWindow.TryValidateWallStroke` | `Count < 2` → `Count < 1`；1 格笔画按「横+纵都占」参与规则 A；失败文案单独一句（带格坐标） |
+| `PixelColorBrushWindow.FinishWallStroke` | 1 格不再算「不是想建墙」，失败时照常把原因报进状态行 |
+| `PixelColorBrushWindow` 状态行 | 操作提示补「**单击 = 1×1 墙**」 |
+| `LevelLoader.ApplyWalls` | `points.Length < 2` → `< 1` |
+| `LevelDataExporter`（墙体段） | `points.Count < 2` → `< 1` |
+| `WallItemEditor` | 端点下限 2 → 1，文案改为「1 个端点 = 1×1 墙，2 个及以上 = 线段墙体」 |
+| 场景菜单 `WallCreator` | **仍要求 ≥ 2 个选中 Pixel**（Q2 = b 保持不动 ⇒ 场景视图那条路建不了 1×1 墙） |
+
+`wallGrid` 并集、暴露、寻路、计数、`ContainerRearranger` / `LevelGridBoard` 全部**零改动** ——
+它们都只读「占格集合」，1×1 墙修好占格之后自动成立。
+
+### 11.4 验证
+
+| # | 操作 | 通过标准 |
+|---|---|---|
+| 1 | 「添加墙体」在空格上**单击** | 生成 1 格墙，出 `Single` 块，Gizmos 是立柱方框 |
+| 2 | 单击**已有墙体所在的格** | 状态行报「(x,y) 已有墙体 —— 1×1 墙不能叠在已有墙体上」，不创建 |
+| 3 | 1×1 墙**贴着**已有墙放 | 允许；两块接缝连续；已有墙那一格的掩码变化（`Edge` 等）符合预期 |
+| 4 | 1×1 墙 + 删除墙体（两次点击） | 高亮 → 删除，不回填 Pixel |
+| 5 | 导出关卡 JSON 再导入 | 1×1 墙仍在（`points` 长度 = 1），且仍是障碍 |
+| 6 | 运行时进关卡 | 该格挡住像素，行为与线段墙一致 |
+| 7 | 撤回：单击建墙后 Ctrl+Z | 该墙整体消失（与线段墙同一条 Undo 路径） |
+
+---
+
+## 12. 已知风险与取舍
 
 | 风险 | 说明 | 处理 |
 |---|---|---|
@@ -448,13 +607,16 @@ T 有三个臂，需要一个「哪个方向是 0°」的约定。因为 T 的�
 
 ---
 
-## 12. 附：相关代码位置索引
+## 13. 附：相关代码位置索引
+
+> 行号是**实现前**（2026-09-29 编码前）的快照，改动后已整体漂移；按符号名搜更可靠。
 
 | 主题 | 位置 |
 |---|---|
 | 墙数据与占格 | `Assets/Scripts/Gameplay/WallItem.cs:24`（points）/ `:115`（EnumerateSegment）/ `:131`（CollectOccupiedCells） |
-| 墙块分类与 yaw | `WallItem.cs:224`（ClassifyPiece）/ `:208`（ChoosePrefab）/ `:258`（DirYaw）/ `:264`（CornerYaw） |
-| 墙块生成 | `WallItem.cs:169`（BuildVisual） |
+| 墙块分类与 yaw | `WallItem.Classify`（原 `ClassifyPiece`，改为吃四向掩码）/ `TeeYaw`（新增）/ `DirYaw` / `CornerYaw` |
+| 墙块生成 | `WallItem.ClearPieces` + `WallItem.SpawnPiece`（原 `BuildVisual` 拆开，分类交给调用方） |
+| 整组重建 | `PixelGroup.RebuildWallVisuals`（新增） |
 | 预制体字段 | `PixelGroup.cs:51-60` |
 | 墙的占格表 | `PixelGroup.cs:189`（RebuildGrid）/ `:338`（IsWall）/ `:1205`（ClearWalls）/ `:1375`（SpawnWall） |
 | 画布：墙模式 | `PixelColorBrushWindow.cs:93`（Mode.AddWall）/ `:147`（墙状态）/ `:2280`（AppendWallCell）/ `:2336`（SimplifyPoints）/ `:2387`（TryValidateWallStroke）/ `:2431`（CreateWallFromStroke）/ `:2510`（DeleteWall） |

@@ -53,7 +53,7 @@ namespace CrowdMatch
     /// 相邻两车之间一条绳。画布只是多了第三种编辑入口，规则与 Inspector 上的「标记选中车为连接」一致
     /// （≥2 辆、每列恰好 1 辆、列号连续、未连、端点已配、与已有绳组不交叉），并且同样顺手关掉洗牌。
     ///
-    /// 工具行（<see cref="CanvasTool"/>）四选一，与拖动互斥：
+    /// 工具行（<see cref="CanvasTool"/>）五选一，与拖动互斥：
     ///
     /// | 工具 | 手势 |
     /// |---|---|
@@ -61,6 +61,11 @@ namespace CrowdMatch
     /// | 问号 | 点一辆车切换 <see cref="ContainerItem.isQuestion"/>（再点取消）。动作与 Inspector 的「标记为问号车」同口径：`ApplyMaterial` + `RefreshQuestionObject` + 记 Undo 时连 Renderer 与 questionObject 一起记 |
     /// | 连绳 | 逐格点击切换选中（再点取消；**同列只留 1 辆**，点该列第二辆就把原来那辆换掉），点「连成绳组」提交；不满足规则时按钮禁用并在提示行写明原因 |
     /// | 断绳 | **两步**：点一下把**整个绳组**高亮（不是只亮被点的那一格），点第二下**同一辆**才断（整组取消，与 Inspector 的「取消选中车的连接」同口径）；点空格 / 没连的车取消待确认 |
+    /// | 删除 | **两步**：点一下把**那一辆车**高亮，点第二下同一辆才删；删掉后该列**后排的车顺次前移补位**（列仍压紧、`rows` 不变），整次一个 Undo。点空格 / 别处换目标或取消待确认 |
+    ///
+    /// 删除**必然让车数与关卡像素对不上**（少一辆）—— 这是设计内的：实际用法就是「关卡本来就已经
+    /// 对不上，用这里做微调」。删掉的车若属于某个绳组，只删这一辆，同组其它车的 ropeGroupId 不动
+    /// （链会缺一节，要清就用「断绳」）；高亮状态与日志都会点出它属于哪个绳组。
     ///
     /// 拖动那条的口径：绳组按列（gridX）升序成链，**换列必然改变整条绳连**，所以只有「跨列」才弹窗，
     /// 同列内换行不弹（链不看行）。确认后**取消整个绳组**（同组的其它车一并断开）再挪车，并进**同一步 Undo**；
@@ -93,6 +98,9 @@ namespace CrowdMatch
     public class ContainerDragWindow : EditorWindow
     {
         private const string UndoName = "拖移容器";
+
+        /// <summary>删除一辆车的 Undo 名（与拖放分开，撤销历史里一眼能分清）。</summary>
+        private const string DeleteUndoName = "删除容器";
 
         /// <summary>格子 高 : 宽 = 1 : 3 —— 横向保持原样，纵向压到三分之一（扁条，一屏能看下更多排）。</summary>
         private const int HeightRatio = 3;
@@ -183,8 +191,8 @@ namespace CrowdMatch
 
         // ===== 工具与绳组 =====
 
-        /// <summary>画布当前工具；四者互斥，见类文档「绳组」「问号」两节。（不叫 Tool：那会遮蔽 <c>UnityEditor.Tool</c>）</summary>
-        private enum CanvasTool { Move, Question, Rope, Unrope }
+        /// <summary>画布当前工具；五者互斥，见类文档「绳组」「问号」「删除」几节。（不叫 Tool：那会遮蔽 <c>UnityEditor.Tool</c>）</summary>
+        private enum CanvasTool { Move, Question, Rope, Unrope, Delete }
 
         private CanvasTool _tool = CanvasTool.Move;
 
@@ -194,6 +202,7 @@ namespace CrowdMatch
             new GUIContent("问号", "点一辆车切换问号标记（再点取消）"),
             new GUIContent("连绳", "逐格点击切换选中（再点取消），点「连成绳组」提交"),
             new GUIContent("断绳", "点一下把整个绳组高亮，再点同一辆才断 → 整组取消"),
+            new GUIContent("删除", "点一辆车高亮，再点同一辆才删除（后排车顺次前移补位）"),
         };
 
         /// <summary>连绳模式下已点选的格（点选顺序；校验与提交时按列排序）。</summary>
@@ -220,6 +229,9 @@ namespace CrowdMatch
         /// 而不是只亮被点的那一格；确认仍然要求点回原来那一格（<see cref="_unropeTarget"/>）。
         /// </summary>
         private int _unropeTargetId;
+
+        /// <summary>删除模式下「第一下点了谁」的格（-1 = 没有）；第二下点**同一格**才真删。</summary>
+        private Vector2Int _deleteTarget = new Vector2Int(-1, -1);
 
         /// <summary>场景层级被外部改过（生成 / 导入 Containers、清空、删车…），等下一次 OnGUI 统一刷新。</summary>
         private bool _sceneDirty;
@@ -336,7 +348,7 @@ namespace CrowdMatch
         {
             // 进 / 出 Play 都会重排容器：取消手势 + 重绑 + 重画，别让画布停在旧快照上
             CancelDrag();
-            ClearRopeInteraction();
+            ClearToolState();
             BindFromSelection();
             Repaint();
         }
@@ -371,7 +383,7 @@ namespace CrowdMatch
                 _group.RebuildGrid();
 
             // 快照变了，之前的连绳点选可能已经指向别处（甚至不存在的车），一律作废
-            ClearRopeInteraction();
+            ClearToolState();
         }
 
         /// <summary>从 ColorConfig 构建调色板（下标 = colorId，与车身上色同一份）。</summary>
@@ -442,7 +454,7 @@ namespace CrowdMatch
             GUILayout.Label("工具", GUILayout.Width(90f));
             using (new EditorGUI.DisabledScope(playing))
             {
-                int picked = GUILayout.Toolbar((int)_tool, ToolContents, GUILayout.Width(300f));
+                int picked = GUILayout.Toolbar((int)_tool, ToolContents, GUILayout.Width(380f));
                 if (picked != (int)_tool)
                     SwitchTool((CanvasTool)picked);
             }
@@ -496,6 +508,9 @@ namespace CrowdMatch
                 "【连绳】逐格点击切换选中（再点取消；同一列只留 1 辆，点第二辆会把原来那辆换掉），点「连成绳组」提交：\n" +
                 "≥2 辆、每列恰好 1 辆、列号连续、均未连接、端点已配、与已有绳组不交叉，并且会顺手关掉洗牌。\n" +
                 "【断绳】点一下把整个绳组高亮，再点回同一辆才断（整组取消）；点空格 / 没连的车取消待确认。\n" +
+                "【删除】点一下把某辆车高亮，再点同一辆才删；删掉后该列后排的车顺次前移补位（列仍压紧、rows 不变），\n" +
+                "整次一个 Undo。删除必然让车数与关卡像素对不上（少一辆）—— 这是设计内的，用于本来就已经对不上的关卡做微调；\n" +
+                "删掉的车若属某个绳组，只删这一辆、同组其它车的连接不动（要清就用「断绳」）。\n" +
                 "绳组始终画成「成员格组色描边 + 相邻两列车心连线」。生成 / 导入 Containers 等外部改动会自动刷新画布。",
                 MessageType.Info);
 
@@ -784,6 +799,10 @@ namespace CrowdMatch
                 {
                     DrawSelectionHighlight(rect);   // 断绳待确认：整个绳组一起亮
                 }
+                else if (_tool == CanvasTool.Delete && _deleteTarget == new Vector2Int(col, row))
+                {
+                    DrawSelectionHighlight(rect);   // 删除待确认：只亮被点的那一辆
+                }
             }
 
             if (rect.Contains(Event.current.mousePosition))
@@ -863,13 +882,7 @@ namespace CrowdMatch
             }
             else if (_hover.x < 0)
             {
-                text = _tool == CanvasTool.Move
-                    ? "按住有车的格子拖到别处松手即可移动；松手在画布外 = 取消"
-                    : _tool == CanvasTool.Question
-                        ? "问号：点一下标记为问号车，再点取消（左半本色、右半黑，编号带 ?）"
-                        : _tool == CanvasTool.Rope
-                            ? "连绳：点选相邻若干列各 1 辆车（再点取消，同列只留 1 辆），然后点「连成绳组」"
-                            : "断绳：点一下把整个绳组高亮，再点同一辆才断（整组取消）";
+                text = ToolIdleHint();
             }
             else
             {
@@ -879,11 +892,49 @@ namespace CrowdMatch
                     : "颜色 " + item.colorId + " / 容量 " + item.capacity +
                       (item.isQuestion ? "（问号车）" : "") +
                       (item.ropeGroupId != 0 ? "　绳组 " + item.ropeGroupId : ""));
+
+                if (_tool == CanvasTool.Delete)
+                    text += item == null ? "　｜　空格：没有车可删" : "　｜　点一下高亮、再点同一辆删除";
             }
 
             text += "　｜　网格 " + _group.columns + " 列 × " + _group.rows + " 行";
 
             EditorGUI.LabelField(rect, text, EditorStyles.miniLabel);
+        }
+
+        /// <summary>光标不在画布上时状态行显示的「本工具怎么用」——一个工具一句，别在这里堆嵌套三元。</summary>
+        private string ToolIdleHint()
+        {
+            switch (_tool)
+            {
+                case CanvasTool.Move:
+                    return "按住有车的格子拖到别处松手即可移动；松手在画布外 = 取消";
+                case CanvasTool.Question:
+                    return "问号：点一下标记为问号车，再点取消（左半本色、右半黑，编号带 ?）";
+                case CanvasTool.Rope:
+                    return "连绳：点选相邻若干列各 1 辆车（再点取消，同列只留 1 辆），然后点「连成绳组」";
+                case CanvasTool.Unrope:
+                    return "断绳：点一下把整个绳组高亮，再点同一辆才断（整组取消）";
+                default:
+                    return "删除：点一下把车高亮，再点同一辆才删（删掉后该列后排车顺次前移补位）";
+            }
+        }
+
+        /// <summary>删除待确认的提示行里那句「高亮的是谁」（含绳组信息，空格返回「空格」）。</summary>
+        private string DescribeCar(Vector2Int cell)
+        {
+            var item = _group.GetItem(cell.x, cell.y);
+            if (item == null)
+                return "空格";
+
+            string text = item.name + "（颜色 " + item.colorId + " / 容量 " + item.capacity + "）" +
+                          (item.isQuestion ? "（问号车）" : "");
+            if (item.ropeGroupId != 0)
+            {
+                int n = CountRopeGroupMembers(item.ropeGroupId);
+                text += "，属绳组 " + item.ropeGroupId + "（整组 " + n + " 辆，删掉后剩 " + Mathf.Max(0, n - 1) + " 辆）";
+            }
+            return text;
         }
 
         // ============================================================
@@ -1135,6 +1186,11 @@ namespace CrowdMatch
                         : "断绳：已高亮绳组 " + _unropeTargetId + "（整组 " +
                           CountRopeGroupMembers(_unropeTargetId) + " 辆）—— 再点 (" +
                           _unropeTarget.x + ", " + _unropeTarget.y + ") 执行，点别处换目标";
+                else if (_tool == CanvasTool.Delete)
+                    text = _deleteTarget.x < 0
+                        ? "删除：点一下把车高亮，再点同一辆才删；删掉后该列后排车顺次前移补位"
+                        : "删除：已高亮 (" + _deleteTarget.x + ", " + _deleteTarget.y + ") 的 " +
+                          DescribeCar(_deleteTarget) + " —— 再点它执行，点别处换目标、点空格取消";
                 else
                     text = "绳组：切到「连绳」点选成组，或切到「断绳」点车取消；成员格有组色描边与连线。";
             }
@@ -1174,15 +1230,17 @@ namespace CrowdMatch
 
             if (ev.type == EventType.MouseDown && rect.Contains(ev.mousePosition))
             {
-                // 四个工具的动作都在按下时发生（问号 / 连绳 / 断绳没有拖动手势）
+                // 四个工具的动作都在按下时发生（问号 / 连绳 / 断绳 / 删除没有拖动手势）
                 if (_tool == CanvasTool.Move)
                     BeginDrag(col, row);
                 else if (_tool == CanvasTool.Question)
                     ToggleQuestion(col, row);
                 else if (_tool == CanvasTool.Rope)
                     ToggleRopePick(col, row);
-                else
+                else if (_tool == CanvasTool.Unrope)
                     HandleUnropeClick(col, row);
+                else
+                    HandleDeleteClick(col, row);
 
                 ev.Use();
                 Repaint();
@@ -1200,7 +1258,7 @@ namespace CrowdMatch
         {
             _tool = tool;
             CancelDrag();
-            ClearRopeInteraction();
+            ClearToolState();
             if (_tool != CanvasTool.Move && _group != null)
                 _group.RebuildGrid();   // 场景可能在窗口开着时被改过
             Repaint();
@@ -1331,7 +1389,7 @@ namespace CrowdMatch
 
             Undo.CollapseUndoOperations(undoGroup);
 
-            ClearRopeInteraction();
+            ClearToolState();
             SceneView.RepaintAll();
             Repaint();
 
@@ -1358,11 +1416,99 @@ namespace CrowdMatch
             return cleared;
         }
 
-        /// <summary>清掉连绳点选与断绳待确认（换工具 / 刷新快照 / 撤销 / 进出 Play 时都作废）。</summary>
-        private void ClearRopeInteraction()
+        // ============================================================
+        // 删除
+        // ============================================================
+
+        /// <summary>
+        /// 删除模式：第一下点只把那**一辆车**高亮，点第二下**同一辆**才真删；
+        /// 点空格取消待确认，点别的车换目标。两步与「断绳」同一套约定，免得手一抖就少一辆车。
+        /// </summary>
+        private void HandleDeleteClick(int col, int row)
+        {
+            var item = _group.GetItem(col, row);
+            if (item == null)
+            {
+                ClearDeleteTarget();   // 空格：没有车可删，顺手取消待确认
+                return;
+            }
+
+            var cell = new Vector2Int(col, row);
+            if (_deleteTarget != cell)
+            {
+                _deleteTarget = cell;   // 第一下：只高亮
+                return;
+            }
+
+            ClearDeleteTarget();        // 第二下：真删
+            DeleteCar(item);
+        }
+
+        /// <summary>取消「删除待确认」状态。</summary>
+        private void ClearDeleteTarget()
+        {
+            _deleteTarget = new Vector2Int(-1, -1);
+        }
+
+        /// <summary>
+        /// 删掉一辆车，并把该列**后排的车顺次前移补位**（列保持压紧、不留洞）。整次一个 Undo 组。
+        ///
+        /// 收尾与拖放同一套：重建 grid → 同步盖子（挪到 row 0 的车要跟着合盖）→ 按锚点把最前排钉住
+        /// （末排被删空后画布会变矮，不补这一步最前排会往下跳）。<c>rows</c> **不变**。
+        /// 同列其它车的 ropeGroupId 不动 —— 绳组缺的那一节留给「断绳」处理，这里只报一句日志。
+        /// </summary>
+        private void DeleteCar(ContainerItem car)
+        {
+            if (car == null)
+                return;
+
+            _group.RebuildGrid();   // 先让 grid 与场景一致，免得按旧引用算出错误的行号
+            int col = car.gridX;
+            int row = car.gridZ;
+            int ropeId = car.ropeGroupId;
+            string carName = car.name;
+            int colorId = car.colorId;
+            int capacity = car.capacity;
+            float aboveBefore = _aboveHeight;   // 改动前「row 0 上方」的高度，末尾用来把最前排钉在原地
+
+            var list = ColumnItems(col);
+            if (!list.Remove(car))
+            {
+                Debug.LogWarning("[容器拖移画布] 要删的车已不在原位（快照过期），本次删除作废。");
+                return;
+            }
+
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(DeleteUndoName);
+
+            Undo.DestroyObjectImmediate(car.gameObject);
+
+            var moved = new List<ContainerItem>();
+            RewriteColumn(col, list, moved, DeleteUndoName);   // 后排前移补位
+
+            _group.RebuildGrid();
+            for (int i = 0; i < moved.Count; i++)
+                SyncLid(moved[i]);
+
+            EditorUtility.SetDirty(_group);
+            Undo.CollapseUndoOperations(undoGroup);
+            KeepFrontRow(aboveBefore);
+            SceneView.RepaintAll();
+            Repaint();
+
+            Debug.Log("[容器拖移画布] 已删除 " + carName + "（颜色 " + colorId + " / 容量 " + capacity + "）：(" +
+                      col + "," + row + ") 该列 " + (list.Count + 1) + " 辆 → " + list.Count + " 辆，" +
+                      "后排 " + moved.Count + " 辆已前移补位" +
+                      (ropeId != 0 ? "；它原属绳组 " + ropeId + "，同组其它车未动（要清用「断绳」）" : "") + "。");
+        }
+
+        /// <summary>清掉各工具的半途状态（连绳点选 / 断绳待确认 / 删除待确认）——换工具 / 刷新快照 / 撤销 / 进出 Play 时都作废。</summary>
+        private void ClearToolState()
         {
             _ropePick.Clear();
             ClearUnropeTarget();
+            ClearDeleteTarget();
         }
 
         /// <summary>落点 = 光标所在的那一格（不细分格的上下半）。高亮与状态行共用这一份。</summary>
@@ -1547,8 +1693,13 @@ namespace CrowdMatch
                       (ropeCleared > 0 ? "，并已断开绳组 " + ropeId + "（" + ropeCleared + " 辆）" : "") + "。");
         }
 
-        /// <summary>把一列的车按 <paramref name="list"/> 的顺序重铺到 row 0..n-1（压紧，不留洞）。</summary>
-        private void RewriteColumn(int col, List<ContainerItem> list, List<ContainerItem> moved)
+        /// <summary>
+        /// 把一列的车按 <paramref name="list"/> 的顺序重铺到 row 0..n-1（压紧，不留洞）。
+        /// <paramref name="undoName"/> 只影响这一步记的 Undo 名（默认就是拖放那条）；调用方通常已经开了 Undo 组，
+        /// 组名会盖过它，传进来是为了让单看每条记录时也说得通。
+        /// </summary>
+        private void RewriteColumn(int col, List<ContainerItem> list, List<ContainerItem> moved,
+                                   string undoName = UndoName)
         {
             for (int i = 0; i < list.Count; i++)
             {
@@ -1558,8 +1709,8 @@ namespace CrowdMatch
                 if (car.gridX == col && car.gridZ == i)
                     continue;   // 位置没变，不动它（也就不会记空 Undo）
 
-                Undo.RecordObject(car, UndoName);
-                Undo.RecordObject(car.transform, UndoName);
+                Undo.RecordObject(car, undoName);
+                Undo.RecordObject(car.transform, undoName);
                 car.gridX = col;
                 car.gridZ = i;
                 car.transform.localPosition = _group.GetLocalPosition(col, i);

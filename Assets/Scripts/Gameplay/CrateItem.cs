@@ -626,6 +626,9 @@ namespace CrowdMatch
         /// **顺序不能换**：先撤窗口，再 <see cref="PixelGroup.RefreshExposed"/>（它内部先
         /// <see cref="PixelGroup.RefreshCrateState"/> 撤占格 + 恢复渲染，再重算暴露），
         /// 最后才起波前 —— 波前要用刷新后的像素状态。
+        ///
+        /// 另外：这批刚露出来的像素算一次「新揭示」交给 <see cref="SameColorMergeWatcher"/>，
+        /// 与旁边同色已显色区域连成一片时播惊讶表情（判定同样用**刷新后**的状态）。
         /// </summary>
         private void RevealCoveredPixels()
         {
@@ -635,6 +638,29 @@ namespace CrowdMatch
                 return;
 
             group.RefreshExposed();
+
+            // 木箱被拆 = 被它盖住的一批像素刚露出来（颜色才可见）：与旁边同色已显色区域连成一片时
+            // 播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。收集放在 RefreshExposed **之后**
+            // —— 那时 crateMask 已撤、这些像素才算「可见」，判定器才认得它们。
+            if (Application.isPlaying)
+            {
+                List<PixelItem> revealed = null;
+                foreach (var cell in Cells)
+                {
+                    if (!group.IsInRange(cell.x, cell.y))
+                        continue;
+
+                    var pixel = group.grid[cell.x, cell.y];
+                    if (pixel == null)
+                        continue;
+
+                    (revealed ??= new List<PixelItem>()).Add(pixel);
+                }
+
+                if (revealed != null)
+                    SameColorMergeWatcher.Notify(group, revealed);
+            }
+
             StartRestoreWave();
         }
 

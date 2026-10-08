@@ -18,8 +18,9 @@
 失败路径**唯一**：
 
 ```
-TryCheckFail()                        GameController.cs:281
+TryCheckFail()                        GameController.cs:342
  ├─ _transitioning 为真        → return
+ ├─ 复活序列还在跑            → return   （`_revivePlaying` 或带/缓冲区仍有保留像素，见 §5）
  ├─ recordMode 为真            → return   （Record 模式不判失败，容器不参与吸收）
  └─ IsFail() 为真
       ├─ _transitioning = true
@@ -27,7 +28,11 @@ TryCheckFail()                        GameController.cs:281
       └─ Invoke(nameof(DoRevive), 1.5f)
             └─ DoRevive()              GameController.cs:350
                  ├─ Revive()           （保留 reviveKeepBeltCount 个在带，其余溢出 + 缓冲区全部匹配后排车；
-                 │                       无同色车的销毁并计入 ClearedPixelCount）
+                 │                       无同色车并入「消失」组、pop 后销毁并计入 ClearedPixelCount；
+                 │                       匹配与座位同步做完：消失组 t=0 一次性播完，
+                 │                       跳跃组按「车行 → 车列 → 空位」升序按 reviveInterval 依次起播）
+                 │                       注：溢出像素**不提前摘**——序列期间仍留在带/缓冲区里被驱动，
+                 │                       只排除匹配/进带/表情，轮到自己才 ReleaseRevivePixel 摘除
                  ├─ GameState.GameStart()
                  └─ _transitioning = false
 ```
@@ -240,7 +245,10 @@ if (dist[nx, nz] <= myDist)
    | 传送带 | `OccupiedSlots / TotalSlots`（没有传送带时打 `无传送带`） |
    | 未判失败的原因 | `IsFail(out reason)` 输出的**第一条**被挡下的门禁（编号见 §3）+ 实测计数值 |
 
-   被挡在判定之前的情形也会打印：`已锁定 _transitioning（胜负过渡中）`、`Record 模式不判失败`。
+   被挡在判定之前的情形也会打印：`已锁定 _transitioning（胜负过渡中）`、`复活表现播放中`、`Record 模式不判失败`。
+   其中「复活表现播放中」覆盖**整段复活序列**（跳跃队列协程 + 带/缓冲区里还没摘下的保留像素）：
+   这些保留像素占着槽位却不参与匹配，门禁 8 会因此找不到任何「可匹配」的带上像素而**误判失败**，
+   所以这段窗口内一律不判。
    与上一条**完全相同**的行不重复打印（复活期间会有几十次上车回调，行内容一模一样），
    真判失败时会清空这条去重记忆。
 
