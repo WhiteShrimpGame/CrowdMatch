@@ -303,6 +303,9 @@ namespace CrowdMatch
         /// 生成一波同色像素：从管道格 scale=0 蛇形前进填满轨道，移动中平滑缩放到 unitSize。
         /// 流式补位：蛇头逐格推进，每步仅当蛇头目标格不再被提取像素占用（停靠/进入视为占用，正在离开不算）时才前进，
         /// 身体同步跟进一格。这样轨道不必整体清空即可开始补位，显著缩短等待时间。
+        ///
+        /// 全部就位后把本波交给 <see cref="SameColorMergeWatcher"/>：与旁边同色已显色区域连成一片时
+        /// 播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。
         /// </summary>
         private IEnumerator SpawnWave(int color)
         {
@@ -387,6 +390,11 @@ namespace CrowdMatch
                 item.SetClickable(true);
             }
             Group?.RefreshExposed();
+
+            // 本波就位 = 一批像素刚被放进网格：与旁边同色已显色区域连成一片时播惊讶表情。
+            // 传整波像素；中途已被匹配移出的那些由判定器按 grid 引用复核剔掉。
+            SameColorMergeWatcher.Notify(g, items);
+
             snakeCells.Clear();
             _spawning = false;
         }

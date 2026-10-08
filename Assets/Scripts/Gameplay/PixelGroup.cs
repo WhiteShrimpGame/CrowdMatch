@@ -743,6 +743,9 @@ namespace CrowdMatch
         ///   · 「使之暴露的那一次点击」也不消耗 —— 那一刻按点击前的状态它仍未暴露。
         ///
         /// 只有真有冰组融化到 0 时才重建（冰面 / 冻结掩码 / 暴露），避免每次点击都跑全网格刷新。
+        ///
+        /// **刚化开的组内像素**算一次「新揭示」（它们的颜色之前被冰盖着看不见）：交给
+        /// <see cref="SameColorMergeWatcher"/> 判定是否与旁边的同色已显色区域连成一片，命中就播惊讶表情。
         /// </summary>
         public void NotifyClickMovedOut()
         {
@@ -750,6 +753,7 @@ namespace CrowdMatch
                 return;
 
             bool anyMelted = false;
+            List<PixelItem> thawed = null;       // 本次刚化开的组内像素（颜色才变可见）
             for (int i = 0; i < iceGroups.Count; i++)
             {
                 var ice = iceGroups[i];
@@ -763,6 +767,7 @@ namespace CrowdMatch
                 {
                     anyMelted = true;
                     ice.PlayMeltEffect();        // 刚化开：生成融化特效 + 播音效（冰上自己配 tag）
+                    CollectIcePixels(ice, ref thawed);
                 }
                 else
                     ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
@@ -776,6 +781,28 @@ namespace CrowdMatch
                 if (iceGroups[i] != null)
                     iceGroups[i].BuildVisual(this);
             RefreshExposed();   // 冰化开后组内像素要立刻恢复可点
+
+            // 冰化开 = 一批像素的颜色刚变可见：与旁边同色已显色区域连成一片时播惊讶表情。
+            // 放在 RefreshExposed 之后：那时冻结掩码已撤、这些像素才算「可见」。
+            if (thawed != null)
+                SameColorMergeWatcher.Notify(this, thawed);
+        }
+
+        /// <summary>收集该冰组成员格上当前仍在网格里的像素（融化瞬间用来判定「新揭示的一批」）。</summary>
+        private void CollectIcePixels(IceItem ice, ref List<PixelItem> outPixels)
+        {
+            if (ice == null || grid == null)
+                return;
+
+            foreach (var cell in ice.CellSet)
+            {
+                if (!IsInRange(cell.x, cell.y))
+                    continue;
+                var p = grid[cell.x, cell.y];
+                if (p == null)
+                    continue;
+                (outPixels ??= new List<PixelItem>()).Add(p);
+            }
         }
 
         // ===== 木箱 =====
@@ -794,6 +821,17 @@ namespace CrowdMatch
         /// （Record 模式不走拆箱计数，见 <c>GameController.ResolveMatch</c> 的提前返回）。
         /// </summary>
         [System.NonSerialized] public bool recordRevealCrates;
+
+        /// <summary>
+        /// 「同色连成一片」惊讶表情的**抑制开关**（口径见 Docs/EmojiSurpriseMergeDesign.md）：true 时
+        /// <see cref="SameColorMergeWatcher.Notify"/> 直接返回。
+        ///
+        /// 由 <c>GameController.InitLevel</c> 在关卡加载期间置 true、首次 <see cref="RefreshExposed"/> 之后复位。
+        /// 不抑制的话：开局就贴着首排 / 连着出口空格的问号像素会在首次 <see cref="RefreshExposed"/> 里
+        /// 当场揭晓 —— 那不是「动态事件」，却会撒一片惊讶表情。**必须在 <c>LevelLoader.Apply</c> 之前写入**
+        /// （那一步的 RebuildGrid 与随后的 RefreshExposed 都会读它）。
+        /// </summary>
+        [System.NonSerialized] public bool suppressMergeSurprise;
 
         /// <summary>
         /// 该格所属的木箱（口径与 <see cref="crateMask"/> 一致：已拆掉、且已过放大阶段的木箱不再算）；无则 null。
@@ -1186,6 +1224,11 @@ namespace CrowdMatch
             }
 
             // 4. 应用到各像素
+            //    顺带收集「本次调用里由未揭晓 → 揭晓」的问号像素：揭晓等于把一批颜色显出来，
+            //    若它们与旁边的同色已显色区域连成一片，要各播一个惊讶表情（见 SameColorMergeWatcher）。
+            //    判定放在循环之后（那时 SetExposed 已跑完、材质已换成原色）。isQuestion / revealed 都是托管字段，
+            //    在调用前预判与 SetExposed 内部那一句等价。
+            List<PixelItem> newlyRevealed = null;
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -1193,9 +1236,17 @@ namespace CrowdMatch
                     var item = grid[c, r];
                     if (item == null)
                         continue;
+
+                    bool revealing = item.isQuestion && !item.revealed && active[c, r];
                     item.SetExposed(active[c, r]);
+                    if (revealing)
+                        (newlyRevealed ??= new List<PixelItem>()).Add(item);
                 }
             }
+
+            // 问号揭晓作为一次独立的「新揭示」事件（与生产者自己的那批互不影响，各判各的）
+            if (newlyRevealed != null)
+                SameColorMergeWatcher.Notify(this, newlyRevealed);
         }
 
         /// <summary>清空所有 PixelItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
