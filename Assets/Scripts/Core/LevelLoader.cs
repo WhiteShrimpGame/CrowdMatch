@@ -46,7 +46,20 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>把关卡数据应用到两个网格（空的 group 参数会被跳过）。</summary>
+        /// <summary>
+        /// 把关卡数据应用到两个网格（空的 group 参数会被跳过）。
+        ///
+        /// **刷新契约（2026-10-08 精简，勿随意破坏）**：整段加载只在两处调 <see cref="PixelGroup.RebuildGrid"/> ——
+        /// <see cref="ApplyPixel"/> 末尾（分配全部网格表并灌入像素）与 <see cref="ApplyCrates"/> 末尾（最终权威态）。
+        /// 中间步骤里只有 <see cref="ApplyWalls"/> 与 <see cref="ApplyPipes"/> 必须各刷新一次：
+        /// **箱子容量要读障碍表**（<c>BoxItem.ComputeCapacity → CountIfEmpty → IsBlocked</c> 读
+        /// <c>wallGrid/pipeGrid/boxGrid/crateMask</c>），而 <c>SpawnWall</c>/<c>SpawnPipe</c> **都不写自己的表** ——
+        /// 表的内容完全靠重建时那次 <c>GetComponentsInChildren</c> 扫描。少了这两次刷新，墙格 / 管道格会被
+        /// 当成空格算进箱子容量，箱子会提前开。
+        /// 其余四步（门 / 箱子 / 升降台 / 冰）的产物在加载中途**没有任何读者**（门表、区域掩码、倍率图、
+        /// 冰冻掩码、elevators / iceGroups / boxes 列表都只在玩法期或最终重建里被读），所以它们的刷新已删除 ——
+        /// 这一步把每次加载的 RebuildGrid 从 8 次降到 4 次，语义逐字不变。
+        /// </summary>
         public static void Apply(PixelGroup pixelGroup, ContainerGroup containerGroup, LevelData data, ColorConfig colorConfig)
         {
             if (data == null)
@@ -54,13 +67,13 @@ namespace CrowdMatch
             if (pixelGroup != null)
             {
                 ApplyPixel(pixelGroup, data.pixel, data.walls, data.pipes, data.boxes, data.gates, colorConfig);
-                ApplyWalls(pixelGroup, data.walls);
-                ApplyPipes(pixelGroup, data.pipes);
+                ApplyWalls(pixelGroup, data.walls);      // 必须刷新：箱子容量要读 wallGrid
+                ApplyPipes(pixelGroup, data.pipes);      // 必须刷新：箱子容量要读 pipeGrid
                 ApplyGates(pixelGroup, data.gates);
                 ApplyBoxes(pixelGroup, data.boxes, colorConfig);
                 ApplyElevators(pixelGroup, data.elevators, colorConfig);
                 ApplyIces(pixelGroup, data.iceGroups);   // 放最后：箱子 / 升降台的像素也要在，冰才冻得住它们
-                ApplyCrates(pixelGroup, data.crates);    // 木箱同理：它盖的像素必须是已经存在的
+                ApplyCrates(pixelGroup, data.crates);    // 木箱同理：它盖的像素必须是已经存在的；末尾刷新 = 最终权威态
             }
             if (containerGroup != null)
                 ApplyContainer(containerGroup, data.container, colorConfig);
@@ -198,16 +211,14 @@ namespace CrowdMatch
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个管道。");
         }
 
-        /// <summary>清空并重建 PixelGroup 下的倍乘门（线段不合法的门被跳过）。</summary>
+        /// <summary>清空并重建 PixelGroup 下的倍乘门（线段不合法的门被跳过）。
+        /// 不在此刷新：门表 / 区域掩码 / 倍率图在加载中途没有读者，统一留到 ApplyCrates 末尾那次 RebuildGrid。</summary>
         private static void ApplyGates(PixelGroup pg, LevelData.GateData[] gates)
         {
             pg.ClearGates();
 
             if (gates == null)
-            {
-                pg.RebuildGrid();
                 return;
-            }
 
             int spawned = 0;
             foreach (var g in gates)
@@ -217,8 +228,6 @@ namespace CrowdMatch
                 if (pg.SpawnGate(g.start, g.end, g.multiplier) != null)
                     spawned++;
             }
-
-            pg.RebuildGrid();
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 道倍乘门。");
@@ -233,10 +242,7 @@ namespace CrowdMatch
             pg.ClearIces();
 
             if (iceGroups == null)
-            {
-                pg.RebuildGrid();
-                return;
-            }
+                return;   // 不在此刷新：iceGroups / iceFrozenMask 加载中途没有读者（见 Apply 的刷新契约）
 
             int spawned = 0;
             foreach (var g in iceGroups)
@@ -246,8 +252,6 @@ namespace CrowdMatch
                 if (pg.SpawnIce(g) != null)
                     spawned++;
             }
-
-            pg.RebuildGrid();
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个冰组。");
@@ -288,10 +292,7 @@ namespace CrowdMatch
             pg.ClearBoxes();
 
             if (boxes == null)
-            {
-                pg.RebuildGrid();
-                return;
-            }
+                return;   // 不在此刷新：boxes 列表 / boxGrid 在加载中途没有读者（见 Apply 的刷新契约）
 
             int spawned = 0;
             foreach (var b in boxes)
@@ -301,8 +302,6 @@ namespace CrowdMatch
                 if (pg.SpawnBox(b, config) != null)
                     spawned++;
             }
-
-            pg.RebuildGrid();
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个箱子。");
@@ -314,10 +313,7 @@ namespace CrowdMatch
             pg.ClearElevators();
 
             if (elevators == null)
-            {
-                pg.RebuildGrid();
-                return;
-            }
+                return;   // 不在此刷新：elevators 列表在加载中途没有读者（见 Apply 的刷新契约）
 
             int spawned = 0;
             foreach (var e in elevators)
@@ -327,8 +323,6 @@ namespace CrowdMatch
                 if (pg.SpawnElevator(e, config) != null)
                     spawned++;
             }
-
-            pg.RebuildGrid();
 
             if (spawned > 0)
                 Debug.Log("[LevelLoader] 已加载 " + spawned + " 个升降台。");

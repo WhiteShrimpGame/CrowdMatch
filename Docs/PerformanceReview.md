@@ -1,20 +1,23 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**分析 + 已落地 4 处最小改动**（P7 / P10 / P11 / P12，见下）。
+> 状态：**分析 + 已落地 5 处改动**（P3 / P7 / P10 / P11 / P12，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **已改码（4 处，两个程序集离线编译均 0 错误）**：
+> - **已改码（5 处，两个程序集离线编译均 0 错误）**：
 >   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
 >   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
 >   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
 >   且原建议的「`gatheredItems.Count == 0` 早退」会破坏开盖，**已作废**；
 >   **P12** `StepExtracting` 复用快照缓冲 + 同一像素的 `transform.position` 读取 6→2 次（§3.3）
->   —— 其 `ApplyEntryQueue` 的 O(E²) 那层**未做**，先测 E 再定。
+>   —— 其 `ApplyEntryQueue` 的 O(E²) 那层**未做**，先测 E 再定；
+>   **P3** `LevelLoader` 每次进关的 `RebuildGrid` **8 次 → 4 次**（§2.3）—— 同时**更正**了两处原描述：
+>   实际是 8 次不是 16 次，且原建议的「合并为一次」**会破坏箱子容量**（中间两步承重），**已作废**。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
+> - **只记录、不处理**：§2.3 末尾的 **E1 / E2**（升降台相关，待该功能正式启用）
 >
-> 其余 **P3~P6、P8、P9、P14~P16** 均**未处理**。改动清单见 §7。
+> 其余 **P4~P6、P8、P9、P14~P16** 均**未处理**。改动清单见 §7。
 > 目标平台：移动端 / WebGL（`GameManager.cs` 设 `Application.targetFrameRate = 60`、`vSyncCount = 0`）
 > 范围：`Assets/Scripts/Gameplay`、`Assets/Scripts/Core`、`Assets/Scripts/DailyBonus`、`Assets/Scripts/SpawnPool`
 > （编辑器工具单列 §5，它们不影响运行时帧率，但影响迭代速度）
@@ -41,7 +44,7 @@
 |---|---|---|---|---|
 | P1 | `FrameItem.Build()` 每次点击全量 `Destroy` + `Instantiate` 描边块 | — | ✅ **已禁用**（FrameItem 不再被调用） | §2.1 |
 | P2 | 6 个调试开关默认全开，其中 `debugMoveLog` 在逐像素热路径打日志 | — | ✅ **已处理**（场景 / 预制体已关，无需改码） | §2.2 |
-| P3 | `LevelLoader` 一次加载调 `RebuildGrid()` **16 次** | 每次进关 | 🟠 | §2.3 |
+| P3 | `LevelLoader` 一次加载调 `RebuildGrid()` **8 次**（原文档误写 16 次） | 每次进关 | ✅ **已减到 4 次**（另更正了原判定，见 §2.3） | §2.3 |
 | P4 | `BoxItem.TryOpen()` 每次点击空转重算 + 5 万预算回溯 + 默认开日志 | **每次点击 × 每个未就绪的箱子** | 🟠 | §2.4 |
 | P5 | `PixelGroup.RefreshExposed()` 每次点击大块分配 + `O(格数×管道数)` BFS | 每次点击 | 🟠 | §2.5 |
 | P6 | `SameColorMergeWatcher.Notify()` 两遍全盘 BFS + 按像素数分配 | 每次动态事件 | 🟡 | §2.6 |
@@ -196,30 +199,72 @@ if (debugMoveLog && winner.item != null)
 
 ---
 
-### 2.3 P3 · `LevelLoader` 一次加载重建网格 16 次 🟠
+### 2.3 P3 · `LevelLoader` 一次加载重建网格 8 次 → ✅ **已减到 4 次（并更正原描述）**
 
-**位置**：`Core/LevelLoader.cs:50-67`（`Apply`）+ 各 `ApplyXxx` 末尾的 `pg.RebuildGrid()`
+> **⚠️ 更正（2026-10-08）**：本节最初两处写错：
+>
+> 1. **不是 16 次，是 8 次。** `grep` 命中的 16 处只是**源码位置数** —— 每个 `ApplyXxx` 都有
+>    「`data == null` 分支」和「末尾」两处，二者**互斥**，每次加载每步只执行一个。
+>    所以每次 `Apply()` 实际执行 **8 次** `pg.RebuildGrid()`（外加 1 次 `cg.RebuildGrid()`，那是另一套）。
+>    派生的「144 个二维数组、128 次层级扫描」相应减半为 ~72 / ~64。
+> 2. **「每步都重建是浪费」这个判断是错的 —— 其中两步是承重的。** 见下。
 
-`grep -n RebuildGrid LevelLoader.cs` 命中 **16 处**（`:146,156,169,182,195,208,221,237,250,266,279,292,305,318,331`，外加 `:373` 的车组重建）。
-每个 `ApplyXxx` 都是「改一批数据 → 立刻 `RebuildGrid()`」，下一个 `ApplyYyy` 又把它全部推翻重来。
+**位置**：`Core/LevelLoader.cs:48-80`（`Apply`）+ 各 `ApplyXxx`
 
-`PixelGroup.RebuildGrid()`（`:165-200`）单次代价不小：
+#### 为什么中间的重建不能全删：箱子容量要读障碍表
 
-- 分配 **9 个 `[columns, TotalRows]` 数组**（`grid` / `wallGrid` / `pipeGrid` / `boxGrid` / `crateMask` / `gateGrid` / `gateRegionMask` / `gateMultiplier` / `iceFrozenMask`）+ 一个 `columns×TotalRows` 的填充循环；
-- 重建 **6 个 `List`**；
-- **8 次 `GetComponentsInChildren<T>()`** 全层级扫描（`PixelItem` / `WallItem` / `PipeItem` / `GateItem` / `BoxItem` / `ElevatorItem` / `IceItem` / `CrateItem`）；
-- 每道门跑一次 `GateRegion.ComputeRegion`（网格 BFS，`PixelGroup.cs:266`）。
+```
+ApplyBoxes → SpawnBox                                    (PixelGroup.cs:1798)
+ └─ BoxItem.ComputeCapacity                               (BoxItem.cs:129)
+     └─ CountIfEmpty → group.IsBlocked
+         └─ IsWall | IsPipe | IsBox | IsCrateCell  →  读 wallGrid / pipeGrid / boxGrid / crateMask
+```
 
-× 16 次 = **144 个二维数组、128 次层级扫描**，绝大部分中间结果是立刻被丢弃的。
+而 **`SpawnWall` 不写 `wallGrid`**（`PixelGroup.cs:1495`）、**`SpawnPipe` 不写 `pipeGrid`**（`:1545`）、
+**`ClearWalls` / `ClearPipes` 只把表清零**（`:1284` / `:1302`）—— 表的内容**完全靠重建时那次
+`GetComponentsInChildren` 扫描**。所以 `ApplyWalls` / `ApplyPipes` 的重建**不能删**：
+删了箱子会把墙格 / 管道格算成空格，`BoxItem.capacity` 偏大 → **箱子提前开**。
+这是会静默溜进正式关卡的玩法 bug，不是性能问题 —— 原作者的「每步都重建」不是懒。
 
-**顺带一条**：`RebuildGrid` 里当 `elevators.Count == 0` 时会调
-`PixelGroup.RestoreDefaultGroundMaterial`（`:322`）→ `ElevatorItem.cs:126` 的
-**`Object.FindObjectsOfType<Renderer>()`** —— 全场景渲染器扫描。这条在 16 次重建里会被触发多次。
+#### 已做的改动（2026-10-08）· 只删「没有读者」的四步
 
-**建议**：`Apply` 里加一个「批量模式」——8 个 `ApplyXxx` 全部跑完**只 `RebuildGrid()` 一次**
-（把各 `ApplyXxx` 末尾的调用挪到 `Apply` 末尾；有 truly 需要中间态的（如冰 / 木箱盖像素要看到已存在的像素）
-用一个 dirty 标记延后到 `Apply` 收尾）。这条属于**进关一次性**开销，收益是「进关更快」而不是「帧率更高」，
-优先度低于 §2 里那几条每帧 / 每次点击的，但改动很干净。
+删掉 `ApplyGates` / `ApplyIces` / `ApplyBoxes` / `ApplyElevators` 各自的 `RebuildGrid()`
+（含 `data == null` 分支那次）。依据：**这四步的产物在加载中途没有任何读者**（逐点 `grep` 核对过）：
+
+| 产物 | 加载中途的读者 |
+|---|---|
+| `gateGrid` / `gateRegionMask` / `gateMultiplier` | 无（`IsBlocked` **不含门**；`SpawnGate` 不读网格） |
+| `iceGroups` / `iceFrozenMask` | 无（`SpawnIce` / `SpawnCrate` 都不读） |
+| `boxes` / `boxGrid` | 无（`boxGrid` 由 `SpawnBox` **增量写**维护，供同一批里后面的箱子读） |
+| `elevators` | 无（`TryAdvance` 等玩法期才读） |
+
+它们统一留到 `ApplyCrates` 末尾那次「最终权威重建」——它跑在 `ApplyIces` / `ApplyElevators` **之后**，
+所以 `elevators.Count` 看到的是本关**最终**集合，比原来「前几次重建带着上一关残留子物体」更准确。
+
+**结果**：每次加载 `pg.RebuildGrid()` **8 次 → 4 次**（保留 `ApplyPixel` / `ApplyWalls` / `ApplyPipes` / `ApplyCrates`），
+语义逐字不变。刷新契约已写进 `Apply` 的 XML 注释（`LevelLoader.cs:48-65`），后续改动照着它走。
+
+#### 明确未做（各有理由）
+
+- **轻量刷新变体**（只重扫障碍表、跳过门区域 BFS / `RefreshIceState`）：删到只剩 4 次（其中仅 2 次是中间步骤）
+  之后，这个变体只省约 2 次门 BFS + 2 次全网格 pass ≈ **剩余开销的 8%**，噪声级；
+  不值得为此给 `RebuildGrid` 加模式参数。
+- **`ClearXxx` 里的重复分配**：读代码后**建议不做**。`ClearGates` / `ClearIces` 的 `= null` 是**刻意**的
+  （`:1322-1326` 注释：倍率「不在区域内 = 1」，用 0 填充会在重建前被读成倍率 0；三个访问器都对 null 兜底），
+  不能改成「清零复用」。剩下四个 `new bool[cols, rows]` 合计每次加载只省 ~340 字节，且发生在**进关时一次**、
+  不在帧预算里 —— 改了只是让 diff 变大。
+
+#### 待办（升降台相关，按你的要求只记录、不处理）
+
+- **E1 · 缓存地面 Renderer**：`RebuildGrid` 在 `elevators.Count == 0` 时调
+  `RestoreDefaultGroundMaterial`（`:243`）→ `ElevatorItem.FindGroundRenderer()` = **`Object.FindObjectsOfType<Renderer>()`**
+  全场景扫描。改成缓存引用即可。等升降台正式启用时做。
+  **注意**：它挂在 `RebuildGrid` 里，所以这次重建次数减半已让它的调用次数**从 8 次降到 4 次**。
+- **E2 · 先确认 `PixelGroup.defaultGroundMaterial` 挂没挂**（`:322` 有 `if (defaultGroundMaterial == null) return;`）——
+  没挂则那条扫描根本不存在。需看 Inspector（预制体，按约定未读）。
+
+**性质**：这条整体是**进关一次性**开销，收益是「进关更快」而非「帧率更高」，
+优先度低于 §2 / §3 里那几条每帧 / 每次点击的。
 
 ---
 
@@ -807,11 +852,12 @@ private void UpdateCountText()
 ## 7. 建议的动手顺序
 
 > **状态更新（2026-10-08）**：
-> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）
->   —— 见 §3.1 / §3.6 / §3.2 / §3.3
+> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）、第 10 条（P3）
+>   —— 见 §3.1 / §3.6 / §3.2 / §3.3 / §2.3
 > - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
 > - **已定方案、未改码**：第 15 条（P13，`IceItem` 仅关卡开始重建，见 §4.1）
 > - **只做了一半**：第 7 条（P12）的 `ApplyEntryQueue` O(E²) 那层**未做**，先测 E 再定（§3.3）
+> - **只记录、不处理**：升降台相关的 E1 / E2（§2.3 末尾）
 >
 > 各条都保留在原编号位置上，只标状态，**不重排序号**，以免打乱下表的 `#` ↔ `P#` 对应关系。
 
@@ -837,7 +883,7 @@ private void UpdateCountText()
 | 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/534` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |
 | 9 | **P4** | `BoxItem.TryOpen` 把空格判定提到建容器之前（即 §2.4 的 (a)） | `BoxItem.cs:361-386` |
-| 10 | **P3** | `LevelLoader` 合并为一次 `RebuildGrid` | `LevelLoader.cs:56-63` |
+| 10 | **P3** | ~~`LevelLoader` 合并为一次 `RebuildGrid`~~ **原方案作废**（中间两步承重，见 §2.3）。实做：删掉「无读者」的四步刷新 —— **✅ 已处理**，每次进关 `RebuildGrid` 8 → 4 次 | `LevelLoader.cs:48-80` |
 
 ### 第三档：需要你先拍板（改口径 / 改算法）
 
@@ -869,7 +915,7 @@ private void UpdateCountText()
 | 描边重建 | `Gameplay/FrameItem.cs` | `Build`(88) / `Clear`(117) / `Spawn`(138) |
 | 调试开关 | `Gameplay/CrowdBufferZone.cs` / `GameController.cs` / `PipeItem.cs` / `BoxItem.cs` / `ElevatorItem.cs` | 见 §2.2 表 |
 | 逐像素日志 | `Gameplay/CrowdBufferZone.cs` | `SweepOnce` 内 `:760-772` |
-| 关卡加载重建 | `Core/LevelLoader.cs` | `Apply`(50) / 16 处 `RebuildGrid` |
+| 关卡加载重建 | `Core/LevelLoader.cs` | `Apply`(48) / 每次加载 4 处 `RebuildGrid`（原 8 处，见 §2.3） |
 | 网格重建 | `Gameplay/PixelGroup.cs` | `RebuildGrid`(165) |
 | 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(509) / `SolveConnected`(595) / `CanonicalKey`(743) |
 | 暴露刷新 | `Gameplay/PixelGroup.cs` | `RefreshExposed`(1047) |
