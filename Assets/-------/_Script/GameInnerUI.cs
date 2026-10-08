@@ -183,11 +183,15 @@ public class GameInnerUI : MonoBehaviour
                 UIManager.Instance.ShowTip("场景中没有胶带！");
                 return;
             }*/
-            Debug.Log("使用了道具2磁铁");
-            CousmeProp(itemType);
+            // 道具2「磁铁」：把最前面一排车用同色像素喂满，装满的车随即出库。
+            // 像素从棋盘上捞（无视阻挡）；传送带 / 缓冲区不碰 —— 那里的像素本来就会按正常流程匹配到同色车。
+            Debug.Log("使用了道具2磁铁：最前面一排磁吸同色像素");
+            var gc = GameController.Instance;
+            if (gc != null)
+                gc.MagnetClearFrontRow();
+
+            CousmeProp(itemType);   // 点按钮就扣
             UpdateCurrentButtonInfo();
-            //LogicOnMagnetBtnClick();
-            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
             PlayerPrefs.Save();
         }
     }

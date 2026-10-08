@@ -111,6 +111,13 @@ namespace CrowdMatch
         /// <summary>是否正在释放一波（蛇形生成动画进行中，_spawning）。</summary>
         public bool IsReleasing => _spawning;
 
+        /// <summary>诊断用：已释放的波数。配合 <see cref="TotalWaveCount"/> 看波次是否还在推进 ——
+        /// 长时间停在同一个值就说明管道卡住了（那才会让轨道格永久算障碍）。</summary>
+        public int ReleasedWaveCount => _waveIndex;
+
+        /// <summary>诊断用：总波数。</summary>
+        public int TotalWaveCount => colors != null ? colors.Count : 0;
+
         /// <summary>该格是否属于管道覆盖范围（管道自身格 + 轨道格）。供暴露判定把管道覆盖格视为阻挡。</summary>
         public bool CoversCell(int col, int row)
         {

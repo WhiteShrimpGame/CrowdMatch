@@ -587,6 +587,121 @@ namespace CrowdMatch
                 ui.gameInnerUI.ConsumeRemovePropForce();
         }
 
+        // ===== 道具2「磁铁」 =====
+
+        /// <summary>
+        /// 道具2「磁铁」：把**最前面一排**车（每列 <c>grid[col, 0]</c>）用同色像素喂满，装满的车随即走正常出库链路。
+        ///
+        /// 口径（已与用户核对）：
+        /// · 像素**从棋盘上捞**，无视前排连通限制（磁铁本来就该能捞被围住的）；
+        /// · **不碰传送带 / 缓冲区**：那里的像素本来就会按正常流程匹配到同色车，而把它们抽出来只有破坏性的
+        ///   Drain API（复活那套会把没匹配上的像素直接销毁），磁铁不该带这种副作用；
+        /// · 装不满的车**留在前排等待**（能吸多少吸多少，不强求出库）；
+        /// · 未揭晓的问号像素不捞 —— 捞走会泄露它的颜色。
+        ///
+        /// 表现走 <see cref="ContainerGroup.ConsumePixelInstant"/> 的瞬移（弹出即出现在车上），不播走路。
+        /// </summary>
+        public void MagnetClearFrontRow()
+        {
+            if (pixelGroup == null || containerGroup == null)
+                return;
+
+            var carGrid = containerGroup.grid;
+            if (carGrid == null)
+                return;
+
+            bool detachedAny = false;
+
+            for (int col = 0; col < containerGroup.columns; col++)
+            {
+                var car = carGrid[col, 0];
+                if (car == null)
+                    continue;
+
+                car.OpenLid();   // 幂等：前排车本来就是开盖的
+
+                while (!car.IsEmpty)
+                {
+                    var pixel = FindBoardPixelOfColor(car.colorId);
+                    if (pixel == null)
+                        break;   // 场上没有同色像素了 → 装不满，留在前排等待
+
+                    DetachPixelForMagnet(pixel);
+                    detachedAny = true;
+                    containerGroup.ConsumePixelInstant(pixel, car);
+                }
+            }
+
+            // 收尾必须与 ResolveMatch 的移出收尾**逐条对齐**，少一条就会留下「看不见的遮挡」：
+            //   TryOpenBoxes / TryAdvanceElevators —— 箱子与升降台的占格要跟着释放；
+            //     不释放那些格依旧是障碍（IsBlocked），旁边的人既不会亮、也点不出去。
+            //   RefreshExposed —— 重算暴露。
+            //   RefreshFrame   —— 重建整体描边。场景里有 FrameItem 时描边是它统一画的
+            //     （PixelItem 自身描边被关掉），不重建就还是旧轮廓 → 「该发白光的没发」。
+            if (detachedAny)
+            {
+                pixelGroup.TryOpenBoxes();
+                pixelGroup.TryAdvanceElevators();
+                pixelGroup.RefreshExposed();
+                RefreshFrame();
+            }
+        }
+
+        /// <summary>
+        /// 在棋盘上找一个该颜色的像素（无视**其他像素**的阻挡）。
+        /// 但**不捞**与「能点」集合一致的那三类：被木箱盖住、被冰组冻住、未揭晓问号。
+        /// 前两者捞走会破坏木箱 / 冰组的账——它们记着自己在哪些格上，格不释放就变成看不见的障碍；
+        /// 问号则是因为颜色本身就是秘密。这几类本来点了也没反馈，不捞它们不会让磁铁显得失灵。
+        /// </summary>
+        private PixelItem FindBoardPixelOfColor(int colorId)
+        {
+            var grid = pixelGroup.grid;
+            if (grid == null)
+                return null;
+
+            int cols = pixelGroup.columns;
+            int totalRows = pixelGroup.TotalRows;
+
+            for (int row = 0; row < totalRows; row++)
+                for (int col = 0; col < cols; col++)
+                {
+                    var p = grid[col, row];
+                    if (p == null)
+                        continue;
+                    if (p.colorId != colorId)
+                        continue;
+                    if (p.IsCovered)
+                        continue;                          // 木箱盖住
+                    if (p.IsFrozen)
+                        continue;                          // 冰组冻住
+                    if (p.isQuestion && !p.revealed)
+                        continue;                          // 未揭晓问号：会泄露颜色
+
+                    return p;
+                }
+            return null;
+        }
+
+        /// <summary>
+        /// 把像素从像素网格摘掉（磁铁捞走后立刻瞬移上车，不走传送带）。
+        /// 与 <see cref="ResolveMatch"/> 的移出口径保持一致：置空格、关暴露/点击、清道具高亮，
+        /// 并记上「已点出」与进度分子（不记的话进度条永远到不了 100%）。
+        /// </summary>
+        private void DetachPixelForMagnet(PixelItem item)
+        {
+            int col = item.gridX;
+            int row = item.gridZ;
+
+            pixelGroup.grid[col, row] = null;
+            item.SetExposed(false);
+            item.SetPropGlow(false);
+            item.SetClickable(false);
+            item.SetWalking(false);   // 瞬移上车，不播走路
+
+            GameData.RemovePixelCount++;
+            GameData.ProgressPixelCount += Mathf.Max(1, pixelGroup.GateMultiplierAt(col, row));
+        }
+
         /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
         private void CleanupLevel()
         {
@@ -955,6 +1070,145 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 诊断（仅 debugClickLog 打开时调用）：<see cref="CanReachFront"/> 失败时，把「组的前沿格子」
+        /// 每个方向**被什么挡住**逐条打出来。
+        ///
+        /// 用来区分「看不见的遮挡」到底来自哪一类掩码——它们都不显示像素，但都在 IsBlocked 家族里：
+        ///   墙体 / 管道 / 箱子(BoxItem) / 木箱(CrateItem) / 活跃管道覆盖 / 倍乘门 / 别的像素。
+        /// 若是「别的像素」，看它的 gridX/gridZ —— 那个格本该是空的（例如磁铁捞走后没清干净）。
+        /// </summary>
+        private void LogReachFrontBlockers(List<PixelItem> matched)
+        {
+            if (pixelGroup == null || matched == null)
+                return;
+
+            var inGroup = new HashSet<PixelItem>(matched);
+            var passGates = pixelGroup.CollectPassGates(matched);
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Click][诊断] 组到不了首排，前沿阻挡明细（组大小 ").Append(matched.Count).Append("）：");
+
+            int printed = 0;
+            const int maxPrint = 40;
+
+            for (int i = 0; i < matched.Count && printed < maxPrint; i++)
+            {
+                var it = matched[i];
+                if (it == null)
+                    continue;
+
+                for (int d = 0; d < 4 && printed < maxPrint; d++)
+                {
+                    int nx = it.gridX + dx[d];
+                    int nz = it.gridZ + dz[d];
+                    if (nx < 0 || nz < 0 || nx >= pixelGroup.columns || nz >= pixelGroup.TotalRows)
+                        continue;
+
+                    string why = null;
+                    if (pixelGroup.IsWall(nx, nz)) why = "墙体";
+                    else if (pixelGroup.IsPipe(nx, nz)) why = "管道";
+                    else if (pixelGroup.IsBox(nx, nz)) why = "箱子";
+                    else if (pixelGroup.IsCrateCell(nx, nz)) why = "木箱";
+                    else if (pixelGroup.IsActivePipeBlocked(nx, nz))
+                    {
+                        // 轨道格是没有可见物的，所以这里把管道波次进度一并打出来：
+                        // 长期停在同一波 = 管道卡住（那才会让轨道永久算障碍）；还在推进 = 正常封锁，等它放完。
+                        var pipe = FindActivePipeAt(nx, nz);
+                        why = pipe != null
+                            ? "活跃管道「" + pipe.name + "」的轨道（已放波 " + pipe.ReleasedWaveCount + "/" +
+                              pipe.TotalWaveCount + "，正在放=" + pipe.IsReleasing + "）" + DescribePipeTrackBlock(pipe)
+                            : "活跃管道覆盖";
+                    }
+                    else if (pixelGroup.IsGateBlockedFor(nx, nz, passGates)) why = "倍乘门";
+
+                    if (why == null)
+                    {
+                        var cell = pixelGroup.grid[nx, nz];
+                        if (cell != null && !inGroup.Contains(cell))
+                            why = "像素 " + cell.name + "(颜色 " + cell.colorId +
+                                  " 暴露=" + cell.IsExposed + " 冻=" + cell.IsFrozen + " 盖=" + cell.IsCovered + ")";
+                    }
+
+                    if (why == null)
+                        continue;   // 这个方向是通的，不是它的锅
+
+                    sb.Append("\n   (").Append(it.gridX).Append(',').Append(it.gridZ)
+                      .Append(") ").Append(DirName(d)).Append("→(").Append(nx).Append(',').Append(nz)
+                      .Append(") 被挡：").Append(why);
+                    printed++;
+                }
+            }
+
+            if (printed == 0)
+                sb.Append("\n   （前沿没有直接阻挡 —— 说明卡在更外圈，看 CanReachFront 的 BFS 覆盖范围）");
+            else if (printed >= maxPrint)
+                sb.Append("\n   …（已截断）");
+
+            Debug.Log(sb.ToString());
+        }
+
+        /// <summary>诊断用：找覆盖该格、且还有未释放波次的管道（无则 null）。与 PixelGroup.IsActivePipeBlocked 同口径。</summary>
+        private PipeItem FindActivePipeAt(int col, int row)
+        {
+            var pipes = pixelGroup.pipes;
+            if (pipes == null)
+                return null;
+
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var p = pipes[i];
+                if (p == null || !p.HasRemainingWaves)
+                    continue;
+                if (p.CoversCell(col, row))
+                    return p;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 诊断用：管道卡在「轨道非空」时（TrackEmpty() 恒 false），指出是哪个轨道格被谁占着。
+        ///
+        /// 关键看那个像素**自身的 gridX/gridZ 是否等于所在格的坐标**：
+        /// 不等 = 坐标过期的幽灵（grid 里挂着它，但它其实已经走了）；
+        /// 再看「还在 PixelGroup 子物体下吗」：false = 它已经被挂到车上了，却还在 grid 里 —— 就是幽灵本尊。
+        /// </summary>
+        private string DescribePipeTrackBlock(PipeItem pipe)
+        {
+            var cells = pipe.TrackCells();
+            for (int i = 0; i < cells.Count; i++)
+            {
+                var p = pixelGroup.GetItem(cells[i].x, cells[i].y);
+                if (p == null)
+                    continue;
+
+                bool coordMatches = p.gridX == cells[i].x && p.gridZ == cells[i].y;
+                bool underPixelGroup = p.transform.parent != null
+                    && p.transform.parent.GetComponentInParent<PixelGroup>() != null;
+
+                return "，轨道被占：格(" + cells[i].x + "," + cells[i].y + ") 上是「" + p.name +
+                       "」自身坐标(" + p.gridX + "," + p.gridZ + ") " + (coordMatches ? "✓与格一致" : "✗与格不一致=幽灵") +
+                       "｜颜色" + p.colorId + " 暴露=" + p.IsExposed +
+                       " 盖=" + p.IsCovered + " 冻=" + p.IsFrozen +
+                       "｜仍在网格物体下=" + underPixelGroup + "（false 且还在 grid 里 = 幽灵）";
+            }
+            return "，但轨道其实是空的（说明卡在别处）";
+        }
+
+        /// <summary>方向名。dz = +1 是更大 row = 更靠后；row 0 是最前排。</summary>
+        private static string DirName(int d)
+        {
+            switch (d)
+            {
+                case 0: return "右→";
+                case 1: return "左→";
+                case 2: return "后排→";
+                default: return "前排→";
+            }
+        }
+
+        /// <summary>
         /// 点击无法移出的同色组时的反馈：组内像素（含被点像素）同时向前（本地 +Z）匀速晃出一小段，
         /// 再以相同速度回到各自网格位；同时播放 TapBlocked 音效与强度 1 震动，
         /// 并在**被点的那一个像素**上播生气表情（点谁谁生气；必出，同一像素上一张还没播完则忽略——判定在表情管理器里）。
@@ -1015,8 +1269,11 @@ namespace CrowdMatch
             if (!recordMode && !propForce && !CanReachFront(matched))
             {
                 if (debugClickLog)
+                {
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
                         "）无法通过空/组内格连通到首排（组被其他像素/墙体/管道包围）");
+                    LogReachFrontBlockers(matched);
+                }
                 PlayBlockedFeedback(matched, start);
                 return;
             }
