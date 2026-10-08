@@ -43,14 +43,14 @@ namespace CrowdMatch
         [Tooltip("切关后等多久才开始播入场动画（秒）；0 = 立即开始")]
         public float levelTextIntroDelay = 0.1f;
 
-        [Tooltip("父物体从 1 倍放大到 2 倍的时长（秒）")]
-        public float levelTextScaleDuration = 0.3f;
-
         [Tooltip("父物体 y 上升 1 单位的时长（秒）")]
         public float levelTextRiseDuration = 0.3f;
 
         [Tooltip("父物体自转 3 圈的时长（秒）")]
         public float levelTextRotateDuration = 0.6f;
+
+        [Tooltip("父物体自转的缓动；慢快慢要明显就选更陡的 InOutQuad / InOutCubic / InOutQuart（InOutSine 最平）")]
+        public Ease levelTextRotateEase = Ease.InOutCubic;
 
         [Tooltip("父物体 y 落下 1 单位的时长（秒）")]
         public float levelTextFallDuration = 0.3f;
@@ -187,8 +187,6 @@ namespace CrowdMatch
             if (levelNameText != null)
                 levelNameText.gameObject.SetActive(false);
             CacheLevelTextRoot();
-            if (_levelTextRoot != null)
-                _levelTextRoot.localScale = Vector3.one;   // 起手就是 1 倍，不受场景里作者数值影响
         }
 
         private void Start()
@@ -346,8 +344,8 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 关卡文本入场：文本先隐藏，3D 物体（文本的父物体的父物体）1 → 2 倍放大 → y +1 → 自转 3 圈 → y 落回 1 单位，
-        /// 跑完再显示文本。每次刷新都会重播；层级不足时直接显示文本。
+        /// 关卡文本入场：文本先隐藏，3D 物体（文本的父物体的父物体）y +1 → 自转 3 圈 → y 落回 1 单位，跑完再显示文本。
+        /// 每次刷新都会重播；层级不足时直接显示文本。
         /// </summary>
         private void PlayLevelTextIntro()
         {
@@ -372,28 +370,23 @@ namespace CrowdMatch
 
             Transform root = _levelTextRoot;
 
-            // 先清掉挂在这个物体上的其它 tween：上一轮残留或别的脚本的动画会每帧回写 scale / position，
-            // 只做复位不 Kill 的话，复位会在同一帧被覆盖 —— 表现就是「第一次从 1 倍开始，切关后不从 1 开始」
+            // 先清掉挂在这个物体上的其它 tween：上一轮残留或别的脚本的动画会每帧回写 position / rotation，
+            // 只做复位不 Kill 的话，复位会在同一帧被覆盖 —— 表现就是「第一次对，切关后不从头开始」
             root.DOKill();
 
-            // 复位到 1 倍与初始位姿（上一次跑完会停在 2 倍，被杀在半空则位置也不对）
-            root.localScale = Vector3.one;
+            // 复位到初始位姿（被杀在半空时位置也不对）
             root.SetPositionAndRotation(_levelTextRootBasePos, _levelTextRootBaseRot);
 
             _levelTextSeq = DOTween.Sequence();
-            // 切关后先空等一段再起播；文本这期间保持隐藏，3D 物体停在复位后的 1 倍初始位姿上
+            // 切关后先空等一段再起播；文本这期间保持隐藏，3D 物体停在复位后的初始位姿上
             if (levelTextIntroDelay > 0f)
                 _levelTextSeq.AppendInterval(levelTextIntroDelay);
-            // From(Vector3.one, true)：把起点显式钉在 1 倍并立即写入，不依赖 DOTween 启动时抓取的当前值
-            // 缓动必须显式指定：DOTween 默认 OutQuad 是「前快后慢」，1 → 2 会看起来一开始就冲到 1.8 再慢慢磨到 2
-            _levelTextSeq.Append(root.DOScale(2f, levelTextScaleDuration).From(Vector3.one, true)
-                                     .SetEase(Ease.InOutSine));
-            _levelTextSeq.Append(root.DOMove(_levelTextRootBasePos + Vector3.up, levelTextRiseDuration));
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos + Vector3.up, levelTextRiseDuration));
             // 自转 3 整圈（360° × 3）：LocalAxisAdd 是在自身朝向基础上追加角度，终点朝向与起点一致
-            // 缓动 InOutSine = 慢起 → 中间快 → 慢停
+            // InOutSine 的峰值速度只有平均速度的 1.57 倍，转 3 圈几乎看不出快慢；默认改用峰值 3 倍的 InOutCubic
             _levelTextSeq.Append(root.DORotate(new Vector3(0f, 360f * 3f, 0f), levelTextRotateDuration, RotateMode.LocalAxisAdd)
-                                      .SetEase(Ease.InOutSine));
-            _levelTextSeq.Append(root.DOMove(_levelTextRootBasePos, levelTextFallDuration));
+                                      .SetEase(levelTextRotateEase));
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos, levelTextFallDuration));
             _levelTextSeq.OnComplete(() =>
             {
                 if (levelNameText != null)
