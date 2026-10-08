@@ -141,6 +141,15 @@ namespace CrowdMatch
         /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
         private int _clickMask;
 
+        /// <summary>
+        /// 4 邻偏移（+x / −x / +z / −z）。**必须是 `static readonly` 字段**：
+        /// 写成方法内的 `int[] dx = {…}` 会**每次调用都 `newarr` 分配**
+        /// （实测：Roslyn 的 blob 缓存只对静态字段的常量初始化生效，对局部字面量不生效）。
+        /// 顺序不要重排 —— BFS 的访问顺序决定了返回列表的元素顺序，下游的动画次序依赖它。
+        /// </summary>
+        private static readonly int[] Dx4 = { 1, -1, 0, 0 };
+        private static readonly int[] Dz4 = { 0, 0, 1, -1 };
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -1106,9 +1115,7 @@ namespace CrowdMatch
                 visited[it.gridX, it.gridZ] = true;
             }
 
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
-
+            // 4 邻偏移用类级 static readonly（原来在这里 new 两个 int[4]，每次点击都分配一遍）
             while (queue.Count > 0)
             {
                 var cur = queue.Dequeue();
@@ -1117,8 +1124,8 @@ namespace CrowdMatch
 
                 for (int d = 0; d < 4; d++)
                 {
-                    int nx = cur.x + dx[d];
-                    int nz = cur.y + dz[d];
+                    int nx = cur.x + Dx4[d];
+                    int nz = cur.y + Dz4[d];
                     if (!pixelGroup.IsInRange(nx, nz))
                         continue;
                     if (visited[nx, nz])
@@ -1330,8 +1337,10 @@ namespace CrowdMatch
                 var cur = queue.Dequeue();
                 result.Add(cur);
 
-                foreach (var nb in GetNeighbors(cur))
+                // 4 邻内联（原来是 GetNeighbors 迭代器：每遍历一个像素都分配一个状态机 + 两个 int[4]）
+                for (int d = 0; d < 4; d++)
                 {
+                    var nb = pixelGroup.GetItem(cur.gridX + Dx4[d], cur.gridZ + Dz4[d]);
                     if (nb == null || nb.colorId != color)
                         continue;
                     // 未揭晓问号 Pixel 断开连通：不参与移除、不扩散
@@ -1406,8 +1415,10 @@ namespace CrowdMatch
                 var cur = queue.Dequeue();
                 result.Add(cur);
 
-                foreach (var nb in GetNeighbors(cur))
+                // 4 邻内联（同 FloodFill，消掉迭代器与 int[4] 分配）
+                for (int d = 0; d < 4; d++)
                 {
+                    var nb = pixelGroup.GetItem(cur.gridX + Dx4[d], cur.gridZ + Dz4[d]);
                     if (nb == null || nb.colorId != color)
                         continue;
                     if (nb.isQuestion && !nb.revealed)
@@ -1420,18 +1431,6 @@ namespace CrowdMatch
             }
 
             return result;
-        }
-
-        private IEnumerable<PixelItem> GetNeighbors(PixelItem item)
-        {
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
-            for (int i = 0; i < dx.Length; i++)
-            {
-                var nb = pixelGroup.GetItem(item.gridX + dx[i], item.gridZ + dz[i]);
-                if (nb != null)
-                    yield return nb;
-            }
         }
 
         private void GatherItem(PixelItem item)

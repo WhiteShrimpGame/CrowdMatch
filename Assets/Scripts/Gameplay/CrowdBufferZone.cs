@@ -512,7 +512,11 @@ namespace CrowdMatch
                     continue;
                 }
 
-                Vector3 toGap = gap - p.transform.position;
+                // 同一物理帧内位置只读一次：`Transform.position` 是托管→native 调用（比读一个字段贵一个数量级），
+                // 而下面两次读之间没有任何写入 —— `rb.velocity` 只写刚体，位置要到下一个物理步才变。
+                Vector3 ppos = p.transform.position;
+
+                Vector3 toGap = gap - ppos;
                 toGap.y = 0f;
 
                 // 距出口前向（z）仍较远时，朝出口位置横向（x）偏移后的点前进以分散人群；足够近才直接朝精确出口
@@ -521,7 +525,7 @@ namespace CrowdMatch
                 if (forwardDist > aimDirectDistanceZ)
                     target = gap + perp * p.bufferAimOffset;
 
-                Vector3 dir = target - p.transform.position;
+                Vector3 dir = target - ppos;
                 dir.y = 0f;
                 if (dir.sqrMagnitude > 0.0001f)
                 {
