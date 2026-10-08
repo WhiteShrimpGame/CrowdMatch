@@ -163,6 +163,14 @@ namespace CrowdMatch
         /// <summary>提取中的批次（每次匹配一组 = 一个独立批次）</summary>
         private readonly List<Batch> _batches = new List<Batch>();
 
+        /// <summary>
+        /// <see cref="StepExtracting"/> 里「本批次已离开网格的像素」那份快照的复用缓冲（每批次开头 Clear 后重建）。
+        /// 必须是快照：处理过程中会边删 <c>batch.extracting</c>，而 <c>ApplyEntryQueue</c> 需要整份 exiting 集合。
+        /// 用字段而不是每帧 new，只为省掉提取期间的每帧分配；是安全的，因为这段不会重入
+        /// （循环体里的 <c>EnterPhysical</c> 只 StartCoroutine，不会回调 StepExtracting）。
+        /// </summary>
+        private readonly List<ExtractState> _exitingBuffer = new List<ExtractState>();
+
         /// <summary>提取期间引用的 PixelGroup（唯一，所有批次共享）</summary>
         private PixelGroup _extractGroup;
 
@@ -523,7 +531,8 @@ namespace CrowdMatch
 
                 // 1. 已离开网格的像素：连续匀速移向入口边落位点；同一列排队（前不追尾），
                 //    一旦进入物理起始范围（离入口边还有 physicalEntryDepth）即提前赋予刚体朝缺口
-                var exiting = new List<ExtractState>(batch.extracting.Count);
+                var exiting = _exitingBuffer;
+                exiting.Clear();
                 for (int i = 0; i < batch.extracting.Count; i++)
                 {
                     var st = batch.extracting[i];
@@ -541,13 +550,17 @@ namespace CrowdMatch
 
                 foreach (var st in exiting)
                 {
-                    Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);
-                    Vector3 moveTarget = ApplyEntryQueue(st, target, entrance, axis, perp, exiting);
-                    MoveToward(st, moveTarget);
+                    // 位置读一次就够：算目标 / 排队 / 移动这三步之间没有任何写入，直到 MoveToward 落位才改 transform；
+                    // 之后再用新值判一次到达（避免同一个像素一帧里反复走「托管→native」的 transform.position）。
+                    Vector3 pos = st.item.transform.position;
+                    Vector3 target = ComputeEntryTarget(pos, entrance, perp);
+                    Vector3 moveTarget = ApplyEntryQueue(st, pos, target, entrance, axis, perp, exiting);
+                    MoveToward(st, pos, moveTarget);
 
-                    bool reachedTarget = XZDistance(st.item.transform.position, target) <= ArriveEpsilon;
+                    pos = st.item.transform.position;
+                    bool reachedTarget = XZDistance(pos, target) <= ArriveEpsilon;
                     bool enteredRange = physicalEntryDepth > 0f
-                        && Vector3.Dot(st.item.transform.position - entrance, axis) >= -physicalEntryDepth;
+                        && Vector3.Dot(pos - entrance, axis) >= -physicalEntryDepth;
                     if (reachedTarget || enteredRange)
                     {
                         batch.extracting.Remove(st);
@@ -1150,10 +1163,10 @@ namespace CrowdMatch
         /// 入口排队：若像素前方（更接近入口边）存在同列（横向接近）的退出像素且前后间距不足，
         /// 则把移动目标退回到前方像素后 entryQueueSpacing 处（横向保持自身当前值），实现同列前不追尾。
         /// 无阻挡时返回原目标。横向按 radius 判定同列，避免不同列的像素被误排。
+        /// <paramref name="pos"/> 由调用方传入（本帧已读出的自身位置），省掉重复的 transform 读取。
         /// </summary>
-        private Vector3 ApplyEntryQueue(ExtractState st, Vector3 target, Vector3 entrance, Vector3 axis, Vector3 perp, List<ExtractState> exiting)
+        private Vector3 ApplyEntryQueue(ExtractState st, Vector3 pos, Vector3 target, Vector3 entrance, Vector3 axis, Vector3 perp, List<ExtractState> exiting)
         {
-            Vector3 pos = st.item.transform.position;
             float myProg = Vector3.Dot(pos - entrance, axis);
             float latMe = Vector3.Dot(pos - entrance, perp);
 
@@ -1185,10 +1198,9 @@ namespace CrowdMatch
             return target;
         }
 
-        /// <summary>匀速移动像素到目标点（保持 Y 不变）</summary>
-        private void MoveToward(ExtractState st, Vector3 target)
+        /// <summary>匀速移动像素到目标点（保持 Y 不变）。<paramref name="pos"/> 由调用方传入并就地推进，省掉重复的 transform 读取。</summary>
+        private void MoveToward(ExtractState st, Vector3 pos, Vector3 target)
         {
-            Vector3 pos = st.item.transform.position;
             Vector3 to = target - pos;
             to.y = 0f;
             float dist = to.magnitude;
@@ -1197,7 +1209,7 @@ namespace CrowdMatch
 
             Vector3 dir = to / dist;
             pos += dir * Mathf.Min(extractSpeed * Time.deltaTime, dist);
-            pos.y = st.item.transform.position.y;
+            // dir.y 恒为 0（to.y 已清零），所以 pos.y 就是传入时的 Y，无需回填
             st.item.transform.position = pos;
 
             // 移向入口边：z 正方向匀速朝向移动方向
