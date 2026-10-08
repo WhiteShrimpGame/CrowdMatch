@@ -358,15 +358,16 @@ namespace CrowdMatch
 
             // 1. 收集候选格：本体 + 相邻（上下左右 4 方向）+ 连通（相邻出发 4 方向 BFS 的空格）
             //    「空」按 IsEmptyForBoxRelease 判：活跃管道的轨迹格不算 —— 管道优先（见类注释）
-            var body = new List<Vector2Int>();
-            EnumerateBody(body);
+            //    本体格数直接算术得出（BodyCount），未就绪路径上不白建一份格子列表；
+            //    判定通过后（第 3 步）才真正 EnumerateBody 出来供规划用。
+            int bodyCount = BodyCount;
             var adjacent = CollectAdjacentEmpty();
             var connected = CollectConnectedEmpty(adjacent);
 
-            int available = body.Count + adjacent.Count + connected.Count;
+            int available = bodyCount + adjacent.Count + connected.Count;
             if (debugOpenLog)
             {
-                Debug.Log("[Box] 开箱判定 " + name + "：本体=" + body.Count +
+                Debug.Log("[Box] 开箱判定 " + name + "：本体=" + bodyCount +
                     " 相邻=" + adjacent.Count +
                     " 连通=" + connected.Count +
                     " 可用=" + available + " 容量=" + capacity +
@@ -385,7 +386,9 @@ namespace CrowdMatch
             //    确保释放后同色像素各自连通（优先级：本体 > 相邻 > 连通距离）。
             //    优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）。
             //    **只在这里建**：未就绪的箱子走上面那个 return，为它白建一张几百项的字典没有意义
-            //    （「未就绪」是常态 —— 容量总是比本体大 8~32 格）。
+            //    （「未就绪」是常态 —— 容量总是比本体大 8~32 格）；本体格子列表同理。
+            var body = new List<Vector2Int>();
+            EnumerateBody(body);
             var score = new Dictionary<Vector2Int, int>();
             foreach (var c in body)
                 score[c] = 0;
@@ -462,6 +465,10 @@ namespace CrowdMatch
         {
             var result = new List<(Vector2Int, int)>();
             if (group == null)
+                return result;
+            // 没有相邻空格 ⇒ BFS 没有种子 ⇒ 结果必然为空。直接返回，省掉下面那个 body 集合
+            // 与 3 个 HashSet + Queue 的分配 —— 箱子被像素围死时每次点击都会走到这里（「未就绪」的常见形态）。
+            if (adjacent.Count == 0)
                 return result;
 
             var body = new HashSet<Vector2Int>();

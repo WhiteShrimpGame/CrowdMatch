@@ -16,7 +16,9 @@
 >   **P4 + P5 的共同根因** `IsActivePipeBlocked` 记忆化（§2.4 / §2.5）—— 它原先被两条 BFS **逐格**调用、
 >   每次重走全部活跃管道折线，现改为按「活跃管道数」版本号失效的覆盖掩码，**语义逐字不变**，
 >   同时消掉 P4 的内层与 P5 的 `O(格数 × 管道数)` 那一层；
->   **P4** 另把 `score` 字典挪到就绪判定之后（未就绪是常态，每次点击白建一张几百项的字典）。
+>   **P4** 另把「只被规划阶段用」的 `score` 字典与 `body` 格子列表挪到就绪判定之后（未就绪是常态：
+>   `capacity` 恒比本体大 8~32 格，每次点击都会白建一张几百项的字典），并给 `CollectConnectedEmpty`
+>   加了 `adjacent.Count == 0` 的等价早退（箱子被像素围死是最常见的未就绪形态）。
 >   **P4 的回溯预算那部分（原 §7 第 13 条）未做** —— 每关最多跑 4 次，先量化再定。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
@@ -276,7 +278,7 @@ ApplyBoxes → SpawnBox                                    (PixelGroup.cs:1783)
 
 ### 2.4 P4 · `BoxItem.TryOpen()` 每次点击重算候选格（内层逐格走管道折线）+ 5 万预算回溯 🟠 **部分处理**
 
-**位置**：`Gameplay/BoxItem.cs:344-421`（`TryOpen`）→ `:511-556`（`PlanAssignments`）→ `:597-639`（`SolveConnected`）→ `:688-743`（`GrowConnectedRec`）→ `:745`（`CanonicalKey`）
+**位置**：`Gameplay/BoxItem.cs:344`（`TryOpen`）→ `:518`（`PlanAssignments`）→ `:604`（`SolveConnected`）→ `:695`（`GrowConnectedRec`）→ `:752`（`CanonicalKey`）
 **调用方**：`PixelGroup.TryOpenBoxes()`（`:1958`），从 `GameController.ResolveMatch`（`:1260`）调用 —— **每次确认点击一次**
 
 > **⚠️ 更正（2026-10-08）**：本节最初的判定漏了真正的成本大头，并高估了 (b) 的频率。改为按实测的关卡规模重述。
@@ -301,8 +303,22 @@ if (available < capacity)
 ```
 
 **（已改）** 修法不是「把空格判定提到建容器之前」——`available` 本身就要靠 `connected` 的 BFS 数出来，
-判定提不上去。真正能提到判定之后的是 **`score` 字典与 `allCells`**：它们只被规划阶段用。
-现在 `score` 建在 `:389`（`if (available < capacity) return false;` 之后），未就绪时不再白建一张几百项的字典。
+判定提不上去。真正能提到判定之后的是**只被规划阶段用**的东西，现在都建在 `:377` 的
+`if (available < capacity) return false;` 之后：
+
+| 原来建在判定之前 | 现在 | 省下 |
+|---|---|---|
+| `score` 字典（`:392`） | 判定后 | 未就绪时不再白建一张几百项的字典 |
+| `body` 格子列表（`:390` 的 `EnumerateBody`） | 判定后 | 未就绪时不再白跑 W×H 次 `List.Add`；计数改读现成的 `BodyCount`（`:100`，与 `EnumerateBody` 同一条公式，编辑器 `BoxItemEditor.cs:46` 也是这么取的） |
+
+**「相邻格一个都没有」这一形态**（箱子被像素围死 —— 也就是「未就绪」最常见的形态）还多省一笔：
+`CollectConnectedEmpty` 开头加了 `if (adjacent.Count == 0) return result;`（`BoxItem.cs:471`）。
+BFS 的队列**只从 `adjacent` 播种**，没有种子结果必然为空，所以这行逐字等价；
+它省掉的是函数里那个只为 BFS 扩展服务的 `body` HashSet（W×H 次插入）与 `HashSet×3 + Queue` 四次分配。
+
+> 顺便记下这一形态的实际开销（全部是**便宜**那一路）：`CollectAdjacentEmpty` 里
+> `List.Contains` 一次都不会跑（`result` 为空），BFS 一次都不跑，`score` / `body` 也不建。
+> 剩下的是 4WH 次便宜比较 + 2W+2H 次 `IsEmptyForBoxRelease`。**不需要为它做进一步的裁剪。**
 
 **(a′) 内层的管道测试才是大头（原文档漏了这条）。** `CollectAdjacentEmpty` / `CollectConnectedEmpty`
 的内层每格调 `IsEmptyForBoxRelease` → `IsEmptyForExposure`（`PixelGroup.cs:496`）→
@@ -330,9 +346,9 @@ if (available < capacity)
 （一处细微差别：新实现先 `IsInRange` 再查表，越界返回 `false`；旧实现不判范围。三个调用点都已各自 `IsInRange` 过，实际无差异。）
 
 **(b) 就绪后走的回溯 —— 未做。** `PlanAssignments` → `SolveConnected` 递归回溯，
-预算 `BacktrackBudget = 50000`（`:95`、`:539`）。每个到达叶子（`block.Count == n`）的候选块算一次
-`CanonicalKey`（`:745`），而它分配一个 `List`、一次 `Sort(lambda)`、一个 `StringBuilder` 和一个 `string`，
-结果塞进 `HashSet<string> seen`（`:696`）。另有 `GrowConnectedRec` 每层 `new HashSet<Vector2Int>`（`:713`）。
+预算 `BacktrackBudget = 50000`（`:95`、`:546`）。每个到达叶子（`block.Count == n`）的候选块算一次
+`CanonicalKey`（`:752`），而它分配一个 `List`、一次 `Sort(lambda)`、一个 `StringBuilder` 和一个 `string`，
+结果塞进 `HashSet<string> seen`（`:703`）。另有 `GrowConnectedRec` 每层 `new HashSet<Vector2Int>`（`:720`）。
 最坏情况 5 万次叶子 × 每次 4 个分配。
 
 > **⚠️ 更正**：原文说这是「最可能造成点一下箱子卡一下的地方」。按实测规模，**每关最多 4 个箱子、每个只开一次**，
@@ -341,20 +357,21 @@ if (available < capacity)
 > `BacktrackBudget - budget`，超阈值才 `Debug.LogWarning`），跑几关看数字再定。
 > 顺带：原文建议的「给 `TryOpen` 加结果缓存」**不成立** —— 每次点击盘面必变（这一击刚移走像素），命中率是 0。
 
-**(c) `debugOpenLog` 默认 `true`**（`:68`），`:367-375` 每次 `TryOpen` 都拼一条 6 段字符串的日志 ——
+**(c) `debugOpenLog` 默认 `true`**（`:68`），`:368-376` 每次 `TryOpen` 都拼一条 6 段字符串的日志 ——
 包括上面「白算一遍」的那些调用。**本次未动**（按你的要求保持现状）。字段默认值是 `true`；
 运行时实际值来自**箱子预制体**（未读 YAML），需要时在 Inspector 确认。
 
-**剩下的**：① (b) 的回溯（先量化）；② `CollectConnectedEmpty` 的 `HashSet×3 + Queue`
-与 `CollectAdjacentEmpty` 的 `List.Contains`（`BoxItem.cs:448`）—— 都能改成复用缓冲 / 去掉内层线性查找，
-属 GC 优化，改动面比上面大；③ `debugOpenLog`。
+**剩下的**：① (b) 的回溯（先量化）；② `CollectAdjacentEmpty` 的 `List.Contains`（`BoxItem.cs:451`）——
+它让相邻扫描的内层变成 O(周长²)，但周长只有几十，收益很小；
+③ `adjacent` 非空时 `CollectConnectedEmpty` 仍会分配 `HashSet×3 + Queue`（那 3 个集合 BFS 真的在用），
+要彻底去掉得改成复用缓冲 —— 属 GC 优化，改动面比上面大；④ `debugOpenLog`。
 
 ---
 
 ### 2.5 P5 · `PixelGroup.RefreshExposed()` 每次点击大块分配 🟠 **部分处理**
 
 **位置**：`Gameplay/PixelGroup.cs:1100` 起
-**调用方**：每次点击（`GameController`），以及 `BoxItem.cs:913`、`ElevatorItem.cs:574`、`CrateItem.cs:640`
+**调用方**：每次点击（`GameController`），以及 `BoxItem.cs:920`、`ElevatorItem.cs:574`、`CrateItem.cs:640`
 
 每次调用：
 
@@ -769,7 +786,7 @@ private void UpdateCountText()
 |---|---|---|
 | `ContainerItem.cs:796` `RefillRollRoutine` | `while(true){ … yield return null; }` | 每帧调 `LockBoardingPixelsWorldRotation`（`:1022`）遍历 `_boardingPixels`。有界（补位期间） |
 | `ContainerItem.cs:730` `WaitForElasticIdle` | `yield return null` 自旋 | 等到弹性结束，有界 |
-| `BoxItem.cs:868,876,884` | 每个隐藏像素 `new WaitForSeconds` | 每次开箱 N 次分配，见 §4.1 同类 |
+| `BoxItem.cs:875,883,891` | 每个隐藏像素 `new WaitForSeconds` | 每次开箱 N 次分配，见 §4.1 同类 |
 | `CrateItem.cs:738` → `PixelItem.cs:252/265/275` | 每个被盖像素一个协程 + `new WaitForSeconds(delay)` | 大木箱破开时一次性起 N 个协程 |
 
 这些是「有界的事件级」开销，不是每帧常态。上面两行「每个像素一个协程」的做法
@@ -934,7 +951,7 @@ private void UpdateCountText()
 | 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 | `CrowdBufferZone.cs:878` |
 | 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/534` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |
-| 9 | **P4** | ~~「把空格判定提到建容器之前」~~ —— **原描述不成立**：`available` 本身要靠 `connected` 的 BFS 数出来，判定提不上去（§2.4 更正）。实做两件：`score` 字典挪到就绪判定之后（`:389`）＋ `IsActivePipeBlocked` 缓存掩码（与第 14 条同一改动）—— **✅ 已处理** | `BoxItem.cs:389` + `PixelGroup.cs:414` |
+| 9 | **P4** | ~~「把空格判定提到建容器之前」~~ —— **原描述不成立**：`available` 本身要靠 `connected` 的 BFS 数出来，判定提不上去（§2.4 更正）。实做三件：`score` 字典（`:392`）与 `body` 格子列表（`:390`）挪到就绪判定之后、计数改用 `BodyCount` ＋ `CollectConnectedEmpty` 加 `adjacent.Count == 0` 早退（`:471`）＋ `IsActivePipeBlocked` 缓存掩码（与第 14 条同一改动）—— **✅ 已处理** | `BoxItem.cs:363-392`、`:471` + `PixelGroup.cs:414` |
 | 10 | **P3** | ~~`LevelLoader` 合并为一次 `RebuildGrid`~~ **原方案作废**（中间两步承重，见 §2.3）。实做：删掉「无读者」的四步刷新 —— **✅ 已处理**，每次进关 `RebuildGrid` 8 → 4 次 | `LevelLoader.cs:48-80` |
 
 ### 第三档：需要你先拍板（改口径 / 改算法）
@@ -969,7 +986,7 @@ private void UpdateCountText()
 | 逐像素日志 | `Gameplay/CrowdBufferZone.cs` | `SweepOnce` 内 `:760-772` |
 | 关卡加载重建 | `Core/LevelLoader.cs` | `Apply`(48) / 每次加载 4 处 `RebuildGrid`（原 8 处，见 §2.3） |
 | 网格重建 | `Gameplay/PixelGroup.cs` | `RebuildGrid`(178) |
-| 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(511) / `SolveConnected`(597) / `CanonicalKey`(745) |
+| 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(518) / `SolveConnected`(604) / `CanonicalKey`(752) |
 | 暴露刷新 | `Gameplay/PixelGroup.cs` | `RefreshExposed`(1100) |
 | 同色合并判定 | `Gameplay/SameColorMergeWatcher.cs` | `Notify`(45) |
 | 每帧车盘扫描 | `Gameplay/ContainerGroup.cs` | `Update`(357) / `ProcessConsumption`(362) / `IsOpen`(315) / `IsRowReleased`(337) |
