@@ -1,14 +1,18 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**仅分析，未改任何代码**。
+> 状态：**分析 + 已落地 3 处最小改动**（P7 / P10 / P11，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **P1 已禁用** —— 已确定 `FrameItem` 不再被调用（§2.1）
-> - **P2 已处理** —— 调试开关已在场景 / 预制体关闭，未改代码（§2.2）
-> - **P13 已定方案** —— `IceItem` 改为**仅关卡开始时重建一次，去掉融化路径上的动态重建**（§4.1）
+> - **已改码（3 处，两个程序集离线编译均 0 错误）**：
+>   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
+>   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
+>   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
+>   且原建议的「`gatheredItems.Count == 0` 早退」会破坏开盖，**已作废**。
+> - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
+> - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
 >
-> 其余 P3~P12、P14~P16 均**未处理**；P13 仅定了方案、尚未改码。改动清单见 §7。
+> 其余 **P3~P6、P8、P9、P12、P14~P16** 均**未处理**。改动清单见 §7。
 > 目标平台：移动端 / WebGL（`GameManager.cs` 设 `Application.targetFrameRate = 60`、`vSyncCount = 0`）
 > 范围：`Assets/Scripts/Gameplay`、`Assets/Scripts/Core`、`Assets/Scripts/DailyBonus`、`Assets/Scripts/SpawnPool`
 > （编辑器工具单列 §5，它们不影响运行时帧率，但影响迭代速度）
@@ -39,11 +43,11 @@
 | P4 | `BoxItem.TryOpen()` 每次点击空转重算 + 5 万预算回溯 + 默认开日志 | **每次点击 × 每个未就绪的箱子** | 🟠 | §2.4 |
 | P5 | `PixelGroup.RefreshExposed()` 每次点击大块分配 + `O(格数×管道数)` BFS | 每次点击 | 🟠 | §2.5 |
 | P6 | `SameColorMergeWatcher.Notify()` 两遍全盘 BFS + 按像素数分配 | 每次动态事件 | 🟡 | §2.6 |
-| P7 | `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent<Rigidbody>()` | **每物理帧 × 每个物理像素** | 🟠 | §3.2 |
+| P7 | `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent<Rigidbody>()` | 每物理帧 × 每个物理像素 | ✅ **已处理**：改读 `PixelItem.bufferBody` 缓存 | §3.2 |
 | P8 | `SweepOnce()` 每次 sweep 大块分配 + 在 `while` 里 `Sort` | 每个提取 tick | 🟠 | §3.4 |
 | P9 | `CanExit()` 逐 seed 重算 `MinActivePipeTrackRow()` / `MustWalkToGate()` | 每个提取 tick × 每个像素 | 🟡 | §3.5 |
-| P10 | `ContainerGroup.Update → ProcessConsumption` 每帧全盘扫描（无早退） | **每帧** | 🟡 | §3.1 |
-| P11 | `GameController.UpdateCountText` 每帧字符串拼接 + 写 UI `Text` | **每帧** | 🟡 | §3.6 |
+| P10 | `ContainerGroup.Update → ProcessConsumption` 每帧扫车盘 —— **原判定的复杂度与建议均已更正**（实际远小于原估，且原建议的早退会破坏开盖） | 每帧 | ✅ **已处理**：外层循环裁到 `maxOpenRows` | §3.1 |
+| P11 | `GameController.UpdateCountText` 每帧字符串拼接 + 写 UI `Text` | 每帧 | ✅ **已处理**：值没变就不拼串 / 不赋值 | §3.6 |
 | P12 | `StepExtracting` 每帧 `new List<ExtractState>` | **每帧** | 🟡 | §3.3 |
 | P13 | `IceItem` 每次融化 `Instantiate`/`Destroy` 角块 + 重建 Mesh | 每次融化 | 🟡 **已定方案**：仅关卡开始重建，去掉动态重建（§4.1） | §4.1 |
 | P14 | `EmojiManager` 每次播放都扫一遍层级 | 每次表情 | 🟢 | §4.2 |
@@ -61,9 +65,9 @@
 | `ConveyorBelt.Update` | 推进相位 + 逐槽写 carrier / cell 的 position+rotation | `O(槽数 × 轨迹段数)` |
 | `ConveyorBeltZone.Update` | 逐槽圈数统计（+ 间隔触发的犯困 / 排队生气检查） | `O(槽数)` |
 | `CrowdBufferZone.Update` | `StepExtracting()` + `TryRelease()` | `O(批次×像素)`，见 §3.3 |
-| `CrowdBufferZone.FixedUpdate` | 逐物理像素设速度 + 转向 | `O(物理像素)`，见 §3.2 |
-| `ContainerGroup.Update` | **`ProcessConsumption()` 全盘扫描** | `O(列×排²)`，见 §3.1 |
-| `GameController.Update` | 每帧刷两个 UI 文本 | 见 §3.6 |
+| `CrowdBufferZone.FixedUpdate` | 逐物理像素设速度 + 转向（已改：读缓存的刚体，不再 `GetComponent`） | `O(物理像素)`，见 §3.2 |
+| `ContainerGroup.Update` | `ProcessConsumption()` 扫车盘（已改：只扫前 `maxOpenRows` 排） | `O(列×maxOpenRows²)`，见 §3.1 |
+| `GameController.Update` | 每帧刷两个 UI 文本（已改：值没变就不写） | 见 §3.6 |
 | `PipeItem.Update` | 检查轨道是否空 → 空了才起协程 | `O(轨道格)` |
 | `ContainerRopeLink.LateUpdate` | 逐绳节重铺 | 见 §3.7 |
 | `BillboardOutline.LateUpdate` | 每个描边面片一次 `Quaternion.FromToRotation` | `O(描边实例)` |
@@ -307,48 +311,67 @@ if (available < capacity)
 
 ## 3. 中危：每帧的常态化开销
 
-### 3.1 P10 · `ContainerGroup.Update → ProcessConsumption()` 每帧全盘扫描 🟡
+### 3.1 P10 · `ContainerGroup.Update → ProcessConsumption()` 每帧扫车盘 ✅ **已处理（并更正原描述）**
 
-**位置**：`Gameplay/ContainerGroup.cs:357-394`
+> **⚠️ 更正（2026-10-08）**：本节最初的判定有两处错误，已改：
+>
+> 1. **复杂度写重了。** 原文按 `O(列 × 排²)` 算，但 `IsOpen` 对 `row >= maxOpenRows` **立刻返回 false**
+>    （`ContainerGroup.cs:317-318`），所以内层 `O(排)` 只在 `row < maxOpenRows` 时成立。
+>    `maxOpenRows` 默认 4、`rows` 通常 12+，实际是 `O(列 × maxOpenRows²)` ≈ 几十次，
+>    **不是**原文估的「≈500 次/帧」。它属于「可以不管」那一档，不是本批里的「最重」。
+> 2. **最初建议的「加一行 `if (gatheredItems.Count == 0) return;`」是错的 —— 会破坏开盖。**
+>    循环体在 `IsOpen` 通过后会无条件调 `item.OpenLid()`（`:381`），而 **`OpenLid()` 是「盖子真的打开」的唯一入口**
+>    （`:322-335`，`lidOpened` 锁存、永不复位）。提前 return 会让「没有聚集像素时」车盖不再打开，
+>    连带影响失败判定的门禁 6 分支 B（`HasPendingFrontTransition` 要读 `lidOpened`，
+>    见 `Docs/FailDetectionReview.md` §3.1）。**该建议已作废，未采用。**
+
+**位置**：`Gameplay/ContainerGroup.cs:357-395`
 
 ```csharp
-private void Update() { ProcessConsumption(); }     // 每帧，无任何早退
+private void Update() { ProcessConsumption(); }     // 每帧
 
 private void ProcessConsumption()
 {
     var gc = GameController.Instance;
-    if (gc == null || gc.gatheredItems == null) return;   // ← 唯一的早退，与 gatheredItems 是否为空无关
+    if (gc == null || gc.gatheredItems == null) return;
 
     for (int col = 0; col < columns; col++)
-      for (int row = 0; row < rows; row++)
+      for (int row = 0; row < rowLimit; row++)      // ← 改后：rowLimit = min(rows, maxOpenRows)
       {
           var item = GetItem(col, row);
           if (item == null || item.IsEmpty || item.isRefilling) continue;
-          if (!IsOpen(col, row)) continue;                  // ← 内部再 O(row) 循环
-          item.OpenLid();                                   // ← 幂等，但每帧都调
-          var pixel = FindMatchingPixel(gc.gatheredItems, item.colorId);   // ← O(已聚集像素)
+          if (!IsOpen(col, row)) continue;
+          item.OpenLid();                           // ← 必须保留：敞开盖子只此一处
+          var pixel = FindMatchingPixel(gc.gatheredItems, item.colorId);
           ...
       }
 }
 ```
 
-**代价**：`IsOpen`（`:315`）内部 `for (int r = 0; r < row; r++)` 调 `IsRowReleased`（`:337`），
-后者可能走到 `IsWaitingRopeCar`（`:919`）→ `IsRopeGroupMatched(chain)` 再遍历一次绳链。
-所以最坏是 `O(列 × 排² × 绳链长)` **每帧**，外加对每个候选车一次 `gatheredItems` 线性查找。
+**实际代价（更正后）**：每帧 `列 × 排` 次 `GetItem` + `IsEmpty`/`isRefilling` 属性读，加
+`列 × maxOpenRows` 次 `IsOpen`（每次内部 ≤ `maxOpenRows` 步）。**全是不分配内存的数组 / 字段访问**，
+量级很小，但确实是**恒定的、永不停机的**。
 
-按 7 列 × 12 排算，`IsOpen` 那层约 7×12×6 ≈ 500 次 cell 查询/帧 —— 单看不致命，
-但它是**恒定的、永不停机的**负担，在移动端属于持续漏电。
+**已做的改动（2026-10-08）· 只裁外层循环**：
 
-**建议（不改语义）**：
-1. **加一行早退**：`if (gc.gatheredItems.Count == 0) return;` —— 传送带模式下
-   `gatheredItems` 通常是空的，这一行基本能把这笔开销砍到 0。**这是最划算的一行改动之一。**
-2. `IsOpen` 的结果可以按「(col,row) + 影响它的状态版本号」缓存；进阶做法是维护一个
-   「当前可开放的车」候选列表（车状态变化时才重算），把每帧的全盘扫描降为按事件。
-3. `item.OpenLid()` 每帧调用即使幂等也是一次虚调用 + 可能的状态检查，挪到「变为可开放」那一刻。
+```csharp
+// 只有前 maxOpenRows 排可能开放（IsOpen 对 row >= maxOpenRows 恒返回 false），
+// 更深的排在这条循环里从来做不了任何事 —— 与 FindMatchableInColumn 的 limit 同口径。
+int rowLimit = Mathf.Min(rows, Mathf.Max(0, maxOpenRows));
+```
+
+- **为什么安全**：`row >= maxOpenRows` 时 `IsOpen` 恒 false，且循环体在到达 `IsOpen` 之前
+  没有任何副作用（`GetItem` / `IsEmpty` / `isRefilling` 全是只读判断），所以裁掉这些排**逐字节等价**。
+  与既有的 `FindMatchableInColumn`（`:418` 的 `int limit = Mathf.Min(rows, maxOpenRows);`）同口径。
+- **收益**：每帧迭代数从 `列 × 排` 降到 `列 × maxOpenRows`（12 排 → 4 排，约 3 倍），
+  **量级仍很小，不算显著优化**，只是顺手把无效迭代去掉。
+- **明确不做**：`gatheredItems.Count == 0` 早退（会破坏开盖，见上）。
+  「维护一份『当前可开放的车』候选列表，车状态变化时才重算」是可行的进阶方向，
+  但要动到门禁 6 所依赖的 `lidOpened` 时序，风险不成比例，**未做**。
 
 ---
 
-### 3.2 P7 · `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent` 🟠
+### 3.2 P7 · `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent` ✅ **已处理**
 
 **位置**：`Gameplay/CrowdBufferZone.cs:455-503`
 
@@ -361,7 +384,7 @@ private void FixedUpdate()
     {
         var p = _physical[i];
         ...
-        var rb = p.GetComponent<Rigidbody>();    // ← 每个物理像素、每个物理帧一次 GetComponent
+        var rb = p.bufferBody;                   // ← 改后：读缓存，不再 GetComponent
         if (rb == null) { _physical.RemoveAt(i); continue; }
         ...
         rb.velocity = dir.normalized * p.bufferCrowdSpeed;
@@ -374,15 +397,27 @@ private void FixedUpdate()
 **每物理帧（默认 50Hz）× 每个在缓冲区等待的物理像素**。缓冲区里堆十几到几十颗时，
 这是每秒上千次 `GetComponent`。
 
-`RefreshGeometry` 每物理帧跑一次，本身只是几个向量运算，可接受（但 `out _` 的
-`entrance`/`gap`/`length` 也算了出来 —— 极小，不必改）。
+`RefreshGeometry` 每物理帧跑一次，本身只是几个向量运算，可接受，未动。
 
-**建议**：`PixelItem` 上加一个 `[System.NonSerialized] public Rigidbody body;` 缓存，
-在 `AttachPhysics` 时写入、`DetachPhysics`（`:1421`）时清空，循环里直接读字段。
-**这是一处干净的小重构，几乎零风险。**
+**已做的改动（2026-10-08）**：
 
-> 相关的：`AttachPhysics`/`DetachPhysics` 在运行时会 `Destroy(rb)` / `Destroy(sphere)`，
-> 也会 `GetComponent`。那些是事件级（每次进入/离开缓冲区），不是每帧，优先度低。
+| 位置 | 改动 |
+|---|---|
+| `PixelItem.cs`（`bufferAimOffset` 之后） | 新增 `[System.NonSerialized] public Rigidbody bufferBody;` |
+| `CrowdBufferZone.EnterPhysical`（`:1250-1252` 拿到刚体之后） | `item.bufferBody = rb;` |
+| `CrowdBufferZone.FixedUpdate`（`:472`） | `p.GetComponent<Rigidbody>()` → `p.bufferBody` |
+| `CrowdBufferZone.DetachPhysics`（`:1421`） | 销毁刚体后补 `item.bufferBody = null;` |
+
+- **为什么安全**：像素的刚体**只由 `EnterPhysical` 添加**（全工程作用于像素的
+  `AddComponent<Rigidbody>` 仅 `:1252` 一处），而 `_physical.Add(item)` 在 `:1285`，
+  **排在添加刚体之后** —— 所以 `_physical` 里的每个像素必然已经写好缓存。
+  刚体若被外部销毁，缓存会变成「已销毁引用」，而 Unity 的 `== null` 对已销毁对象**仍为 true**，
+  于是 `:475` 那条「刚体不见了就移出物理队列」的既有分支行为**逐字不变**。
+  `DetachPhysics` 的三个调用点（`:445`、`:1365`、`:1416`）都紧跟 `_physical.Remove`，清空缓存不会漏。
+- **收益**：把「每物理帧 × 每像素」的 `GetComponent` 归零。
+
+> 注意：`EnterPhysical` / `DetachPhysics` 里**也**各有一次 `GetComponent`（取刚体 / 取 `SphereCollider`），
+> 那些是**事件级**（每次进入 / 离开缓冲区一次），不在每帧预算里，**保持原样未动**。
 
 ---
 
@@ -491,7 +526,7 @@ for (int r = 0; r < row; r++)                       // ← 前方逐格 IsObstac
 
 ---
 
-### 3.6 P11 · `GameController.UpdateCountText` 每帧字符串 🟡
+### 3.6 P11 · `GameController.UpdateCountText` 每帧字符串 ✅ **已处理**
 
 **位置**：`Gameplay/GameController.cs:871-892`
 
@@ -519,8 +554,47 @@ private void UpdateCountText()
    值没变不会置脏（所以不会每帧重建 Canvas）—— **这一点侥幸没踩坑**，
    但比较本身要在新分配出来的字符串之间做。
 
-**建议**：缓存上一次的数值，只在**变化时**才拼串赋值。这一条能顺手把 (1)(3) 一起解决，
-并且完全不动语义。
+**已做的改动（2026-10-08）**：缓存上一次的数值，只在**变化时**才拼串赋值。
+
+```csharp
+// GameController 私有字段（[System.NonSerialized]，不进 Inspector / 不落 YAML）
+private int _lastBeltOccupied = int.MinValue, _lastBeltTotal = int.MinValue;
+private int _lastGatheredCount = int.MinValue, _lastProgressPercent = int.MinValue;
+
+private void UpdateCountText()
+{
+    if (gatherCountText != null)
+    {
+        if (conveyorZone != null)
+        {
+            int occupied = conveyorZone.OccupiedSlots;
+            int total = conveyorZone.TotalSlots;
+            if (occupied != _lastBeltOccupied || total != _lastBeltTotal)   // 值没变：不拼串、不写 Text
+            {
+                _lastBeltOccupied = occupied;
+                _lastBeltTotal = total;
+                gatherCountText.text = occupied + "/" + total;
+            }
+        }
+        else
+        {
+            int count = gatheredItems.Count;
+            if (count != _lastGatheredCount) { _lastGatheredCount = count; gatherCountText.text = count.ToString(); }
+        }
+    }
+    if (progressText != null)
+    {
+        int percent = GameData.ProgressPercent;
+        if (percent != _lastProgressPercent) { _lastProgressPercent = percent; progressText.text = percent + "%"; }
+    }
+}
+```
+
+- **为什么安全**：`gatherCountText` / `progressText` 全工程**只有本方法写**（`grep` 确认，
+  无第二处 `Assign`），所以缓存不会与别处的写入脱节。用 `int.MinValue` 当「还没写过」的哨兵，
+  **保证首帧一定写一次**。
+- **收益**：消除每帧约 4 个小字符串分配（`OccupiedSlots` 那次全槽扫描保留 —— 它是 `O(槽数)`
+  的纯数组读，比字符串便宜得多，没有再为它加脏标记的必要）。
 
 ---
 
@@ -665,7 +739,7 @@ private void UpdateCountText()
 
 1. **像素预制体上有没有常驻 `Rigidbody` / `Collider`** —— 这直接决定 §3.2 的量级，
    也决定 `Physics.Processing` 在 Profiler 里的占比。（按约定没读 `.prefab`。）
-   代码只告诉我们缓冲区进出时会 `AttachPhysics` / `DetachPhysics`（`CrowdBufferZone.cs:1421`），
+   代码只告诉我们缓冲区进出时会 `EnterPhysical`（`:1228`）/ `DetachPhysics`（`:1421`）增删刚体与碰撞球，
    但**静置的像素是否也带碰撞体**必须看预制体。
 2. **典型关卡的规模**：格子上限、单关像素总数、传送带槽数、绳组数量。
    本文的数字估算用的是「约 7 列 × 12 排、像素百级、槽位十几」，需要你用真实关卡校正。
@@ -680,9 +754,12 @@ private void UpdateCountText()
 
 ## 7. 建议的动手顺序
 
-> **状态更新（2026-10-08）**：**P2 已处理**（场景 / 预制体已关调试开关，第 1 条免做）；
-> **P1 已禁用**（`FrameItem` 不再被调用，第 8 条免做）。
-> 两者都保留在原编号位置上，只标状态，**不重排序号**，以免打乱下表的 `#` ↔ `P#` 对应关系。
+> **状态更新（2026-10-08）**：
+> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）—— 见 §3.1 / §3.6 / §3.2
+> - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
+> - **已定方案、未改码**：第 15 条（P13，`IceItem` 仅关卡开始重建，见 §4.1）
+>
+> 各条都保留在原编号位置上，只标状态，**不重排序号**，以免打乱下表的 `#` ↔ `P#` 对应关系。
 
 > **编号说明**：下表的 `#` 是**动手顺序**，`P#` 是**问题编号**（§0 速览表与 §2/§3/§4 各节标题里的那个）。
 > 两者**不是一一对应**：一个 P 可能拆成几步做（P5 拆成 4·14·16，P4 拆成 9·13，P8 拆成 11·12），
@@ -693,15 +770,15 @@ private void UpdateCountText()
 | # | P# | 改动 | 位置 |
 |---|---|---|---|
 | 1 | **P2** | ~~6 个调试开关默认值改 `false`~~ —— **✅ 已处理**：已在场景 / 预制体关闭，无需改码（§2.2） | — |
-| 2 | **P10** | `ProcessConsumption` 加 `if (gc.gatheredItems.Count == 0) return;` | `ContainerGroup.cs:365` |
-| 3 | **P11** | `UpdateCountText` 只在数值变化时赋值 | `GameController.cs:881-892` |
+| 2 | **P10** | ~~原建议「加 `if (gc.gatheredItems.Count == 0) return;`」~~ —— **已作废**，那会破坏开盖（§3.1 更正）。实做：外层循环裁到 `min(rows, maxOpenRows)` —— **✅ 已处理** | `ContainerGroup.cs:368-374` |
+| 3 | **P11** | `UpdateCountText` 只在数值变化时赋值 —— **✅ 已处理**（§3.6） | `GameController.cs:881-902` |
 | 4 | **P5** | 删掉 `NotifyClickMovedOut` 里多余的 `RefreshIceState()`（§2.5 末尾那条重复调用） | `PixelGroup.cs:750` 附近 |
 
 ### 第二档：小重构，局部风险
 
 | # | P# | 改动 | 位置 |
 |---|---|---|---|
-| 5 | **P7** | `PixelItem` 缓存 `Rigidbody`，消掉物理帧里的 `GetComponent` | `CrowdBufferZone.cs:472` + `PixelItem.cs` + `:1421` |
+| 5 | **P7** | `PixelItem` 缓存 `Rigidbody`，消掉物理帧里的 `GetComponent` —— **✅ 已处理**（§3.2） | `CrowdBufferZone.cs:472` + `PixelItem.cs` + `:1421` |
 | 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 | `CrowdBufferZone.cs:878` |
 | 7 | **P12** | `exiting` 等临时 `List` 改成员缓存复用 | `CrowdBufferZone.cs:524` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |

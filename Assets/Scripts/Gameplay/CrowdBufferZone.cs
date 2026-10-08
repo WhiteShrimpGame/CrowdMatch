@@ -469,7 +469,9 @@ namespace CrowdMatch
                     continue;
                 }
 
-                var rb = p.GetComponent<Rigidbody>();
+                // 用 EnterPhysical 缓存好的刚体：省掉「每物理帧 × 每像素」的 GetComponent。
+                // 刚体被外部销毁时这里是已销毁引用，Unity 的 == null 判定仍为 true，与每次现查行为一致。
+                var rb = p.bufferBody;
                 if (rb == null)
                 {
                     _physical.RemoveAt(i);
@@ -1250,6 +1252,7 @@ namespace CrowdMatch
             var rb = item.GetComponent<Rigidbody>();
             if (rb == null)
                 rb = item.gameObject.AddComponent<Rigidbody>();
+            item.bufferBody = rb;   // 缓存给 FixedUpdate：免掉每物理帧 × 每像素的 GetComponent
             rb.useGravity = false;
             rb.mass = 1f;
             rb.drag = 0f;
@@ -1427,6 +1430,7 @@ namespace CrowdMatch
                 rb.velocity = Vector3.zero;
                 Destroy(rb);
             }
+            item.bufferBody = null;   // 刚体已销毁：清掉缓存，别留下已销毁引用给 FixedUpdate
 
             var sphere = item.GetComponent<SphereCollider>();
             if (sphere != null)

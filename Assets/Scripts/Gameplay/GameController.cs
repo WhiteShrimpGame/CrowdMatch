@@ -127,6 +127,14 @@ namespace CrowdMatch
         /// <summary>上一条失败判定诊断行：内容完全相同时不重复打印（复活期间会有几十次上车回调，行内容一模一样）。</summary>
         private string _lastFailCheckLog;
 
+        // ===== 计数 / 进度文本的「上次值」缓存（见 UpdateCountText）=====
+        // 文本是按帧刷的，但值只在像素上带、上车、通关时变。不缓存的话每帧都要拼字符串并写一次 UI Text，
+        // 白白产生 GC 垃圾。用 int.MinValue 当「还没写过」的哨兵，保证首帧一定写一次。
+        [System.NonSerialized] private int _lastBeltOccupied = int.MinValue;
+        [System.NonSerialized] private int _lastBeltTotal = int.MinValue;
+        [System.NonSerialized] private int _lastGatheredCount = int.MinValue;
+        [System.NonSerialized] private int _lastProgressPercent = int.MinValue;
+
         /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
         private int _overflowClickCount;
 
@@ -877,18 +885,46 @@ namespace CrowdMatch
                 HandleClick();
         }
 
-        /// <summary>刷新每帧变化的文本：聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。</summary>
+        /// <summary>
+        /// 刷新聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。
+        /// 值没变就不拼串、不写 Text：本方法是每帧调的，而这两个值只在像素上带 / 上车 / 通关时才变，
+        /// 每帧无条件赋值会白白产生字符串垃圾（Text 的 setter 虽自带相等判断，但那是在新分配出来的字符串之间比）。
+        /// </summary>
         private void UpdateCountText()
         {
             if (gatherCountText != null)
             {
                 if (conveyorZone != null)
-                    gatherCountText.text = conveyorZone.OccupiedSlots + "/" + conveyorZone.TotalSlots;
+                {
+                    int occupied = conveyorZone.OccupiedSlots;
+                    int total = conveyorZone.TotalSlots;
+                    if (occupied != _lastBeltOccupied || total != _lastBeltTotal)
+                    {
+                        _lastBeltOccupied = occupied;
+                        _lastBeltTotal = total;
+                        gatherCountText.text = occupied + "/" + total;
+                    }
+                }
                 else
-                    gatherCountText.text = gatheredItems.Count.ToString();
+                {
+                    int count = gatheredItems.Count;
+                    if (count != _lastGatheredCount)
+                    {
+                        _lastGatheredCount = count;
+                        gatherCountText.text = count.ToString();
+                    }
+                }
             }
+
             if (progressText != null)
-                progressText.text = GameData.ProgressPercent + "%";
+            {
+                int percent = GameData.ProgressPercent;
+                if (percent != _lastProgressPercent)
+                {
+                    _lastProgressPercent = percent;
+                    progressText.text = percent + "%";
+                }
+            }
         }
 
         /// <summary>当前「传送带 + 已点未进带」的总占用数。</summary>
