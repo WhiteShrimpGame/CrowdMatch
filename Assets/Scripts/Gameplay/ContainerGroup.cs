@@ -365,9 +365,12 @@ namespace CrowdMatch
             if (gc == null || gc.gatheredItems == null)
                 return;
 
+            // 只有前 maxOpenRows 排可能开放（IsOpen 对 row >= maxOpenRows 恒返回 false），
+            // 更深的排在这条循环里从来做不了任何事，所以外层直接裁掉它们 —— 与 FindMatchableInColumn 的 limit 同口径。
+            int rowLimit = Mathf.Min(rows, Mathf.Max(0, maxOpenRows));
             for (int col = 0; col < columns; col++)
             {
-                for (int row = 0; row < rows; row++)
+                for (int row = 0; row < rowLimit; row++)
                 {
                     var item = GetItem(col, row);
                     if (item == null || item.IsEmpty || item.isRefilling)

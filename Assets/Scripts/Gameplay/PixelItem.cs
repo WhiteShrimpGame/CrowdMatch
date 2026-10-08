@@ -125,6 +125,14 @@ namespace CrowdMatch
         [System.NonSerialized] public float bufferAimOffset;
 
         /// <summary>
+        /// 物理缓冲区的刚体缓存：<c>CrowdBufferZone.EnterPhysical</c> 写入、<c>DetachPhysics</c> 清空。
+        /// 只为省掉 <c>FixedUpdate</c> 里「每物理帧 × 每个物理像素」的 <c>GetComponent&lt;Rigidbody&gt;()</c>。
+        /// 刚体若被外部销毁，这里会变成已销毁引用，Unity 的 <c>== null</c> 判定仍为 true，
+        /// 与「每次现查」的行为一致。
+        /// </summary>
+        [System.NonSerialized] public Rigidbody bufferBody;
+
+        /// <summary>
         /// 复活保留：本像素已被复活队列预定（会按次序跳车 / 原地消失）。在轮到自己之前它
         /// **仍然留在传送带槽位 / 缓冲区里被正常驱动**（跟着带移动、被物理推挤），
         /// 但不参与匹配、不进传送带、不进表情候选 —— 否则会和复活队列抢。

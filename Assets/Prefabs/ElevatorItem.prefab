@@ -385,7 +385,7 @@ MonoBehaviour:
   frameColor: {r: 0.32, g: 0.36, b: 0.45, a: 1}
   doorColor: {r: 0.42, g: 0.46, b: 0.55, a: 1}
   pitColor: {r: 0.12, g: 0.13, b: 0.18, a: 1}
-  debugLog: 1
+  debugLog: 0
   frameRoot: {fileID: 1213021961710764846}
   doorLeft: {fileID: 8814711017186799886}
   doorRight: {fileID: 5962064278283927331}
