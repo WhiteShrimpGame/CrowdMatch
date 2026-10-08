@@ -1742,6 +1742,12 @@ MonoBehaviour:
   recordMode: 0
   recordOutputDir: 
   reviveKeepBeltCount: 10
+  reviveInterval: 0.1
+  reviveDisappearPopDuration: 0.3
+  reviveDisappearShrinkDuration: 0.3
+  reviveJumpDuration: 0.5
+  reviveElasticScaleDuration: 0.15
+  reviveElasticRecoverDuration: 0.2
   overflowPendingLimit: 9
   debugClickLog: 1
   debugFailLog: 1

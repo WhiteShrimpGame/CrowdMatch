@@ -365,10 +365,12 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 复活用：取出缓冲区所有「已点击但尚未进入传送带」的像素（提取中 + 物理阶段）并清空缓冲区。
-        /// 不销毁像素；物理阶段的像素解除物理约束。返回像素列表（保持世界位置），供调用方直接匹配到后排车。
+        /// 复活用（第一部分）：取出「提取中」批次里的像素并清空批次。它们还在**网格里寻路**，
+        /// 既不在传送带上也不在物理队列里，「保持带 / 缓冲区行为」无从谈起，所以照旧直接取出。
+        /// 不销毁、不动父物体（仍是 PixelGroup）；顺带清理提取上下文与管道蛇形可通行标记。
+        /// 注：失败门禁 5（网格内还有像素在寻路 → 不判失败）保证判失败那一刻此列表为空，实际多为空操作。
         /// </summary>
-        public List<PixelItem> DrainAllPixels()
+        public List<PixelItem> DrainExtracting()
         {
             var all = new List<PixelItem>();
 
@@ -385,24 +387,63 @@ namespace CrowdMatch
             }
             _batches.Clear();
 
-            // 物理阶段（已附加刚体）：解除物理约束后加入
-            for (int i = 0; i < _physical.Count; i++)
-            {
-                var p = _physical[i];
-                if (p != null)
-                {
-                    DetachPhysics(p);
-                    all.Add(p);
-                }
-            }
-            _physical.Clear();
-
             // 清理管道蛇形可通行标记与提取上下文（需在置空 _extractGroup 之前调用）
             ClearExtractionWalkableFlags();
             _extractGroup = null;
-            _lastReleaseTime = float.NegativeInfinity;
 
             return all;
+        }
+
+        /// <summary>
+        /// 复活用（第二部分）：把物理队列里的像素**原地**标为 <see cref="PixelItem.reviveReserved"/> 并返回。
+        /// **不摘除、不解除物理** —— 它们在被复活队列叫走之前继续待在缺口前被互相推挤
+        /// （复活口径见 GameController.Revive 的注释）；摘除由 <see cref="ReleaseReserved"/> 在
+        /// 起跳前 / 消失完成时做。
+        /// </summary>
+        public List<PixelItem> ReservePhysical()
+        {
+            var reserved = new List<PixelItem>();
+            for (int i = 0; i < _physical.Count; i++)
+            {
+                var p = _physical[i];
+                if (p == null)
+                    continue;
+                p.reviveReserved = true;
+                reserved.Add(p);
+            }
+
+            _lastReleaseTime = float.NegativeInfinity;   // 复活后不再被旧的释放节流卡住
+            return reserved;
+        }
+
+        /// <summary>
+        /// 是否还有被复活保留、尚未摘下的像素。它们占着物理队列却不参与进带，所以失败判定不能在
+        /// 这种状态下做（见 GameController.TryCheckFail）。用扫描而非计数器：像素一销毁就自然不再计入。
+        /// </summary>
+        public bool HasReservedPixel()
+        {
+            for (int i = 0; i < _physical.Count; i++)
+            {
+                var p = _physical[i];
+                if (p != null && p.reviveReserved)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 把一颗被复活保留的像素从缓冲区真正摘下来：解除物理约束并移出物理队列。
+        /// 消失组的 pop 完成时、跳跃组的起跳前各调一次（见 GameController.ReleaseRevivePixel）。
+        /// 不在队列里（已被取走 / 销毁）返回 false，调用方照常清保留标志。
+        /// </summary>
+        public bool ReleaseReserved(PixelItem pixel)
+        {
+            if (pixel == null)
+                return false;
+            if (!_physical.Remove(pixel))
+                return false;
+            DetachPhysics(pixel);
+            return true;
         }
 
         private void Update()
@@ -1298,8 +1339,8 @@ namespace CrowdMatch
             float bestDist = float.MaxValue;
             foreach (var p in _physical)
             {
-                if (p == null)
-                    continue;
+                if (p == null || p.reviveReserved)
+                    continue;   // 复活保留：等复活队列叫它走，这儿不许取
                 Vector3 toGap = gap - p.transform.position;
                 toGap.y = 0f;
                 float d = toGap.magnitude;
@@ -1327,7 +1368,8 @@ namespace CrowdMatch
 
         /// <summary>
         /// 把仍在缓冲区物理队列里等待（已走到缺口前排队、尚未被传送带取走）的像素收集到 outList。
-        /// 不含还在网格里往外走的提取中像素。供「后点的像素先上了传送带」这类插队判定。
+        /// 不含还在网格里往外走的提取中像素，也**不含复活保留的像素**（它们只是在等跳车，
+        /// 不该被算进插队 / 排队生气的候选）。供「后点的像素先上了传送带」这类插队判定。
         /// </summary>
         public void CollectWaiting(List<PixelItem> outList)
         {
@@ -1336,8 +1378,9 @@ namespace CrowdMatch
 
             for (int i = 0; i < _physical.Count; i++)
             {
-                if (_physical[i] != null)
-                    outList.Add(_physical[i]);
+                var p = _physical[i];
+                if (p != null && !p.reviveReserved)
+                    outList.Add(p);
             }
         }
 
@@ -1353,8 +1396,8 @@ namespace CrowdMatch
             float bestDist = float.MaxValue;
             foreach (var p in _physical)
             {
-                if (p == null)
-                    continue;
+                if (p == null || p.reviveReserved)
+                    continue;   // 复活保留：等复活队列叫它走，这儿不许取
                 Vector3 toGap = gap - p.transform.position;
                 toGap.y = 0f;
                 float d = toGap.magnitude;

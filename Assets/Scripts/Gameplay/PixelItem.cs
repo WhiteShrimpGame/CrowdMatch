@@ -125,6 +125,15 @@ namespace CrowdMatch
         [System.NonSerialized] public float bufferAimOffset;
 
         /// <summary>
+        /// 复活保留：本像素已被复活队列预定（会按次序跳车 / 原地消失）。在轮到自己之前它
+        /// **仍然留在传送带槽位 / 缓冲区里被正常驱动**（跟着带移动、被物理推挤），
+        /// 但不参与匹配、不进传送带、不进表情候选 —— 否则会和复活队列抢。
+        /// 由 <c>GameController.Revive</c> 置位，<c>GameController.ReleaseRevivePixel</c> 在
+        /// 起跳前 / 消失完成时清除。详见 Docs/FailDetectionReview.md §1 与复活相关注释。
+        /// </summary>
+        [System.NonSerialized] public bool reviveReserved;
+
+        /// <summary>
         /// IConveyorItem：供传送带定位的 Transform；对象已被销毁时返回 null。
         /// 必须用 `this == null`（Unity 运算符）判：传送带持有的是 IConveyorItem 数组，
         /// 那里的 `== null` 是普通引用比较、看不见已销毁对象（见 ConveyorBelt.CheckLeave 的「防御」分支）。
