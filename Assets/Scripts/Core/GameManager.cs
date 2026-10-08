@@ -29,11 +29,8 @@ namespace CrowdMatch
         [Tooltip("关卡 JSON 列表（调试用，优先级高于 levelDataConfig；非空时按序号循环取关）")]
         public List<TextAsset> levelJsons = new List<TextAsset>();
 
-        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用")]
+        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用；关卡显示文本也在它里面（levelTexts / levelTextsLoop）")]
         public LevelDataConfig levelDataConfig;
-
-        [Tooltip("关卡文本配置 ScriptableObject（关卡序号 → 文本，如 1 → 北京）；留空则关卡文本 UI 显示为空")]
-        public LevelTextConfig levelTextConfig;
 
         [Header("对象池")]
         [Tooltip("对象池配置资产（tag → prefab → preloadCount）；留空则跳过对象池初始化")]
