@@ -145,6 +145,33 @@ namespace CrowdMatch
         /// <summary>上面那张掩码对应的「活跃管道数」；-1 = 已失效，下次查询时重建。</summary>
         [System.NonSerialized] private int _activePipeMaskCount = -1;
 
+        // ===== RefreshExposed 的复用缓冲 =====
+        // 这几张表都是**纯局部**用途（只在 RefreshExposed 内部读写，无外部读法），所以可以按需扩容后反复复用，
+        // 不必每次点击重新分配。用法见 ClearedGrid：尺寸不符就重建，相符就清零复用。
+        // **前提：RefreshExposed 不可重入** —— 目前成立：它既不 yield，也没有任何回调会同步调回自己
+        // （SetExposed → ApplyMaterial / RefreshQuestionObject / ApplyExposedState 都只写自己的渲染器 /
+        // Animator，不回 PixelGroup）；唯一可能回调的 SameColorMergeWatcher.Notify 在函数最后一句，
+        // 那时这几张表已经用完。
+        [System.NonSerialized] private bool[,] _reachableEmptyBuf;
+        [System.NonSerialized] private bool[,] _directlyExposedBuf;
+        [System.NonSerialized] private bool[,] _exposureVisitedBuf;
+        [System.NonSerialized] private bool[,] _exposureActiveBuf;
+        [System.NonSerialized] private readonly Queue<Vector2Int> _exposureQueue = new Queue<Vector2Int>();
+        [System.NonSerialized] private readonly List<Vector2Int> _componentCellsBuf = new List<Vector2Int>();
+
+        /// <summary>4 邻偏移。提成静态只读：写成方法内的 <c>int[] dx = {…}</c> 局部数组字面量会每次调用都分配一次。</summary>
+        private static readonly int[] Dx4 = { 1, -1, 0, 0 };
+        private static readonly int[] Dz4 = { 0, 0, 1, -1 };
+
+        /// <summary>取一张「已清零、尺寸正确」的复用布尔网格：尺寸不符就重建，相符就 <see cref="System.Array.Clear"/> 复用。</summary>
+        private static bool[,] ClearedGrid(ref bool[,] buf, int cols, int rows)
+        {
+            if (buf == null || buf.GetLength(0) != cols || buf.GetLength(1) != rows)
+                return buf = new bool[cols, rows];
+            System.Array.Clear(buf, 0, buf.Length);
+            return buf;
+        }
+
         /// <summary>运行时收集到的所有倍乘门（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<GateItem> gates = new List<GateItem>();
 
@@ -1116,11 +1143,10 @@ namespace CrowdMatch
             // 0. 计算「能连通到首排的空格」：从首排空/出口出发 BFS，只通过 IsEmptyForExposure 的空格扩散。
             //    「空」必须是真正通向出口的空——被活跃管道（新蛇即将填充）隔开的空格不算，
             //    避免蛇被移出后，紧邻非蛇同色 Pixel 的其他颜色块因「局部空」被误激活 Animator。
-            var reachableEmpty = new bool[cols, totalRows];
+            var reachableEmpty = ClearedGrid(ref _reachableEmptyBuf, cols, totalRows);
             {
-                int[] edx = { 1, -1, 0, 0 };
-                int[] edz = { 0, 0, 1, -1 };
-                var q = new Queue<Vector2Int>();
+                var q = _exposureQueue;
+                q.Clear();
                 for (int c = 0; c < cols; c++)
                 {
                     if (IsEmptyForExposure(c, 0))
@@ -1134,8 +1160,8 @@ namespace CrowdMatch
                     var cur = q.Dequeue();
                     for (int d = 0; d < 4; d++)
                     {
-                        int nx = cur.x + edx[d];
-                        int nz = cur.y + edz[d];
+                        int nx = cur.x + Dx4[d];
+                        int nz = cur.y + Dz4[d];
                         if (nx < 0 || nx >= cols || nz < 0 || nz >= totalRows)
                             continue;
                         if (reachableEmpty[nx, nz])
@@ -1151,7 +1177,7 @@ namespace CrowdMatch
             // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）。
             //    门格另有一条：只对**该门闭合区域内**的格子作数 —— 区域外的像素把门格当墙，
             //    于是「门框外侧紧邻的像素」不再因为贴着门格而点亮（口径见 IsGateBlockedFor）。
-            var directlyExposed = new bool[cols, totalRows];
+            var directlyExposed = ClearedGrid(ref _directlyExposedBuf, cols, totalRows);
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -1168,10 +1194,8 @@ namespace CrowdMatch
             }
 
             // 2. BFS 扩散同色连通块：含直接暴露格的连通块整块激活
-            var visited = new bool[cols, totalRows];
-            var active = new bool[cols, totalRows];
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
+            var visited = ClearedGrid(ref _exposureVisitedBuf, cols, totalRows);
+            var active = ClearedGrid(ref _exposureActiveBuf, cols, totalRows);
 
             for (int c = 0; c < cols; c++)
             {
@@ -1183,10 +1207,12 @@ namespace CrowdMatch
                         continue;
 
                     int color = grid[c, r].colorId;
-                    var cells = new List<Vector2Int>();
+                    var cells = _componentCellsBuf;
+                    cells.Clear();
                     bool hasExposed = false;
                     bool hasExposedQuestion = false;
-                    var queue = new Queue<Vector2Int>();
+                    var queue = _exposureQueue;
+                    queue.Clear();
                     queue.Enqueue(new Vector2Int(c, r));
                     visited[c, r] = true;
 
@@ -1204,8 +1230,8 @@ namespace CrowdMatch
 
                         for (int d = 0; d < 4; d++)
                         {
-                            int nx = cur.x + dx[d];
-                            int nz = cur.y + dz[d];
+                            int nx = cur.x + Dx4[d];
+                            int nz = cur.y + Dz4[d];
                             if (nx < 0 || nx >= cols || nz < 0 || nz >= totalRows)
                                 continue;
                             if (visited[nx, nz])
