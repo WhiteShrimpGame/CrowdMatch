@@ -1084,8 +1084,16 @@ namespace CrowdMatch
         /// 打开某容器正后方（gridZ + 1）容器的盖子，让它随后可接收像素。
         /// 前排 / 已开放的后排容器共用此逻辑——耗尽谁的容量就开谁后面的盖子。
         ///
-        /// 例外：该车「装满但同组还有车没装满」时**不开**——它仍压着同组的像素需求
+        /// 例外一：该车「装满但同组还有车没装满」时**不开**——它仍压着同组的像素需求
         /// （<see cref="IsWaitingRopeCar"/>），打开后盖就等于绕过 <see cref="IsOpen"/> 对后排的堵截。
+        ///
+        /// 例外二（**开盖口径**）：目标格必须满足「**它前方所有车都已放行**」（<see cref="IsFrontCleared"/>）
+        /// 才开盖。正常玩法里这条恒成立——匹配只认 <see cref="IsOpen"/> 的车，能被喂满的车前方必然都已放行。
+        /// 但**复活路径不走 <c>IsOpen</c>**（<c>MatchPixelsToCars</c> 按颜色找任意排的车），
+        /// 于是会出现「第 z 排被喂满、而它前面第 z−1 排还没匹配完」——此时不该开第 z+1 排的盖。
+        ///
+        /// 顺着这条口径还要**继续往深排走**：只要第 z+1 排自己也已装满，第 z+2 排的前方就同样全都放行了。
+        /// 只开一格的话，「本该开、但当时前方还没放行因而被跳过」的深排盖会永远等不到人来开。
         /// </summary>
         private void OpenRearLid(ContainerItem container)
         {
@@ -1095,16 +1103,34 @@ namespace CrowdMatch
                 return;
 
             int col = container.gridX;
-            int row = container.gridZ + 1;
-            var rear = GetItem(col, row);
-            if (rear != null)
+            for (int row = container.gridZ + 1; row < rows; row++)
             {
-                rear.OpenLid();
+                if (!IsFrontCleared(col, row))
+                    break;                  // 前方还有没匹配完的车：这一排及更深处都不该开
+                if (!CarAt(col, row))
+                    break;                  // 这一列到头了
+
+                OpenLidAt(col, row);
+
+                if (!EmptyAt(col, row))
+                    break;                  // 这一排自己还没装满：再往深处，前方就不全放行了
+            }
+        }
+
+        /// <summary>
+        /// 打开某格的盖子：有实例走 <see cref="ContainerItem.OpenLid"/>；
+        /// 视窗外的深排车没有实例，就把开盖状态记到数据层，等它补位滚进视窗时由
+        /// <see cref="ContainerItem.ApplyCell"/> 水合出来，与当场开盖表现一致。
+        /// </summary>
+        private void OpenLidAt(int col, int row)
+        {
+            var item = GetItem(col, row);
+            if (item != null)
+            {
+                item.OpenLid();
                 return;
             }
 
-            // 懒实例化：正后方那辆车还在视窗外（没有实例）——把开盖状态记到数据层，
-            // 等它补位滚进视窗被实例化时由 ContainerItem.ApplyCell 水合出来，与当场开盖表现一致。
             if (!CellInRange(col, row))
                 return;
             int i = CellIndex(col, row);
