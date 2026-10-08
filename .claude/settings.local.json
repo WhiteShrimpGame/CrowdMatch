@@ -114,7 +114,8 @@
       "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_board.js\" Level08.json)",
       "Bash(node \"C:/Users/hougo/AppData/Local/Temp/smoke_shuffle.js\")",
       "Bash(grep -vE \"-------\")",
-      "Bash(grep -v -e \"Assets/-------\" -e \"Assets\\\\\\\\\\\\\\\\-------\")"
+      "Bash(grep -v -e \"Assets/-------\" -e \"Assets\\\\\\\\\\\\\\\\-------\")",
+      "Bash(xargs wc -l)"
     ]
   }
 }
