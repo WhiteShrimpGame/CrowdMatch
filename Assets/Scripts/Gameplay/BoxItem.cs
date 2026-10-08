@@ -363,15 +363,6 @@ namespace CrowdMatch
             var adjacent = CollectAdjacentEmpty();
             var connected = CollectConnectedEmpty(adjacent);
 
-            // 优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）
-            var score = new Dictionary<Vector2Int, int>();
-            foreach (var c in body)
-                score[c] = 0;
-            foreach (var c in adjacent)
-                score[c] = 1;
-            foreach (var pair in connected)
-                score[pair.cell] = 2 + pair.distance;
-
             int available = body.Count + adjacent.Count + connected.Count;
             if (debugOpenLog)
             {
@@ -392,6 +383,17 @@ namespace CrowdMatch
 
             // 3. 整体规划：把隐藏像素按颜色分组，每种颜色分配到一组 4 方向连通的候选格，
             //    确保释放后同色像素各自连通（优先级：本体 > 相邻 > 连通距离）。
+            //    优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）。
+            //    **只在这里建**：未就绪的箱子走上面那个 return，为它白建一张几百项的字典没有意义
+            //    （「未就绪」是常态 —— 容量总是比本体大 8~32 格）。
+            var score = new Dictionary<Vector2Int, int>();
+            foreach (var c in body)
+                score[c] = 0;
+            foreach (var c in adjacent)
+                score[c] = 1;
+            foreach (var pair in connected)
+                score[pair.cell] = 2 + pair.distance;
+
             var allCells = new List<Vector2Int>(available);
             allCells.AddRange(body);
             allCells.AddRange(adjacent);

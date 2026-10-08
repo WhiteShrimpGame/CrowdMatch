@@ -132,6 +132,19 @@ namespace CrowdMatch
         /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
 
+        /// <summary>
+        /// 「活跃管道覆盖格」缓存 [column, row]：true = 该格被仍有未释放波次的管道覆盖（自身格 + 轨道格）。
+        /// 只为 <see cref="IsActivePipeBlocked"/> 服务 —— 它被暴露判定 / 开箱判定的 BFS **逐格**调用，
+        /// 原本每次都要把所有活跃管道的折线从头走一遍，是这两条链路的乘性开销。
+        /// 掩码内容只由「哪些管道还有未释放波次」与它们的 <c>points</c> 决定，而 <c>points</c> 进关后不变、
+        /// <c>PipeItem._waveIndex</c> 只增不减（见 <see cref="PipeItem.HasRemainingWaves"/>），
+        /// 所以「活跃管道数」就是一个可靠的版本号，见 <see cref="EnsureActivePipeMask"/>。
+        /// </summary>
+        [System.NonSerialized] private bool[,] _activePipeMask;
+
+        /// <summary>上面那张掩码对应的「活跃管道数」；-1 = 已失效，下次查询时重建。</summary>
+        [System.NonSerialized] private int _activePipeMaskCount = -1;
+
         /// <summary>运行时收集到的所有倍乘门（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<GateItem> gates = new List<GateItem>();
 
@@ -182,6 +195,9 @@ namespace CrowdMatch
             gates = new List<GateItem>();
             iceGroups = new List<IceItem>();
             crates = new List<CrateItem>();
+            // pipes 换了一批，活跃管道掩码作废。**必须显式失效**：换关时新旧关卡的活跃管道数
+            // 可能恰好相同，只靠计数版本号会误用上一关的掩码（几何不同 → 判据出错）。
+            _activePipeMaskCount = -1;
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -393,20 +409,57 @@ namespace CrowdMatch
             return grid[col, row] == null && !IsBlocked(col, row);
         }
 
-        /// <summary>该格是否被「仍有未释放波次的管道」覆盖（管道自身格 + 轨道格）。暴露判定时视为阻挡。</summary>
+        /// <summary>该格是否被「仍有未释放波次的管道」覆盖（管道自身格 + 轨道格）。暴露判定时视为阻挡。
+        /// 走 <see cref="_activePipeMask"/> 缓存，不再每次重走管道折线。</summary>
         public bool IsActivePipeBlocked(int col, int row)
         {
-            if (pipes == null)
+            if (pipes == null || pipes.Count == 0)
                 return false;
+            if (!IsInRange(col, row))
+                return false;
+            EnsureActivePipeMask();
+            return _activePipeMask[col, row];
+        }
+
+        /// <summary>
+        /// 按需重建 <see cref="_activePipeMask"/>。先数一遍还有未释放波次的管道数（≤ 管道总数 次 bool 读、
+        /// 零分配）：与缓存版本不同才重建，所以同一波次状态下 BFS 里成千上万次查询只付一次重建。
+        /// 重建用 <see cref="PipeItem.CoversCell"/> 逐格问一遍 —— 判据与旧实现完全同源，不另写一套遍历，
+        /// 避免两边口径日后分叉。触发时机是「某条管道最后一波已生成」这类事件，每关次数 ≤ 管道数。
+        /// </summary>
+        private void EnsureActivePipeMask()
+        {
+            int count = 0;
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe != null && pipe.HasRemainingWaves)
+                    count++;
+            }
+
+            int cols = columns;
+            int totalRows = TotalRows;
+            if (_activePipeMask != null && count == _activePipeMaskCount &&
+                _activePipeMask.GetLength(0) == cols && _activePipeMask.GetLength(1) == totalRows)
+                return;
+
+            if (_activePipeMask == null || _activePipeMask.GetLength(0) != cols || _activePipeMask.GetLength(1) != totalRows)
+                _activePipeMask = new bool[cols, totalRows];
+            else
+                System.Array.Clear(_activePipeMask, 0, _activePipeMask.Length);
+
             for (int i = 0; i < pipes.Count; i++)
             {
                 var pipe = pipes[i];
                 if (pipe == null || !pipe.HasRemainingWaves)
                     continue;
-                if (pipe.CoversCell(col, row))
-                    return true;
+                for (int c = 0; c < cols; c++)
+                    for (int r = 0; r < totalRows; r++)
+                        if (!_activePipeMask[c, r] && pipe.CoversCell(c, r))
+                            _activePipeMask[c, r] = true;
             }
-            return false;
+
+            _activePipeMaskCount = count;
         }
 
         /// <summary>所有「正在释放中」管道的轨迹（管道自身格 + 轨道格）占据的 row 最小值。
@@ -1301,6 +1354,7 @@ namespace CrowdMatch
             }
             pipeGrid = new bool[columns, TotalRows];
             pipes = new List<PipeItem>();
+            _activePipeMaskCount = -1;   // pipes 清空，活跃管道掩码作废（见 EnsureActivePipeMask）
         }
 
         /// <summary>清空所有 GateItem 子物体（供关卡重载时重建倍乘门）。</summary>

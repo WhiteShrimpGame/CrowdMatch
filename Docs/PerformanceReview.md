@@ -1,10 +1,10 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**分析 + 已落地 5 处改动**（P3 / P7 / P10 / P11 / P12，见下）。
+> 状态：**分析 + 已落地 7 处改动**（P3 / P4 / P5 / P7 / P10 / P11 / P12，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **已改码（5 处，两个程序集离线编译均 0 错误）**：
+> - **已改码（7 处，两个程序集离线编译均 0 错误）**：
 >   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
 >   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
 >   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
@@ -12,12 +12,18 @@
 >   **P12** `StepExtracting` 复用快照缓冲 + 同一像素的 `transform.position` 读取 6→2 次（§3.3）
 >   —— 其 `ApplyEntryQueue` 的 O(E²) 那层**未做**，先测 E 再定；
 >   **P3** `LevelLoader` 每次进关的 `RebuildGrid` **8 次 → 4 次**（§2.3）—— 同时**更正**了两处原描述：
->   实际是 8 次不是 16 次，且原建议的「合并为一次」**会破坏箱子容量**（中间两步承重），**已作废**。
+>   实际是 8 次不是 16 次，且原建议的「合并为一次」**会破坏箱子容量**（中间两步承重），**已作废**；
+>   **P4 + P5 的共同根因** `IsActivePipeBlocked` 记忆化（§2.4 / §2.5）—— 它原先被两条 BFS **逐格**调用、
+>   每次重走全部活跃管道折线，现改为按「活跃管道数」版本号失效的覆盖掩码，**语义逐字不变**，
+>   同时消掉 P4 的内层与 P5 的 `O(格数 × 管道数)` 那一层；
+>   **P4** 另把 `score` 字典挪到就绪判定之后（未就绪是常态，每次点击白建一张几百项的字典）。
+>   **P4 的回溯预算那部分（原 §7 第 13 条）未做** —— 每关最多跑 4 次，先量化再定。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
 > - **只记录、不处理**：§2.3 末尾的 **E1 / E2**（升降台相关，待该功能正式启用）
 >
-> 其余 **P4~P6、P8、P9、P14~P16** 均**未处理**。改动清单见 §7。
+> 其余 **P6、P8、P9、P14~P16** 均**未处理**；**P4 / P5 只做了其中一部分**（各自剩什么见 §2.4 / §2.5）。
+> 改动清单见 §7。
 > 目标平台：移动端 / WebGL（`GameManager.cs` 设 `Application.targetFrameRate = 60`、`vSyncCount = 0`）
 > 范围：`Assets/Scripts/Gameplay`、`Assets/Scripts/Core`、`Assets/Scripts/DailyBonus`、`Assets/Scripts/SpawnPool`
 > （编辑器工具单列 §5，它们不影响运行时帧率，但影响迭代速度）
@@ -45,8 +51,8 @@
 | P1 | `FrameItem.Build()` 每次点击全量 `Destroy` + `Instantiate` 描边块 | — | ✅ **已禁用**（FrameItem 不再被调用） | §2.1 |
 | P2 | 6 个调试开关默认全开，其中 `debugMoveLog` 在逐像素热路径打日志 | — | ✅ **已处理**（场景 / 预制体已关，无需改码） | §2.2 |
 | P3 | `LevelLoader` 一次加载调 `RebuildGrid()` **8 次**（原文档误写 16 次） | 每次进关 | ✅ **已减到 4 次**（另更正了原判定，见 §2.3） | §2.3 |
-| P4 | `BoxItem.TryOpen()` 每次点击空转重算 + 5 万预算回溯 + 默认开日志 | **每次点击 × 每个未就绪的箱子** | 🟠 | §2.4 |
-| P5 | `PixelGroup.RefreshExposed()` 每次点击大块分配 + `O(格数×管道数)` BFS | 每次点击 | 🟠 | §2.5 |
+| P4 | `BoxItem.TryOpen()` 每次点击重算候选格（内层逐格走管道折线）+ 5 万预算回溯 | **每次点击 × 每个未就绪的箱子** | 🟠 **部分处理**：候选格内层的管道测试已缓存、`score` 字典挪到就绪判定之后；**回溯预算未动** | §2.4 |
+| P5 | `PixelGroup.RefreshExposed()` 每次点击大块分配 + `O(格数×管道数)` BFS | 每次点击 | 🟠 **部分处理**：`O(格数 × 管道数)` 那层已消；**数组 / `Queue` 缓存复用未做** | §2.5 |
 | P6 | `SameColorMergeWatcher.Notify()` 两遍全盘 BFS + 按像素数分配 | 每次动态事件 | 🟡 | §2.6 |
 | P7 | `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent<Rigidbody>()` | 每物理帧 × 每个物理像素 | ✅ **已处理**：改读 `PixelItem.bufferBody` 缓存 | §3.2 |
 | P8 | `SweepOnce()` 每次 sweep 大块分配 + 在 `while` 里 `Sort` | 每个提取 tick | 🟠 | §3.4 |
@@ -214,14 +220,14 @@ if (debugMoveLog && winner.item != null)
 #### 为什么中间的重建不能全删：箱子容量要读障碍表
 
 ```
-ApplyBoxes → SpawnBox                                    (PixelGroup.cs:1798)
+ApplyBoxes → SpawnBox                                    (PixelGroup.cs:1783)
  └─ BoxItem.ComputeCapacity                               (BoxItem.cs:129)
      └─ CountIfEmpty → group.IsBlocked
          └─ IsWall | IsPipe | IsBox | IsCrateCell  →  读 wallGrid / pipeGrid / boxGrid / crateMask
 ```
 
-而 **`SpawnWall` 不写 `wallGrid`**（`PixelGroup.cs:1495`）、**`SpawnPipe` 不写 `pipeGrid`**（`:1545`）、
-**`ClearWalls` / `ClearPipes` 只把表清零**（`:1284` / `:1302`）—— 表的内容**完全靠重建时那次
+而 **`SpawnWall` 不写 `wallGrid`**（`PixelGroup.cs:1549`）、**`SpawnPipe` 不写 `pipeGrid`**（`:1599`）、
+**`ClearWalls` / `ClearPipes` 只把表清零**（`:1337` / `:1355`）—— 表的内容**完全靠重建时那次
 `GetComponentsInChildren` 扫描**。所以 `ApplyWalls` / `ApplyPipes` 的重建**不能删**：
 删了箱子会把墙格 / 管道格算成空格，`BoxItem.capacity` 偏大 → **箱子提前开**。
 这是会静默溜进正式关卡的玩法 bug，不是性能问题 —— 原作者的「每步都重建」不是懒。
@@ -268,71 +274,115 @@ ApplyBoxes → SpawnBox                                    (PixelGroup.cs:1798)
 
 ---
 
-### 2.4 P4 · `BoxItem.TryOpen()` 每次点击空转重算 + 5 万预算回溯 🟠
+### 2.4 P4 · `BoxItem.TryOpen()` 每次点击重算候选格（内层逐格走管道折线）+ 5 万预算回溯 🟠 **部分处理**
 
-**位置**：`Gameplay/BoxItem.cs:344-422`（`TryOpen`）→ `:509-554`（`PlanAssignments`）→ `:595-637`（`SolveConnected`）→ `:686-741`（`GrowConnectedRec`）→ `:743`（`CanonicalKey`）
-**调用方**：`PixelGroup.TryOpenBoxes()`（`:1922`），**每次移出像素后调用**
+**位置**：`Gameplay/BoxItem.cs:344-421`（`TryOpen`）→ `:511-556`（`PlanAssignments`）→ `:597-639`（`SolveConnected`）→ `:688-743`（`GrowConnectedRec`）→ `:745`（`CanonicalKey`）
+**调用方**：`PixelGroup.TryOpenBoxes()`（`:1958`），从 `GameController.ResolveMatch`（`:1260`）调用 —— **每次确认点击一次**
 
-两个独立的问题：
+> **⚠️ 更正（2026-10-08）**：本节最初的判定漏了真正的成本大头，并高估了 (b) 的频率。改为按实测的关卡规模重述。
 
-**(a) 未就绪的箱子每次点击都白算一遍。** `TryOpen` 开头无条件做：
+**实测规模**（166 个关卡 JSON）：棋盘 15×15（225 格），最大 21×21；带箱子的关卡只有 8 个，每关 **2~4 个**箱子；
+但 **`capacity − 本体格数` 恒 ≥ 8，最大 32**（`Level_C04` = 28/25/20/21、`Level_QBlock` = 26/26、`LevelHard_15` = 20/28）。
+管道最多 **9 个 / 35 个折点**。两条推论定了成本模型：
+
+1. 箱子必须靠「连通空格」凑够格数 → `CollectConnectedEmpty` 的 BFS 每次都真跑，不是边角；
+2. 一个箱子要额外找 20~32 个空格，而棋盘前中期基本被填满 → **「未就绪」是常态**。
+
+**(a) 未就绪的箱子每次点击都白算一遍。** `TryOpen` 在判定之前就无条件做完这一整套（**下面是改动前的原状**）：
 
 ```csharp
 var body = new List<Vector2Int>();        EnumerateBody(body);
 var adjacent = CollectAdjacentEmpty();    // 4 邻扫描
 var connected = CollectConnectedEmpty(adjacent);   // 4 方向 BFS
-var score = new Dictionary<Vector2Int, int>();     // 三趟填充
+var score = new Dictionary<Vector2Int, int>();     // 三趟填充，几百项
 ...
 if (available < capacity)
     return false;   // ← 空间不足：上面全部白做，而下次点击还会再做一遍
 ```
 
-空格不够时它返回 `false`，但**这个判断要先把 BFS 和三个容器全建出来**。
-玩家在推箱子关卡反复点击时，每个还没就绪的箱子每次点击都重付这笔钱。
+**（已改）** 修法不是「把空格判定提到建容器之前」——`available` 本身就要靠 `connected` 的 BFS 数出来，
+判定提不上去。真正能提到判定之后的是 **`score` 字典与 `allCells`**：它们只被规划阶段用。
+现在 `score` 建在 `:389`（`if (available < capacity) return false;` 之后），未就绪时不再白建一张几百项的字典。
 
-**(b) 就绪后走的回溯是真的贵。** `PlanAssignments` → `SolveConnected` 递归回溯，
-预算 `BacktrackBudget = 50000`（`:95`、`:537`）。每个到达叶子（`block.Count == n`）的候选块算一次
-`CanonicalKey`（`:743`），而 `CanonicalKey` 分配一个 `List`、一次 `Sort(lambda)`、
-一个 `StringBuilder` 和一个 `string`，结果塞进 `HashSet<string> seen`（`:694`）。
-另有 `GrowConnectedRec` 每层 `new HashSet<Vector2Int>`（`:711`）。
-**最坏情况 5 万次叶子 × 每次 4 个分配**，全在点击那一帧里同步跑完 —— 这是最可能造成
-「点一下箱子卡一下」的地方。另有 `CollectAdjacentEmpty` 用 `List.Contains` 嵌在循环里（`:431-448`）。
+**(a′) 内层的管道测试才是大头（原文档漏了这条）。** `CollectAdjacentEmpty` / `CollectConnectedEmpty`
+的内层每格调 `IsEmptyForBoxRelease` → `IsEmptyForExposure`（`PixelGroup.cs:496`）→
+**`IsActivePipeBlocked`**（`PixelGroup.cs:414`），而后者**遍历全部活跃管道、每个再走 `CoversCell` 的整条折线**
+（`PipeItem.cs:115`）。也就是每次格判定的成本是 `O(管道数 × 折点数)` 而不是 `O(1)`：
 
-**(c) `debugOpenLog` 默认 `true`**（`:68`），`:376-384` 每次 `TryOpen` 都拼一条 6 段字符串的日志 ——
-包括上面「白算一遍」的那些调用。
+| 环节 | 次数级 | 单次成本 |
+|---|---|---|
+| `EnumerateBody` | 每箱每点击 | 免费（纯算术） |
+| `CollectAdjacentEmpty` | 每箱每点击 | 周长 × 4 次格判定（内层 `List.Contains` 让它再乘个周长） |
+| **`CollectConnectedEmpty`** | 每箱每点击 | **≈ 4E 次格判定**（E = 可达空格区），另 `new HashSet×3 + Queue` |
+| **每个格判定的内层** | **4E × 箱数** | **`O(管道数 × 折点数)`** ← 乘性项 |
 
-**建议（不动算法，先砍浪费）**：
-1. **把空格判定提到建容器之前，用轻量计数**：先数一遍可用空格，`< capacity` 就直接 return，
-   再建 `body`/`adjacent`/`connected`/`score`。这一步能吃掉 (a) 的绝大部分。
-2. `debugOpenLog` 默认关。
-3. (b) 待你决定：是给 `TryOpen` 加结果缓存（同样的盘面状态不重算），还是把 `CanonicalKey` 的
-   分配去掉（用不分配的编码，比如把格子坐标打包进 `long`/`int` 的哈希键，避开 `string`）。
-   这属于算法改口径，需要你先确认可以动。
+按实测数据粗估（标注为估算）：E ≈ 200 时单箱一次点击 ≈ 4×200×60 ≈ **5 万次内部迭代**，4 个箱子 ≈ 20 万次。
+**同一个 `IsActivePipeBlocked` 还被另外两处调用**：`RefreshExposed` 的第 0 趟 BFS（`:1126`、`:1143`，
+即 §2.5 的 P5）与 `GameController.cs:1126` 的每次点击邻域扫描 —— 所以 P4 与 P5 **是同一个根**。
+
+**（已改）** `IsActivePipeBlocked` 改为查「活跃管道覆盖掩码」`PixelGroup._activePipeMask`（字段 `:144`、`:146` +
+`EnsureActivePipeMask` `:430`；`IsActivePipeBlocked` 本身现在 `:414`）。失效判据用**活跃管道数**：`PipeItem._waveIndex` 在关卡内只增不减（唯一写入在
+`PipeItem.cs:313`），所以「还有未释放波次的管道数」是个可靠版本号 —— 先数一遍（≤ 管道总数 次 bool 读、零分配），
+与缓存版本不同才重建。重建用现成的 `CoversCell` 逐格问一遍，**判据与旧实现完全同源**，不另写一套遍历以免日后分叉。
+`RebuildGrid()`（换关）与 `ClearPipes()` 里显式置 `-1` 失效 —— **这条是必须的**：换关时新旧关卡的活跃管道数
+可能恰好相同，只靠计数版本号会误用上一关的掩码。
+于是那个乘性项变成常数：P4 的 4 条 BFS、P5 的整盘 BFS、`GameController:1126` 三方同时受益，**语义逐字不变**。
+（一处细微差别：新实现先 `IsInRange` 再查表，越界返回 `false`；旧实现不判范围。三个调用点都已各自 `IsInRange` 过，实际无差异。）
+
+**(b) 就绪后走的回溯 —— 未做。** `PlanAssignments` → `SolveConnected` 递归回溯，
+预算 `BacktrackBudget = 50000`（`:95`、`:539`）。每个到达叶子（`block.Count == n`）的候选块算一次
+`CanonicalKey`（`:745`），而它分配一个 `List`、一次 `Sort(lambda)`、一个 `StringBuilder` 和一个 `string`，
+结果塞进 `HashSet<string> seen`（`:696`）。另有 `GrowConnectedRec` 每层 `new HashSet<Vector2Int>`（`:713`）。
+最坏情况 5 万次叶子 × 每次 4 个分配。
+
+> **⚠️ 更正**：原文说这是「最可能造成点一下箱子卡一下的地方」。按实测规模，**每关最多 4 个箱子、每个只开一次**，
+> 所以这段代码每次进关最多跑 4 次，不是每次点击。它是「**开箱那一帧可能卡一下**」，而且正好落在开箱动画起播的瞬间。
+> 值不值得动，取决于那 5 万预算到底有没有被打满 —— 静态读代码看不出来，**建议先加一行计数**（输出
+> `BacktrackBudget - budget`，超阈值才 `Debug.LogWarning`），跑几关看数字再定。
+> 顺带：原文建议的「给 `TryOpen` 加结果缓存」**不成立** —— 每次点击盘面必变（这一击刚移走像素），命中率是 0。
+
+**(c) `debugOpenLog` 默认 `true`**（`:68`），`:367-375` 每次 `TryOpen` 都拼一条 6 段字符串的日志 ——
+包括上面「白算一遍」的那些调用。**本次未动**（按你的要求保持现状）。字段默认值是 `true`；
+运行时实际值来自**箱子预制体**（未读 YAML），需要时在 Inspector 确认。
+
+**剩下的**：① (b) 的回溯（先量化）；② `CollectConnectedEmpty` 的 `HashSet×3 + Queue`
+与 `CollectAdjacentEmpty` 的 `List.Contains`（`BoxItem.cs:448`）—— 都能改成复用缓冲 / 去掉内层线性查找，
+属 GC 优化，改动面比上面大；③ `debugOpenLog`。
 
 ---
 
-### 2.5 P5 · `PixelGroup.RefreshExposed()` 每次点击大块分配 🟠
+### 2.5 P5 · `PixelGroup.RefreshExposed()` 每次点击大块分配 🟠 **部分处理**
 
-**位置**：`Gameplay/PixelGroup.cs:1047` 起
-**调用方**：每次点击（`GameController`），以及 `BoxItem.cs:911`、`ElevatorItem.cs:574`、`CrateItem.cs:640`
+**位置**：`Gameplay/PixelGroup.cs:1100` 起
+**调用方**：每次点击（`GameController`），以及 `BoxItem.cs:913`、`ElevatorItem.cs:574`、`CrateItem.cs:640`
 
 每次调用：
 
-- `new bool[cols, TotalRows]`（`:1066`，`reachableEmpty`），文档里的 BFS 还额外建 `Queue<Vector2Int>`；
-- 先调 `RefreshIceState()` + `RefreshCrateState()`（`:1054`、`:1058`），各自再走 ~2 遍全网格并逐像素写 `SetFrozen`/`SetCovered`；
+- `new bool[cols, TotalRows]`（`:1119`，`reachableEmpty`），文档里的 BFS 还额外建 `Queue<Vector2Int>`；
+- 先调 `RefreshIceState()` + `RefreshCrateState()`（`:1107`、`:1111`），各自再走 ~2 遍全网格并逐像素写 `SetFrozen`/`SetCovered`；
 - 连通块的逐格 `new Vector2Int` + 每个连通分量一个 `List`/`Queue`。
 
-**还叠了一个嵌套扫描**：`reachableEmpty` 的 BFS 每格调 `IsEmptyForExposure`（`:1090`）→
-`IsActivePipeBlocked`（`:453`→`:397`），而后者**遍历全部 pipe 及其点**。
+**还叠了一个嵌套扫描**：`reachableEmpty` 的 BFS 每格调 `IsEmptyForExposure`（`:1143`）→
+`IsActivePipeBlocked`（`:506`→`:414`），而后者**遍历全部 pipe 及其点**。
 于是是 `O(格数 × 管道数)` 级别，而不是 `O(格数)`。
 
-**另外一处重复调用**：`NotifyClickMovedOut`（`:750`）先调 `RefreshIceState()`，
+> **已改（2026-10-08）**：这一层已经消掉了 —— `IsActivePipeBlocked` 改为查 `PixelGroup._activePipeMask`
+> 缓存掩码，`O(管道数 × 折点数)` → `O(1)`。**这就是 §2.4 的 (a′) 那处改动，一处改了两条链**：
+> P4 的 4 条 BFS 与本条 P5 的整盘 BFS 同时受益，另外还捎带上 `GameController.cs:1126` 的每次点击邻域扫描。
+> 失效机制、为什么「活跃管道数」是可靠版本号、以及换关必须显式失效，见 §2.4 的 (a′)。
+
+**另外一处重复调用**：`NotifyClickMovedOut`（`:803`）先调 `RefreshIceState()`，
 紧接着调 `RefreshExposed()` —— 而 `RefreshExposed` 开头自己又会调一次 `RefreshIceState()`。
 **冰状态每次点击算了两遍。**
 
-**建议**：`RefreshIceState()` 那份重复调用直接删掉（低风险、纯浪费）。
-数组与 `Queue` 改成成员缓存（按需扩容，`Array.Clear` 复用），BFS 里的 `IsActivePipeBlocked`
-提到外层算一次「活跃管道覆盖掩码」再查表 —— 后者是中等改动。
+**建议（按此拆解）**：
+1. **BFS 里的 `IsActivePipeBlocked` 提到外层算一次「活跃管道覆盖掩码」再查表** —— **✅ 已做**（见上框）。
+2. **`RefreshIceState()` 那份重复调用直接删掉**（低风险、纯浪费）—— **未做**（§7 第 4 条）。
+3. **数组与 `Queue` 改成成员缓存**（按需扩容、`Array.Clear` 复用）—— **未做**（§7 第 16 条）。
+   前提要先确认：`RefreshExposed` 里那几张 `bool[,]` 与 `Queue` 都是**纯局部**用途
+   （`reachableEmpty` / `directlyExposed` / `visited` / `active`），改成员复用必须每次都清干净，
+   否则会读到上一次的残留 —— 这几张表**只在 `RefreshExposed` 内部使用**（无外部读法），所以是安全的，
+   但 `reachableEmpty` 那份还被 `NeighbourReachableForExposure` 当参数传递（`:520`），改的时候要一起带过去。
 
 ---
 
@@ -601,17 +651,17 @@ while (frontier.Count > 0)
 
 ```csharp
 if (!exitOnlyFromRow0 && _extractGroup != null && _extractGroup.MustWalkToGate(col, row, out _))
-    return false;                                   // ← MustWalkToGate: 遍历所有门 (PixelGroup.cs:514-534)
+    return false;                                   // ← MustWalkToGate: 遍历所有门 (PixelGroup.cs:567-587)
 
 int minTrackRow = _extractGroup != null ? _extractGroup.MinActivePipeTrackRow() : int.MaxValue;
-                                                    // ← MinActivePipeTrackRow: 遍历所有管道 × 所有点 (PixelGroup.cs:414-432)
+                                                    // ← MinActivePipeTrackRow: 遍历所有管道 × 所有点 (PixelGroup.cs:467-485)
 
 for (int r = 0; r < row; r++)                       // ← 前方逐格 IsObstacle
     if (IsObstacle(col, r, vacated, claimed, matchedOccupied, batch)) return false;
 ```
 
 `IsObstacle`（`:986`）每格会调 `IsBlocked`（4 次数组查，便宜）+
-`IsGateBlockedFor`（`PixelGroup.cs:575`，内部 `HashSet<GateItem>.Contains`）。
+`IsGateBlockedFor`（`PixelGroup.cs:628`，内部 `HashSet<GateItem>.Contains`）。
 
 **合计**：`O(像素数 × (门数 + 管道数×点数 + 排数))` **每个 sweep**。其中
 `MinActivePipeTrackRow()` 的结果在一次 sweep 内是**常量**（vacated/claimed 不影响它），
@@ -719,7 +769,7 @@ private void UpdateCountText()
 |---|---|---|
 | `ContainerItem.cs:796` `RefillRollRoutine` | `while(true){ … yield return null; }` | 每帧调 `LockBoardingPixelsWorldRotation`（`:1022`）遍历 `_boardingPixels`。有界（补位期间） |
 | `ContainerItem.cs:730` `WaitForElasticIdle` | `yield return null` 自旋 | 等到弹性结束，有界 |
-| `BoxItem.cs:866,874,882` | 每个隐藏像素 `new WaitForSeconds` | 每次开箱 N 次分配，见 §4.1 同类 |
+| `BoxItem.cs:868,876,884` | 每个隐藏像素 `new WaitForSeconds` | 每次开箱 N 次分配，见 §4.1 同类 |
 | `CrateItem.cs:738` → `PixelItem.cs:252/265/275` | 每个被盖像素一个协程 + `new WaitForSeconds(delay)` | 大木箱破开时一次性起 N 个协程 |
 
 这些是「有界的事件级」开销，不是每帧常态。上面两行「每个像素一个协程」的做法
@@ -733,7 +783,7 @@ private void UpdateCountText()
 ### 4.1 P13 · `IceItem` 每次融化重建角块与 Mesh 🟡
 
 **Sprite 模式**：`IceItem.cs:317-332` 遍历包围盒，`Spawn`（`:597-616`）对每个有效角 `Instantiate`，
-`Clear`（`:416-446`）`Destroy` 上一批。触发点是**任意冰组融化**：`PixelGroup.cs:780-782` 会对
+`Clear`（`:416-446`）`Destroy` 上一批。触发点是**任意冰组融化**：`PixelGroup.cs:834-835` 会对
 **所有**冰组逐个 `BuildVisual`（不只是融化掉的那一个）。**模式和 §2.1 的 `FrameItem` 一样**
 （同图集角块每次重建）—— 但注意 `FrameItem` 已禁用，而这里**没有禁用**，`BuildVisual` 是真的在跑，
 所以本条独立成立。
@@ -765,8 +815,8 @@ private void UpdateCountText()
 据此：
 
 1. **关卡开始**：`BuildVisual` 照常跑一次，角块 / Mesh 生成后常驻（Mesh 模式的 `_mesh` 保留到 `Clear`）。
-2. **融化时**：不再调 `BuildVisual`。把 `PixelGroup.cs:780-782` 那个「对所有冰组 `BuildVisual`」的循环换成
-   —— 未融化的组只调 `UpdateDisplay()`（`:773` 本来就在做），**化完（`Melted`）的组只做「移除冰面」这一件事**
+2. **融化时**：不再调 `BuildVisual`。把 `PixelGroup.cs:834-835` 那个「对所有冰组 `BuildVisual`」的循环换成
+   —— 未融化的组只调 `UpdateDisplay()`（`:826` 本来就在做），**化完（`Melted`）的组只做「移除冰面」这一件事**
    （把 `BuildVisual` 里的 `Clear()` 单独抽成 `HideVisual()` 之类的即可）。
 3. **编辑器路径不动**：`IceItemEditor.cs:48,396` 与 `PixelColorBrushWindow.cs:4107,4135,4163,4207`
    的 `BuildVisual` 是编辑操作触发的预览重建，不在帧率预算里。
@@ -778,7 +828,7 @@ private void UpdateCountText()
 `new Mesh()` + 重建 GameObject）降为「每次融化 × 仅计数文本」；冰面重建次数从
 `O(融化次数 × 冰组数)` 降到 `O(1)`（关卡开始一次）。
 
-**顺带**：`PixelGroup.cs:773` 对每个非融化组调 `UpdateDisplay()`，其中 `remaining.ToString()`（`:484`）
+**顺带**：`PixelGroup.cs:826` 对每个非融化组调 `UpdateDisplay()`，其中 `remaining.ToString()`（`:484`）
 分配字符串、`ApplyTextScale`（`:543-561`）每次重设 `fontSize` 与 `SetSizeWithCurrentAnchors`。
 **`remaining` 没变就早退**（同理，`countOffset` / `countFontScale` 没变时 `ApplyTextScale` 也可以省）。
 
@@ -823,8 +873,8 @@ private void UpdateCountText()
 |---|---|---|
 | 5.1 | `GateItem.cs:421-431`（`OnDrawGizmos`）+ `:400` | 每次重绘遍历整个 `regionMask` 并逐格 `GetWorldPosition`（`TransformPoint`），还 `new HashSet<Vector2Int>` |
 | 5.2 | `LevelGridBoard.cs:710`（`Solve`）、`:989`（`CanReachFront`）、`:1093`（`RefreshExposure`）、`:1288`（`PipePenalty`） | `O(组数²)` 轮全盘 BFS；`CanReachFront` 每次建 2 个 `HashSet` + `bool[,]` + `Queue`；`RefreshExposure` 每次 3 个 `bool[,]`，还嵌在最多 512 次迭代的循环里（Record 生成用） |
-| 5.3 | `GateItem.cs:205`、`PixelGroup.cs:592`、`:976` | `RegionCellCount` / `CountPixelsInRegion` / `ValidateGates` 都是 `O(格数)`，后者再乘门数 |
-| 5.4 | `PixelGroup.cs:1255-1419` 各 `ClearXxx` | 每个都一次 `GetComponentsInChildren`，进关时全部调用 |
+| 5.3 | `GateItem.cs:205`、`PixelGroup.cs:639`、`:1029` | `RegionCellCount` / `CountPixelsInRegion` / `ValidateGates` 都是 `O(格数)`，后者再乘门数 |
+| 5.4 | `PixelGroup.cs:1306-1472` 各 `ClearXxx` | 每个都一次 `GetComponentsInChildren`，进关时全部调用 |
 
 `Assets/Scripts/Editor/` 下的大文件（`PixelColorBrushWindow.cs` 4572 行、
 `ContainerDragWindow.cs` 1750 行、`ContainerRearranger.cs` 1122 行）本次**未逐行审计** ——
@@ -852,11 +902,13 @@ private void UpdateCountText()
 ## 7. 建议的动手顺序
 
 > **状态更新（2026-10-08）**：
-> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）、第 10 条（P3）
->   —— 见 §3.1 / §3.6 / §3.2 / §3.3 / §2.3
+> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）、第 9 条（P4）、
+>   第 10 条（P3）、第 14 条（P5）—— 见 §3.1 / §3.6 / §3.2 / §3.3 / §2.4 / §2.3 / §2.5
 > - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
 > - **已定方案、未改码**：第 15 条（P13，`IceItem` 仅关卡开始重建，见 §4.1）
-> - **只做了一半**：第 7 条（P12）的 `ApplyEntryQueue` O(E²) 那层**未做**，先测 E 再定（§3.3）
+> - **只做了一半**：第 7 条（P12）的 `ApplyEntryQueue` O(E²) 那层**未做**，先测 E 再定（§3.3）；
+>   第 9·13 条（P4）的回溯预算那层**未做**，同上先量化（§2.4）；
+>   第 14·16 条（P5）只有掩码那层做了，重复 `RefreshIceState`（第 4 条）与数组复用（第 16 条）未做
 > - **只记录、不处理**：升降台相关的 E1 / E2（§2.3 末尾）
 >
 > 各条都保留在原编号位置上，只标状态，**不重排序号**，以免打乱下表的 `#` ↔ `P#` 对应关系。
@@ -872,7 +924,7 @@ private void UpdateCountText()
 | 1 | **P2** | ~~6 个调试开关默认值改 `false`~~ —— **✅ 已处理**：已在场景 / 预制体关闭，无需改码（§2.2） | — |
 | 2 | **P10** | ~~原建议「加 `if (gc.gatheredItems.Count == 0) return;`」~~ —— **已作废**，那会破坏开盖（§3.1 更正）。实做：外层循环裁到 `min(rows, maxOpenRows)` —— **✅ 已处理** | `ContainerGroup.cs:368-374` |
 | 3 | **P11** | `UpdateCountText` 只在数值变化时赋值 —— **✅ 已处理**（§3.6） | `GameController.cs:881-902` |
-| 4 | **P5** | 删掉 `NotifyClickMovedOut` 里多余的 `RefreshIceState()`（§2.5 末尾那条重复调用） | `PixelGroup.cs:750` 附近 |
+| 4 | **P5** | 删掉 `NotifyClickMovedOut` 里多余的 `RefreshIceState()`（§2.5 末尾那条重复调用） | `PixelGroup.cs:803` 附近 |
 
 ### 第二档：小重构，局部风险
 
@@ -882,7 +934,7 @@ private void UpdateCountText()
 | 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 | `CrowdBufferZone.cs:878` |
 | 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/534` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |
-| 9 | **P4** | `BoxItem.TryOpen` 把空格判定提到建容器之前（即 §2.4 的 (a)） | `BoxItem.cs:361-386` |
+| 9 | **P4** | ~~「把空格判定提到建容器之前」~~ —— **原描述不成立**：`available` 本身要靠 `connected` 的 BFS 数出来，判定提不上去（§2.4 更正）。实做两件：`score` 字典挪到就绪判定之后（`:389`）＋ `IsActivePipeBlocked` 缓存掩码（与第 14 条同一改动）—— **✅ 已处理** | `BoxItem.cs:389` + `PixelGroup.cs:414` |
 | 10 | **P3** | ~~`LevelLoader` 合并为一次 `RebuildGrid`~~ **原方案作废**（中间两步承重，见 §2.3）。实做：删掉「无读者」的四步刷新 —— **✅ 已处理**，每次进关 `RebuildGrid` 8 → 4 次 | `LevelLoader.cs:48-80` |
 
 ### 第三档：需要你先拍板（改口径 / 改算法）
@@ -891,8 +943,8 @@ private void UpdateCountText()
 |---|---|---|---|
 | 11 | **P8** | `SweepOnce` 的 `Sort` 移出 `while`、`dist`/`snakeOrder` 预计算 | 允许改这段寻路结构？ |
 | 12 | **P8** | `SweepOnce` 的数组改复用 / 按 `dist` 分桶代替比较排序 | 同上 |
-| 13 | **P4** | `BoxItem` 的 `CanonicalKey` 去分配，或给 `TryOpen` 加结果缓存（即 §2.4 的 (b)） | 允许改回溯的键编码？ |
-| 14 | **P5** | `RefreshExposed` 的活跃管道掩码预计算（§2.5 的 `O(格数×管道数)` 那层） | 中等改动，动到暴露判定 |
+| 13 | **P4** | `BoxItem` 的 `CanonicalKey` 去分配 —— **未做**。①「给 `TryOpen` 加结果缓存」**已否决**（每次点击盘面必变，命中率 0）；② 先加「本次回溯消耗了多少预算」的计数，跑几关看是否真被打满（每关最多跑 4 次，见 §2.4 更正） | 允许改回溯的键编码？ |
+| 14 | **P5** | ~~`RefreshExposed` 的活跃管道掩码预计算~~ —— **✅ 已处理**（`PixelGroup._activePipeMask` + `EnsureActivePipeMask`），与第 9 条是**同一处改动**：P4 的箱内 BFS、P5 的整盘 BFS、`GameController:1126` 的邻域扫描同时受益，**语义逐字不变**（§2.4 的 (a′) + §2.5） | `PixelGroup.cs:414` |
 | 15 | **P13 · P14** | **P13 已定方案**：`IceItem` 改为**仅关卡开始时重建一次，去掉融化路径上的动态重建**（保留「化完移除冰面」，见 §4.1 定案）。`EmojiManager` / `IceItem` 另可把层级解析结果缓存到实例 | P13 见 §4.1；P14 需先确认池化回收时不清组件（§6.4） |
 | 16 | **P5** | `PixelGroup` 各 `bool[,]` 改成员复用 + `Array.Clear` | 要确认没有「持有上一帧残留」的读法 |
 
@@ -916,15 +968,15 @@ private void UpdateCountText()
 | 调试开关 | `Gameplay/CrowdBufferZone.cs` / `GameController.cs` / `PipeItem.cs` / `BoxItem.cs` / `ElevatorItem.cs` | 见 §2.2 表 |
 | 逐像素日志 | `Gameplay/CrowdBufferZone.cs` | `SweepOnce` 内 `:760-772` |
 | 关卡加载重建 | `Core/LevelLoader.cs` | `Apply`(48) / 每次加载 4 处 `RebuildGrid`（原 8 处，见 §2.3） |
-| 网格重建 | `Gameplay/PixelGroup.cs` | `RebuildGrid`(165) |
-| 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(509) / `SolveConnected`(595) / `CanonicalKey`(743) |
-| 暴露刷新 | `Gameplay/PixelGroup.cs` | `RefreshExposed`(1047) |
+| 网格重建 | `Gameplay/PixelGroup.cs` | `RebuildGrid`(178) |
+| 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(511) / `SolveConnected`(597) / `CanonicalKey`(745) |
+| 暴露刷新 | `Gameplay/PixelGroup.cs` | `RefreshExposed`(1100) |
 | 同色合并判定 | `Gameplay/SameColorMergeWatcher.cs` | `Notify`(45) |
 | 每帧车盘扫描 | `Gameplay/ContainerGroup.cs` | `Update`(357) / `ProcessConsumption`(362) / `IsOpen`(315) / `IsRowReleased`(337) |
 | 物理帧驱动 | `Gameplay/CrowdBufferZone.cs` | `FixedUpdate`(455) / `DetachPhysics`(1421) |
 | 提取推进 | `Gameplay/CrowdBufferZone.cs` | `StepExtracting`(507) / `HasGridPathfindingPixels`(200) |
 | 寻路 sweep | `Gameplay/CrowdBufferZone.cs` | `SweepOnce`(633) / `ComputeExitDistance`(1043) / `PickBestPixel`(1088) / `CanExit`(860) / `IsObstacle`(986) |
-| 门 / 管道全扫 | `Gameplay/PixelGroup.cs` | `MustWalkToGate`(514) / `MinActivePipeTrackRow`(414) / `GateAt`(485) / `IsGateBlockedFor`(575) / `IsActivePipeBlocked`(397) |
+| 门 / 管道全扫 | `Gameplay/PixelGroup.cs` | `MustWalkToGate`(567) / `MinActivePipeTrackRow`(467) / `GateAt`(538) / `IsGateBlockedFor`(628) / **`IsActivePipeBlocked`(414) + `EnsureActivePipeMask`(430)**（缓存掩码，见 §2.4 (a′)）/ `RebuildGrid`(178) |
 | UI 每帧文本 | `Gameplay/GameController.cs` | `Update`(871) / `UpdateCountText`(881) |
 | 传送带驱动 | `Gameplay/Conveyor/ConveyorBelt.cs` | `Update`(212) / `ApplyPositions`(276) / `ApplyCellPositions`(321) / `CheckLeave`(355) / `OccupiedCount`(443) |
 | 轨迹采样 | `Gameplay/Curve/ArcPathController.cs` | `GetTotalPathLength`(67) / `GetGlobalPosition`(78) / `GetGlobalEulerAngles`(102) |
