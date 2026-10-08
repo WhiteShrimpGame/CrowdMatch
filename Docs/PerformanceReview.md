@@ -1,10 +1,10 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**分析 + 已落地 8 处改动**（P3 / P4 / P5 / P7 / P10 / P11 / P12，见下）。
+> 状态：**分析 + 已落地 9 处改动**（P3 / P4 / P5 / P6 / P7 / P10 / P11 / P12，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **已改码（8 处，两个程序集离线编译均 0 错误）**：
+> - **已改码（9 处，两个程序集离线编译均 0 错误）**：
 >   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
 >   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
 >   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
@@ -22,7 +22,10 @@
 >   **P5** `RefreshExposed` 的 4 张 `bool[,]` + 队列 + 每同色连通块的 `List`/`Queue` 改成员缓冲复用、
 >   4 邻偏移提成 `static readonly` —— 每次点击的分配从 **63~195 个容器（约 5~20 KB）降到 0**（§2.5 的 (b)）；
 >   同时**更正**一处原描述：所谓「`NotifyClickMovedOut` 每次点击重复算冰状态」**不成立**，
->   那两行只在**真有冰组融化**时才走到（§2.5 的 ⚠️），该条**作废**。
+>   那两行只在**真有冰组融化**时才走到（§2.5 的 ⚠️），该条**作废**；
+>   **P6** `SameColorMergeWatcher.Notify`：新增「无新像素↔同色可见旧像素 4 邻对就返回」的**等价早退**、
+>   连通块标号改**按格索引**（内层 2400 次哈希查找 → 数组读）、全部缓冲（含每标签的成员列表）**static 复用**
+>   —— 每次事件的分配与哈希都降到 0（§2.6）。
 >   **P4 的回溯预算那部分（原 §7 第 13 条）未做** —— 每关最多跑 4 次，先量化再定。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
@@ -59,7 +62,7 @@
 | P3 | `LevelLoader` 一次加载调 `RebuildGrid()` **8 次**（原文档误写 16 次） | 每次进关 | ✅ **已减到 4 次**（另更正了原判定，见 §2.3） | §2.3 |
 | P4 | `BoxItem.TryOpen()` 每次点击重算候选格（内层逐格走管道折线）+ 5 万预算回溯 | **每次点击 × 每个未就绪的箱子** | 🟠 **部分处理**：候选格内层的管道测试已缓存、`score` 字典挪到就绪判定之后；**回溯预算未动** | §2.4 |
 | P5 | `PixelGroup.RefreshExposed()` 每次点击整盘重算（6 个全网格 pass + 每同色连通块一对容器） | 每次点击 | ✅ **已处理**：`O(格数×管道数)` 那层已消（管道掩码）＋ 全部缓冲改成员复用（每次点击分配 63~195 个容器 → 0） | §2.5 |
-| P6 | `SameColorMergeWatcher.Notify()` 两遍全盘 BFS + 按像素数分配 | 每次动态事件 | 🟡 | §2.6 |
+| P6 | `SameColorMergeWatcher.Notify()` 每次事件整盘重算（全网格扫描 + 两遍连通块 + ~10~15 KB） | 每次动态事件（每关 10~40 次） | ✅ **已处理**：早退 + 标签改按格索引 + 缓冲全复用（哈希与分配降到 0）；「第二遍只跑受影响分量」未做 | §2.6 |
 | P7 | `CrowdBufferZone.FixedUpdate` 在物理帧循环里 `GetComponent<Rigidbody>()` | 每物理帧 × 每个物理像素 | ✅ **已处理**：改读 `PixelItem.bufferBody` 缓存 | §3.2 |
 | P8 | `SweepOnce()` 每次 sweep 大块分配 + 在 `while` 里 `Sort` | 每个提取 tick | 🟠 | §3.4 |
 | P9 | `CanExit()` 逐 seed 重算 `MinActivePipeTrackRow()` / `MustWalkToGate()` | 每个提取 tick × 每个像素 | 🟡 | §3.5 |
@@ -429,23 +432,57 @@ BFS 的队列**只从 `adjacent` 播种**，没有种子结果必然为空，所
 
 ---
 
-### 2.6 P6 · `SameColorMergeWatcher.Notify()` 两遍全盘 BFS 🟡
+### 2.6 P6 · `SameColorMergeWatcher.Notify()` 每次事件整盘重算 🟡 **已处理（剩一项待议）**
 
-**位置**：`Gameplay/SameColorMergeWatcher.cs:45-149`
-**触发源**：每次动态事件（管道波次 / 开箱 / 升降台升起 / 问号揭晓 / 冰融化 / 木箱拆开）
+**位置**：`Gameplay/SameColorMergeWatcher.cs:74` 起
+**触发源**：每次动态事件 —— 管道波次（`PipeItem.cs:396`）/ 开箱（`BoxItem.cs:924`）/ 升降台升起（`ElevatorItem.cs:579`）/
+问号揭晓（`PixelGroup.cs:1328`）/ 冰融化（`PixelGroup.cs:868`）/ 木箱拆开（`CrateItem.cs:661`）
 
-每次调用：
+**频率（实测 166 关）**：
 
-- `new HashSet<PixelItem>`（`:49`）；
-- **一遍全网格扫描**，建 `List<PixelItem> visible` + `Dictionary<PixelItem,int> visibleIndex`（`:63-85`）——
-  注意这个字典的键是**像素实例**，`PixelItem` 上拿 `GetHashCode` 是有成本的；
-- `new int[visible.Count]` ×2（`:90`、`:93`）；
-- **`LabelComponents` 跑两遍**（`:91`、`:94`，一次含新像素、一次把新像素当隔绝物）—— 两遍连通块 BFS；
-- `new int[labelCount+1]` ×3、`new List<PixelItem>[labelCount+1]`（`:97-99`），以及 `:117-118` 的又两批。
+| 触发源 | 数据 | 单关上限 |
+|---|---|---|
+| 管道波次 | 58 关有管道，波次总数 681 | **28**（`Level_C02`） |
+| 问号揭晓 | 28 关有问号，共 989 格 | 按「曝光波次」估 5~20 |
+| 开箱 / 冰 / 木箱 / 升降台 | 23 / 1 / 3 / 2 关 | 个位数 |
 
-**建议**：`visible` / `visibleIndex` / 各计数数组改成成员缓存复用；两遍 BFS 若可合并则合并。
-**这是「每次事件一次」而不是每帧，所以优先度低于 §2 里那几条每帧 / 每次点击的**，但它是这条链上最重的一环。
-另注意 `LabelComponents` 里若也用 `IsBlocked` / `IsGateBlockedFor`，会继承 §3.5 的 HashSet 查找成本。
+⇒ **每关 10~40 次，不是每帧**（所以本条从来不是帧率问题）。每次调用的账：
+
+| 环节 | 原来 | 现在 |
+|---|---|---|
+| 一次全网格扫描建 `visible` + `Dictionary<PixelItem,int>`（键是**像素实例**） | ~150 次字典插入 | 复用 `List<Vector2Int>` + 标签表按格索引，**0 次哈希插入** |
+| 两遍 `LabelComponents`（一次含新像素、一次把新像素当隔绝物） | 每遍约 1200 次哈希查找（每邻格一次 `HashSet.Contains` + 一次字典 `TryGetValue`），两遍共 ~2400 | 每邻格：一次边界判定 + **两次数组读**；哈希 **0** |
+| 按块统计那两趟 | 逐像素再查 `HashSet` / 字典 | 数组读 |
+| 分配 | 约 10~15 KB（`Dictionary` 的 buckets+entries ≈7 KB、两个 `int[]`、四个按标签的数组、**每个标签一个 `List<PixelItem>`**、`Queue<int>` ×2） | **0**（全部 static 复用，成员列表走池） |
+
+**（已改）三件，都逐字等价**：
+
+1. **早退 `AnyMergePair`**（`:152` 调用、`:227` 定义）—— 「本批新像素里没有任何一颗与『同色、可见、且非本批新像素』的格 4 相邻」时直接返回。
+   **为什么是当且仅当**：此时任一连通块要么全由新像素组成、要么全由旧像素组成（两类像素之间没有边），
+   于是 4a 要的「旧块与新像素同块」与 4b 要的「块内新旧像素都有」都凑不齐；反过来，只要有这样一条边，
+   沿同色路径就能推出「存在新像素与可见的非新像素相邻」。所以不会漏播，也不会多消耗任何 `Random.Range`
+   （本来就不会播）。它挡掉的是「新区块根本没挨着任何原有同色区域」这类调用 ——
+   **这是三件里收益最不确定的一条，取决于这种调用占多大比例**。
+2. **标签表按格索引**（字段区 `:39` 起 + `LabelComponents` `:259`）—— 用 `int[,]`（0 = 可见未标号、-1 = 不可见、>0 = 标号）
+   取代「`Dictionary<PixelItem,int>` 把像素映射到 `visible` 下标 + `int[]` 标签」；`HashSet<PixelItem> excluded`
+   换成按格的 `bool[,] NewMask`。内层从哈希查找变成数组读。
+   原来那颗 `HashSet newSet` **整个删掉了**（两处用途都由 `NewMask` 承担 —— 等价理由：步骤 1 已保证新像素就落在它自报的格上）。
+   「同一实例出现在两格」那条异常兜底改用一颗复用的 `SeenOnce`（`:132`），保留「只算先扫到的那格」的原口径。
+3. **缓冲全部 static 复用**（`:39` 起）—— 3 张网格（两张标签表 + 新像素掩码）、5 张按标签的表、
+   `VisibleCells` / `SeenOnce` / `BfsQueue` / `ValidNew`，以及**成员列表的池** `RentMemberList`（`:333`）。
+   代价是引入「**`Notify` 不可重入**」这条前提 —— 已核实：它唯一调出去的
+   `EmojiManager.TryPlaySurpriseEmoji` → `PlayEmoji` 只做对象池生成 + 世界缩放/朝向 + 一条延时回收，
+   不回 PixelGroup、不重入本类。这条约定写进了类注释。
+
+> **⚠️ 更正**：§7 第 17 条原先写的理由「（合并两遍 `LabelComponents`）属改口径」**不成立** —— 见下条。
+
+**还剩一项（已证明等价，但属结构重写，暂不做）**：第二遍连通块只跑「含新像素的 after 分量」。
+未被新像素碰到的原有区域，其 after 标签里 `newCount == 0`，在 4a 里本来就被跳过；所以第二遍只需在
+「含新像素的那些 after 分量」内部做（多加一条 `labelAll[格] == li` 的守卫即可 —— 同色相邻必然同 after 分量，不会丢格）。
+**等价性包括随机数序列**：被跳过的旧分量本来就不消耗 `Random.Range`，而 `TryPlaySurpriseEmoji` 无全局状态、
+各标签的像素集互不相交，所以输出逐像素一致。收益：实测整盘同色连通块中位 27 个、受影响的通常 1~2 个
+⇒ 第二遍本身降 ~90%，折算到整个调用约 20~25%。**但它要引入「只跑受影响分量」的控制流分支，
+改动面明显大于上面三件**，所以留着 —— 除非以后 Profiler 指到这里。
 
 ---
 
@@ -946,7 +983,7 @@ private void UpdateCountText()
 
 > **状态更新（2026-10-08）**：
 > - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）、第 9 条（P4）、
->   第 10 条（P3）、第 14 条（P5）、第 16 条（P5）—— 见 §3.1 / §3.6 / §3.2 / §3.3 / §2.4 / §2.3 / §2.5
+>   第 10 条（P3）、第 14 条（P5）、第 16 条（P5）、第 17 条（P6）—— 见各条的 §
 > - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
 > - **✅ 原描述作废、不做**：第 4 条（P5）—— 「`NotifyClickMovedOut` 每次点击重复算冰状态」不成立，
 >   那两行只在真有冰组融化时才走到（§2.5 更正）
@@ -995,10 +1032,11 @@ private void UpdateCountText()
 ### 第四档：本次不建议动（先看 Profiler 再定）
 
 这三条我**没有排进上面三档**，理由写在下面 —— 不是漏了，是刻意缓做。
+（第 17 条（P6）已经做掉了，保留在原编号位置上只标状态，见下表。）
 
 | # | P# | 事项 | 为什么不排进去 |
 |---|---|---|---|
-| 17 | **P6** | `SameColorMergeWatcher.Notify()` 两遍全盘 BFS + 按像素数分配（§2.6） | 是「每次动态事件一次」而非每帧，且改动要合并两遍 `LabelComponents` 的语义，属改口径；先确认它在 Profiler 里真的占位 |
+| 17 | **P6** | ~~`Notify()` 两遍全盘 BFS + 按像素数分配~~ —— **✅ 已处理**：早退 + 标签改按格索引 + 缓冲全复用（§2.6）。剩「第二遍只跑受影响分量」已证明等价（连随机数都不变），但属结构重写，暂不做 | `SameColorMergeWatcher.cs:74` |
 | 18 | **P15** | `AudioManager.GetConfigItem` 建 `Dictionary<tag, AudioItem>`（§4.3） | 配置项只有几十条且非每帧，收益小；顺手做即可 |
 | 19 | **P16** | `ContainerRopeLink.LateUpdate` 逐绳节铺排（§3.7） | 已是 `isKinematic` 的刻意设计，无已知坏味道；需先看 `BehaviourUpdate` 占比再决定要不要合并绳根驱动 |
 
@@ -1015,7 +1053,7 @@ private void UpdateCountText()
 | 网格重建 | `Gameplay/PixelGroup.cs` | `RebuildGrid`(205) |
 | 开箱规划 | `Gameplay/BoxItem.cs` | `TryOpen`(344) / `PlanAssignments`(518) / `SolveConnected`(604) / `CanonicalKey`(752) |
 | 暴露刷新 | `Gameplay/PixelGroup.cs` | `RefreshExposed`(1127) |
-| 同色合并判定 | `Gameplay/SameColorMergeWatcher.cs` | `Notify`(45) |
+| 同色合并判定 | `Gameplay/SameColorMergeWatcher.cs` | `Notify`(74) / `AnyMergePair`(227) / `LabelComponents`(259) |
 | 每帧车盘扫描 | `Gameplay/ContainerGroup.cs` | `Update`(357) / `ProcessConsumption`(362) / `IsOpen`(315) / `IsRowReleased`(337) |
 | 物理帧驱动 | `Gameplay/CrowdBufferZone.cs` | `FixedUpdate`(455) / `DetachPhysics`(1421) |
 | 提取推进 | `Gameplay/CrowdBufferZone.cs` | `StepExtracting`(507) / `HasGridPathfindingPixels`(200) |
