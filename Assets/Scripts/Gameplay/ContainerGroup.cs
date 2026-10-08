@@ -1316,6 +1316,9 @@ namespace CrowdMatch
         /// 把某格的车实例化出来并水合到数据层状态——懒实例化的**唯一入口**（该格已有实例时直接返回它）。
         /// 新实例先摆在 <paramref name="row"/> 那一排的位置上：补位前移时调用方传的是**旧排**，
         /// 于是它会跟着全列一起滑进视窗，而不是凭空出现在终点。
+        ///
+        /// **绳组车整组实例化**：该格属于绳组时，顺带把同组其它成员也实例化出来（见
+        /// <see cref="MaterializeRopeGroup"/>）——绳只能整组在场。
         /// </summary>
         private ContainerItem Materialize(int col, int row)
         {
@@ -1332,7 +1335,52 @@ namespace CrowdMatch
             if (!cell.occupied)
                 return null;
 
-            return SpawnFromCell(col, row, cell, row);
+            var item = SpawnFromCell(col, row, cell, row);
+            MaterializeRopeGroup(cell.ropeGroupId);
+            return item;
+        }
+
+        /// <summary>
+        /// 把某个绳组的**全部**成员整组实例化（<paramref name="ropeGroupId"/> 为 0 时为空操作；幂等）。
+        ///
+        /// 绳在关卡加载时由 <see cref="BuildRopes"/> 按**实例**建好、直接引用两端车（见
+        /// <see cref="ContainerRopeLink"/>），之后不再重建。所以绳组成员必须**整组同时在场**：
+        /// 只实例化落进视窗的那部分，绳链就会缺段、或把本不相邻的两辆连起来。
+        /// 整组成员都在视窗之外的情形由 <see cref="MaterializeAllRopeGroups"/> 在建绳前兜住。
+        /// </summary>
+        private void MaterializeRopeGroup(int ropeGroupId)
+        {
+            if (ropeGroupId == 0 || !HasData)
+                return;
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rows; row++)
+                {
+                    int i = CellIndex(col, row);
+                    if (!_cells[i].occupied || _cells[i].ropeGroupId != ropeGroupId)
+                        continue;
+                    if (grid != null && grid[col, row] != null)
+                        continue;
+                    SpawnFromCell(col, row, _cells[i], row);
+                }
+        }
+
+        /// <summary>
+        /// 把所有绳组**整组**实例化出来（数据层里每个 ropeGroupId 各来一次），供
+        /// <see cref="BuildRopes"/> 在建绳之前调用：整组成员都在视窗之外的绳组，只有这一遍能把它建起来。
+        /// </summary>
+        private void MaterializeAllRopeGroups()
+        {
+            if (!HasData)
+                return;
+
+            var ids = new HashSet<int>();
+            for (int i = 0; i < _cells.Length; i++)
+                if (_cells[i].occupied && _cells[i].ropeGroupId != 0)
+                    ids.Add(_cells[i].ropeGroupId);
+
+            foreach (var id in ids)
+                MaterializeRopeGroup(id);
         }
 
         /// <summary>
@@ -1409,6 +1457,8 @@ namespace CrowdMatch
         {
             if (item == null)
                 return;   // Unity 伪空：已销毁的车在这里就被挡掉
+
+            ReleaseRopesFor(item);   // 先撤掉以它为端点的绳根：池化后车不再被销毁，绳不会再自毁
 
             var go = item.gameObject;
 
@@ -1612,6 +1662,10 @@ namespace CrowdMatch
         /// <summary>
         /// 建立绳子：把 ropeGroupId 相同（且非 0）的车按列升序成链，相邻两车之间生成一条绳。
         /// 由 GameController 在关卡应用完成后调用。
+        ///
+        /// **先把绳组成员整组实例化出来**（<see cref="MaterializeAllRopeGroups"/>）：绳是「此刻按实例建好、
+        /// 直接引用两端车」的静态结构，之后不再重建，所以懒实例化下不能只看到落进视窗的那部分成员
+        /// ——那会让绳链缺段 / 把不相邻的两辆车连起来；整组都在视窗之外时更糟：那一组根本不会建绳。
         /// </summary>
         /// <param name="shuffleEnabled">
         /// 本次关卡是否启用了洗牌。开启时**完全不建绳**、绳组也不参与任何判定——
@@ -1624,6 +1678,7 @@ namespace CrowdMatch
             if (!ropeEnabled || shuffleEnabled)
                 return;
 
+            MaterializeAllRopeGroups();
             CollectRopeGroups();
 
             foreach (var list in _ropeGroups.Values)
@@ -1650,7 +1705,52 @@ namespace CrowdMatch
             _ropeGroups.Clear();
         }
 
-        /// <summary>按 ropeGroupId 归组：只收网格内确有位置的当前车，组内按列（gridX）升序。</summary>
+        /// <summary>
+        /// 撤掉所有以该车为端点的绳根（车进池 / 被销毁之前调用）。
+        ///
+        /// 旧口径靠 <see cref="ContainerRopeLink.LateUpdate"/> 的「端点已销毁 → 绳根自毁」收尾；
+        /// 池化之后车**不再被销毁**（只是停用后进池、还可能被下一辆车复用），那条兜底就永远不触发 ——
+        /// 绳会一直挂着一辆已进池的车，并被拉到池根那边去。所以归还池之前必须显式撤掉
+        /// （观感与改动前一致：整组出库时绳子逐段消失）。
+        /// 先把端点置空再销毁：即使销毁延后一帧，LateUpdate 也不会再拿它去绷直。
+        /// </summary>
+        private void ReleaseRopesFor(ContainerItem item)
+        {
+            if (item == null || _ropeRoots.Count == 0)
+                return;
+
+            for (int i = _ropeRoots.Count - 1; i >= 0; i--)
+            {
+                var root = _ropeRoots[i];
+                if (root == null)
+                {
+                    _ropeRoots.RemoveAt(i);
+                    continue;
+                }
+
+                var link = root.GetComponent<ContainerRopeLink>();
+                if (link != null && link.leftCar != item && link.rightCar != item)
+                    continue;
+
+                _ropeRoots.RemoveAt(i);
+                if (link != null)
+                {
+                    link.leftCar = null;
+                    link.rightCar = null;
+                }
+
+                if (Application.isPlaying)
+                    Destroy(root);
+                else
+                    DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>
+        /// 按 ropeGroupId 归组：只收网格内确有位置的当前车，组内按列（gridX）升序。
+        /// 调用前提：该组成员已被**整组实例化**（<see cref="BuildRopes"/> → <see cref="MaterializeAllRopeGroups"/>）
+        /// ——只实例化了一部分成员时会漏人，链就断了。
+        /// </summary>
         private void CollectRopeGroups()
         {
             var all = GetComponentsInChildren<ContainerItem>();

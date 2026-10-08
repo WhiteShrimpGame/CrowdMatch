@@ -962,6 +962,7 @@ namespace CrowdMatch
         /// 在 st 当前的门格生成一个分身像素，包装成「接手这一格」的 ExtractState（本 tick 不参与决策）。
         /// **不写 grid[,]**：在途（提取中）像素本来就不在 grid 里（ResolveMatch 已把该格置空），
         /// 写进去会变成新的障碍、还会被暴露 BFS 当成实体像素。
+        /// 每成功生成一个分身即播放一次「Multi」音效。
         /// </summary>
         private ExtractState SpawnGateClone(ExtractState src, int budget)
         {
@@ -978,6 +979,11 @@ namespace CrowdMatch
             var gc = GameController.Instance;
             if (gc == null || !gc.recordMode)
                 clone.SetWalking(true);   // 与 ResolveMatch 里对匹配像素的处理一致（记录模式下像素随即消失，不需要走动画）
+
+            // 倍乘门「生成新 Pixel」的音效。AudioManager 每个 tag 只有一个 AudioSource，
+            // 同一帧内重复调用只是把这一个从头重播、不会叠加音量，因此这里不做额外节流。
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.Play("Multi");
 
             return new ExtractState
             {

@@ -59,6 +59,12 @@ namespace CrowdMatch
         [Tooltip("墙体独立 1×1 预制体（占一格，无相邻墙格，可视觉溢出边界）")]
         public GameObject wallSinglePrefab;
 
+        [Tooltip("墙体 T 字交叉预制体（占一格，三向有墙；0° 朝向约定见 Docs/WallJunctionDesign.md §10-Q1）")]
+        public GameObject wallTeePrefab;
+
+        [Tooltip("墙体十字交叉预制体（占一格，四向有墙；按四向对称设计，不旋转）")]
+        public GameObject wallCrossPrefab;
+
         [Tooltip("管道预制体模板（需自带 PipeItem 组件，并含波次数字 Text 与下一颜色指示 Renderer）")]
         public GameObject pipePrefab;
 
@@ -424,6 +430,14 @@ namespace CrowdMatch
             }
             return min;
         }
+
+        /// <summary>
+        /// 箱子释放（<see cref="BoxItem.TryOpen"/>）判定用的「空」：无像素 / 非障碍，
+        /// **且不被「还有未释放波次」的管道轨迹覆盖** —— 那几格是管道下一波要占的，**管道优先**：
+        /// 箱子若把释放出来的像素放到轨道上，管道就该因轨道被占而放不出下一波了（两者抢同一批空格）。
+        /// 判据与 <see cref="IsEmptyForExposure"/> 相同（活跃管道轨迹 = 阻挡，理由见那里的注释）。
+        /// </summary>
+        public bool IsEmptyForBoxRelease(int col, int row) => IsEmptyForExposure(col, row);
 
         /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
         public bool IsEmptyForExposure(int col, int row)
@@ -1406,8 +1420,63 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 重建所有墙块。
+        ///
+        /// 分类口径（见 <see cref="WallItem.AccumulateArms"/>）：**按线段连接关系给格累加臂掩码** ——
+        /// 只看「哪条线段真的经过这一格」，不看「谁的格子挨着」。于是：
+        /// ① 两面墙真正穿过同一格（或同一面墙的两段穿过）⇒ 叠成 T / 十字；
+        /// ② 相邻但各是各的（两面墙首尾相接、或同一面墙折返贴着自己）⇒ 各自独立成型，端点不会消失。
+        ///
+        /// 为什么要整组重来：新建一面墙会让**已有墙**在共享格上的块类型变化（端点 → T、边 → 十字），
+        /// 删除时反向退回。所以「建墙 / 删墙 / 闭环 / 关卡导入 / 撤销」这几处都要整组重建一次
+        /// （见 Docs/WallJunctionDesign.md §5.4、§6）。
+        ///
+        /// 重叠格归「层级顺序最先出现的那面墙」；归属只决定「块挂在谁名下」，
+        /// 掩码与归属无关，所以删掉归属者后重建会自动补回。
+        ///
+        /// ⚠️ 不要挂进 PixelColorBrushWindow.RefreshSnapshot：那个函数由 hierarchyChanged 置脏驱动，
+        /// 而本函数会新建 / 销毁子物体、又触发 hierarchyChanged，会变成每帧重建（见文档 §5.5）。
+        /// </summary>
+        public void RebuildWallVisuals()
+        {
+            var walls = GetComponentsInChildren<WallItem>();
+            if (walls.Length == 0)
+                return;
+
+            // 全组共用一份臂掩码：跨墙与墙内同一条口径，不需要「谁覆盖了哪格」的簿记
+            var arms = new Dictionary<Vector2Int, int>();
+            foreach (var w in walls)
+            {
+                if (w == null)
+                    continue;
+                WallItem.AccumulateArms(w.points, w.closed, arms, IsInRange);
+            }
+
+            var rendered = new HashSet<Vector2Int>();
+            foreach (var w in walls)
+            {
+                if (w == null)
+                    continue;
+
+                w.ClearPieces();
+
+                foreach (var cell in w.EnumerateOccupiedCells())
+                {
+                    if (!IsInRange(cell.x, cell.y))
+                        continue;   // 越界格不画
+                    if (!rendered.Add(cell))
+                        continue;   // 已被前面的墙画过 → 一格只画一块
+
+                    arms.TryGetValue(cell, out int mask);   // 没有臂 = 1×1 墙 / 退化段 ⇒ 掩码 0
+                    var type = WallItem.ClassifyMask(mask, out float yaw);
+                    w.SpawnPiece(this, cell, type, yaw);
+                }
+            }
+        }
+
+        /// <summary>
         /// 在 PixelGroup 下动态创建一个 WallItem（不依赖预制体，用 new GameObject + AddComponent），
-        /// 并调用其 BuildVisual 用角/边/端点/独立 1×1 四类预制体拼接墙体实体（运行时可视化）。
+        /// 并整组重建墙块（角/边/端点/独立 1×1/T 字/十字六类预制体）。
         /// closed = true 时额外补首尾闭合段。
         /// </summary>
         public WallItem SpawnWall(IList<Vector2> points, bool closed = false)
@@ -1419,7 +1488,8 @@ namespace CrowdMatch
             var wall = go.AddComponent<WallItem>();
             wall.points = new List<Vector2>(points);
             wall.closed = closed;
-            wall.BuildVisual(this);
+            wall.group = this;
+            RebuildWallVisuals();
             return wall;
         }
 

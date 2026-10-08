@@ -216,6 +216,9 @@ namespace CrowdMatch
             sb.Append("\n层级 = 移出本组之前至少要移出的像素总数；轮次 = 被取走的第几轮。\n");
             sb.Append("管道波次不落在轮次里：第 k 波 = 第 0 波层级 + k × 单波容量（顺推）；\n");
             sb.Append("某组的路线若依赖某条管道，层级另加该管道「单波容量 × 波数」（表中标「管道代价」）。\n");
+            sb.Append("箱内每个颜色一组，共享**一个**层级 = min over 直接相邻箱体的组 h（排除路线要经过本箱其他邻组的 h）\n");
+            sb.Append("  of (h.层级 + h.像素数) = 某个邻组整组彻底走完的那一刻；\n");
+            sb.Append("某组的路线若必须经过「箱子释放后会重新占满的那一带」（箱体格 ∪ 箱子邻组的相邻格），层级另加该箱子总容量（表中标「箱子代价」）。\n");
             sb.Append("同一层级内的组在 Record 里的先后是随机洗牌的。\n\n");
 
             foreach (var kv in GroupByTier(board))
@@ -239,6 +242,7 @@ namespace CrowdMatch
                       .Append(" 颜色=").Append(g.color)
                       .Append(" 元素=").Append(g.elements);
                     if (g.pipePenalty > 0) sb.Append(" 管道代价=+").Append(g.pipePenalty);
+                    if (g.boxPenalty > 0) sb.Append(" 箱子代价=+").Append(g.boxPenalty);
                     sb.Append(" 格=").Append(CellsText(g));
                     if (g.note.Length > 0) sb.Append("  ").Append(g.note);
                     sb.Append('\n');

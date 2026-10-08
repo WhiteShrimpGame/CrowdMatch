@@ -38,12 +38,20 @@ MonoBehaviour:
     volume: 0.6
     isBGM: 0
   - tag: CarLeave2
-    clip: {fileID: 8300000, guid: a9d5f98ba3438cf4ab6769ea99c1d132, type: 3}
-    volume: 0.6
+    clip: {fileID: 8300000, guid: 88bc2cb0389c1444f88ccb3c1c8acc06, type: 3}
+    volume: 1
     isBGM: 0
   - tag: CarLeave3
-    clip: {fileID: 8300000, guid: a9d5f98ba3438cf4ab6769ea99c1d132, type: 3}
-    volume: 0.6
+    clip: {fileID: 8300000, guid: 7cfbca1f3935de24ba3d279fccac9021, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: CarLeave4
+    clip: {fileID: 8300000, guid: 4008c9ea6284f0648a4e51ac13c96179, type: 3}
+    volume: 1
+    isBGM: 0
+  - tag: CarLeave5
+    clip: {fileID: 8300000, guid: ba62ec7f4a752aa46acc681daa6479f2, type: 3}
+    volume: 1
     isBGM: 0
   - tag: OnBelt
     clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
@@ -84,4 +92,8 @@ MonoBehaviour:
   - tag: DailyReward
     clip: {fileID: 8300000, guid: 78b83af4fabd7b44aa96f54e753a2e8e, type: 3}
     volume: 1
+    isBGM: 0
+  - tag: Multi
+    clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
+    volume: 0.25
     isBGM: 0
