@@ -1882,7 +1882,9 @@ namespace CrowdMatch
 
             box.BuildVisual(this, config);
 
-            // 立即占用 boxGrid（供后续箱子的容量计算看到本箱本体）；ApplyBoxes 末尾的 RebuildGrid 会重建权威表。
+            // 立即占用 boxGrid（供同一批里后续箱子的容量计算看到本箱本体）。
+            // 注意：ApplyBoxes 自己**不再**收尾重建网格了 —— 加载期最后一次权威重建在 ApplyCrates 末尾
+            // （见 Docs/PerformanceReview.md §2.3）。这里这份增量写就是本批内后续箱子读到的全部来源。
             if (boxGrid != null)
             {
                 for (int r = box.rowMin; r <= box.rowMax; r++)
