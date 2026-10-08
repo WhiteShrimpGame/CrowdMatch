@@ -202,8 +202,8 @@ namespace CrowdMatch
                         continue;
 
                     var pixel = belt.GetItem(i) as PixelItem;
-                    if (pixel != null && pixel.emojiNode != null)
-                        outList.Add(pixel);
+                    if (pixel != null && pixel.emojiNode != null && !pixel.reviveReserved)
+                        outList.Add(pixel);   // 复活保留：在等跳车，不该出犯困脸
                 }
             }
 
@@ -433,6 +433,11 @@ namespace CrowdMatch
             if (float.IsNaN(prevX))
                 return false;   // 本槽首次记录：本帧只锚定起点，不判定
 
+            // 复活保留：这颗在等复活队列叫它跳车，不许被正常匹配流程吃掉。
+            // 放在锚点更新之后，保证它摘除后本槽新像素的 prevX 仍然连续。
+            if (pixel.reviveReserved)
+                return false;
+
             // 闸口只在远侧直线上，纵向离开远侧范围就不必判定（保留原 matchRangeZ 的语义）
             if (!IsAtFarSide(pixel))
                 return false;
@@ -598,14 +603,16 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 复活用：保留前 keepCount 个占用槽位的像素，其余槽位取下（解绑 carrier、保持世界位置）并返回。
-        /// 返回的像素已无父物体，供调用方直接匹配到后排车。
+        /// 复活用：前 keepCount 个占用槽位的像素照旧留在带上正常参与游戏；其余槽位的像素
+        /// **只标 <see cref="PixelItem.reviveReserved"/>、不从带上摘下来** —— 在轮到自己跳车之前
+        /// 它们仍然跟着传送带移动（复活口径见 GameController.Revive 的注释）。
+        /// 返回被标记的那批（顺序 = 占用槽序号升序），供调用方匹配后排车。
         /// </summary>
-        public List<PixelItem> DrainBeltKeep(int keepCount)
+        public List<PixelItem> ReserveBeltBeyond(int keepCount)
         {
-            var removed = new List<PixelItem>();
+            var reserved = new List<PixelItem>();
             if (belt == null)
-                return removed;
+                return reserved;
 
             var occupied = new List<int>();
             for (int i = 0; i < belt.slotCount; i++)
@@ -615,15 +622,54 @@ namespace CrowdMatch
             int keep = Mathf.Clamp(keepCount, 0, occupied.Count);
             for (int k = keep; k < occupied.Count; k++)
             {
-                int slot = occupied[k];
-                var pixel = belt.GetItem(slot) as PixelItem;
-                if (pixel != null)
-                    removed.Add(pixel);
-                belt.ClearSlot(slot);
-                ResetSlotTracking(slot);
-                ResetLapTracking(slot);
+                var pixel = belt.GetItem(occupied[k]) as PixelItem;
+                if (pixel == null)
+                    continue;
+                pixel.reviveReserved = true;
+                reserved.Add(pixel);
             }
-            return removed;
+            return reserved;
+        }
+
+        /// <summary>
+        /// 是否还有被复活保留、尚未摘下的像素。它们占着槽位却不参与匹配，所以失败判定不能在这种
+        /// 状态下做（见 GameController.TryCheckFail）。用扫描而非计数器：像素一销毁就自然不再计入。
+        /// </summary>
+        public bool HasReservedPixel()
+        {
+            if (belt == null)
+                return false;
+
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                var pixel = belt.GetItem(i) as PixelItem;
+                if (pixel != null && pixel.reviveReserved)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 把一颗被复活保留的像素从传送带上真正摘下来（清槽位 + 复位该槽的配对 / 圈数追踪）。
+        /// 消失组的 pop 完成时、跳跃组的起跳前各调一次（见 GameController.ReleaseRevivePixel）。
+        /// 找不到该像素（已被取走 / 销毁）返回 false，调用方照常清保留标志。
+        /// </summary>
+        public bool ReleaseReserved(PixelItem pixel)
+        {
+            if (belt == null || pixel == null)
+                return false;
+
+            for (int i = 0; i < belt.slotCount; i++)
+            {
+                if (!ReferenceEquals(belt.GetItem(i), pixel))
+                    continue;
+
+                belt.ClearSlot(i);   // SetParent(null, true)：保持世界位置
+                ResetSlotTracking(i);
+                ResetLapTracking(i);
+                return true;
+            }
+            return false;
         }
     }
 }

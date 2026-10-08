@@ -67,6 +67,11 @@ namespace CrowdMatch
         [Tooltip("犯困表情在 SpawnPool 配置里的 tag（由传送带宿主按间隔检测播放）")]
         public string sleepTag = "EmojiSleep";
 
+        [Header("惊讶表情（同色连成一片）")]
+        [Tooltip("同色连成一片时的惊讶表情在 SpawnPool 配置里的 tag。管道推波 / 箱子放货 / 升降台升起 / " +
+                 "问号揭晓 / 冰化开 / 木箱被拆 都会触发判定，见 Docs/EmojiSurpriseMergeDesign.md")]
+        public string surpriseTag = "EmojiSurprise";
+
         [Header("生气的 tag（三条来源共用）")]
         [Tooltip("生气表情在 SpawnPool 配置里的 tag")]
         public string angryTag = "EmojiAngry";
@@ -168,6 +173,43 @@ namespace CrowdMatch
             if (pixel == null || pixel.emojiNode == null)
                 return;
             PlayEmoji(pixel.emojiNode, sleepTag, follow: true);
+        }
+
+        /// <summary>
+        /// 从一组像素里**随机**挑一个播惊讶表情（用于「同色连成一片」的每个区域各出一个）。
+        ///
+        /// 候选口径与其它表情一致：只挑配了 `emojiNode` 的。在此之上加一层**逐像素抑制** ——
+        /// 该像素头上惊讶还没播完的排除在外（与「点击受阻生气」同一策略，见 <see cref="TryPlayAngryEmoji"/>），
+        /// 于是同一个区域被连续事件反复命中时不会在同一颗头上叠脸。
+        /// 没配 tag / 该 tag 未在池里注册 / 候选全被排除时返回 false（不做任何播放）。
+        /// </summary>
+        public bool TryPlaySurpriseEmoji(IList<PixelItem> pixels)
+        {
+            if (pixels == null || pixels.Count == 0 || string.IsNullOrEmpty(surpriseTag))
+                return false;
+
+            // 未配池 / 该 tag 没注册：直接返回。一次合并事件最多会调这里 (原有区域数 + 1) 次，
+            // 不拦的话未配 tag 时每次事件都刷好几条 "Pool Dict not contains tag" 错误。
+            var pool = GetPool();
+            if (pool == null || !pool.HasTag(surpriseTag))
+                return false;
+
+            var candidates = new List<PixelItem>(pixels.Count);
+            for (int i = 0; i < pixels.Count; i++)
+            {
+                var p = pixels[i];
+                if (p == null || p.emojiNode == null)
+                    continue;   // 没配表情节点：没法显示
+                if (HasEmoji(p.emojiNode, surpriseTag))
+                    continue;   // 这颗头上惊讶还没播完：忽略本次
+                candidates.Add(p);
+            }
+
+            if (candidates.Count == 0)
+                return false;
+
+            PlayEmoji(candidates[Random.Range(0, candidates.Count)].emojiNode, surpriseTag, follow: true);
+            return true;
         }
 
         /// <summary>
