@@ -1,18 +1,20 @@
 # CrowdMatch「潜在性能问题」排查文档
 
-> 状态：**分析 + 已落地 3 处最小改动**（P7 / P10 / P11，见下）。
+> 状态：**分析 + 已落地 4 处最小改动**（P7 / P10 / P11 / P12，见下）。
 > 排查日期：2026-10-08
 >
 > **后续更新（2026-10-08）**：
-> - **已改码（3 处，两个程序集离线编译均 0 错误）**：
+> - **已改码（4 处，两个程序集离线编译均 0 错误）**：
 >   **P7** 物理帧里的 `GetComponent` → `PixelItem.bufferBody` 缓存（§3.2）；
 >   **P11** UI 计数 / 进度文本改为「值没变就不刷新」（§3.6）；
 >   **P10** 外层循环裁到 `maxOpenRows`（§3.1）—— 同时**更正**了原判定：实际量级远小于原估，
->   且原建议的「`gatheredItems.Count == 0` 早退」会破坏开盖，**已作废**。
+>   且原建议的「`gatheredItems.Count == 0` 早退」会破坏开盖，**已作废**；
+>   **P12** `StepExtracting` 复用快照缓冲 + 同一像素的 `transform.position` 读取 6→2 次（§3.3）
+>   —— 其 `ApplyEntryQueue` 的 O(E²) 那层**未做**，先测 E 再定。
 > - **已处理 / 免做**：**P1** 已禁用（`FrameItem` 不再被调用，§2.1）；**P2** 已在场景 / 预制体关闭调试开关（§2.2）
 > - **已定方案、未改码**：**P13** `IceItem` 改为仅关卡开始时重建一次（§4.1）
 >
-> 其余 **P3~P6、P8、P9、P12、P14~P16** 均**未处理**。改动清单见 §7。
+> 其余 **P3~P6、P8、P9、P14~P16** 均**未处理**。改动清单见 §7。
 > 目标平台：移动端 / WebGL（`GameManager.cs` 设 `Application.targetFrameRate = 60`、`vSyncCount = 0`）
 > 范围：`Assets/Scripts/Gameplay`、`Assets/Scripts/Core`、`Assets/Scripts/DailyBonus`、`Assets/Scripts/SpawnPool`
 > （编辑器工具单列 §5，它们不影响运行时帧率，但影响迭代速度）
@@ -48,7 +50,7 @@
 | P9 | `CanExit()` 逐 seed 重算 `MinActivePipeTrackRow()` / `MustWalkToGate()` | 每个提取 tick × 每个像素 | 🟡 | §3.5 |
 | P10 | `ContainerGroup.Update → ProcessConsumption` 每帧扫车盘 —— **原判定的复杂度与建议均已更正**（实际远小于原估，且原建议的早退会破坏开盖） | 每帧 | ✅ **已处理**：外层循环裁到 `maxOpenRows` | §3.1 |
 | P11 | `GameController.UpdateCountText` 每帧字符串拼接 + 写 UI `Text` | 每帧 | ✅ **已处理**：值没变就不拼串 / 不赋值 | §3.6 |
-| P12 | `StepExtracting` 每帧 `new List<ExtractState>` | **每帧** | 🟡 | §3.3 |
+| P12 | `StepExtracting` 提取期间每帧 `new List<ExtractState>` + 同一像素重复读 `transform.position` | 提取期间每帧 | ✅ **已处理**：复用快照缓冲 + 位置读取 6→2 次（O(E²) 那层未做） | §3.3 |
 | P13 | `IceItem` 每次融化 `Instantiate`/`Destroy` 角块 + 重建 Mesh | 每次融化 | 🟡 **已定方案**：仅关卡开始重建，去掉动态重建（§4.1） | §4.1 |
 | P14 | `EmojiManager` 每次播放都扫一遍层级 | 每次表情 | 🟢 | §4.2 |
 | P15 | `AudioManager.GetConfigItem` 线性查找 | 每次播音 | 🟢 | §4.3 |
@@ -64,7 +66,7 @@
 |---|---|---|
 | `ConveyorBelt.Update` | 推进相位 + 逐槽写 carrier / cell 的 position+rotation | `O(槽数 × 轨迹段数)` |
 | `ConveyorBeltZone.Update` | 逐槽圈数统计（+ 间隔触发的犯困 / 排队生气检查） | `O(槽数)` |
-| `CrowdBufferZone.Update` | `StepExtracting()` + `TryRelease()` | `O(批次×像素)`，见 §3.3 |
+| `CrowdBufferZone.Update` | `StepExtracting()` + `TryRelease()`（已改：快照缓冲复用 + 位置少读） | `O(批次×像素)`，见 §3.3 |
 | `CrowdBufferZone.FixedUpdate` | 逐物理像素设速度 + 转向（已改：读缓存的刚体，不再 `GetComponent`） | `O(物理像素)`，见 §3.2 |
 | `ContainerGroup.Update` | `ProcessConsumption()` 扫车盘（已改：只扫前 `maxOpenRows` 排） | `O(列×maxOpenRows²)`，见 §3.1 |
 | `GameController.Update` | 每帧刷两个 UI 文本（已改：值没变就不写） | 见 §3.6 |
@@ -421,28 +423,78 @@ private void FixedUpdate()
 
 ---
 
-### 3.3 P12 · `StepExtracting` 每帧分配 🟡
+### 3.3 P12 · `StepExtracting` 每帧分配 ✅ **已处理（并补齐了原判定漏掉的主项）**
 
-**位置**：`Gameplay/CrowdBufferZone.cs:507-612`，分配点在 `:524`
+**位置**：`Gameplay/CrowdBufferZone.cs:517-626`
+
+> **补充（2026-10-08）**：本节原来只写了那个 `List` 分配。重读调用链后发现，
+> **提取期间真正的主项是 `ApplyEntryQueue` 的 O(E²) 次 `transform.position` 读取**，不是那个 `List`。
+> 已按下三层处理，第 3 层（O(E²) 本身）**未做**。
+
+**前提**：`StepExtracting` 开头就是 `if (_batches.Count == 0) return;`（`:519-520`），
+所以**不在提取时成本为 0** —— 下面所有开销只在「有批次在走」时存在。
+E = 本批「已出网格、正在飞向入口」的像素数。
 
 ```csharp
 for (int b = _batches.Count - 1; b >= 0; b--)
 {
-    var batch = _batches[b];
-    // 1. 已离开网格的像素……
-    var exiting = new List<ExtractState>(batch.extracting.Count);   // ← 每批次、每帧一次新的 List
+    var exiting = new List<ExtractState>(batch.extracting.Count);   // ← 原：每批次、每帧一次新的 List
     ...
+    foreach (var st in exiting)
+    {
+        Vector3 target = ComputeEntryTarget(st.item.transform.position, entrance, perp);   // 读 ①
+        Vector3 moveTarget = ApplyEntryQueue(st, target, ...);      // 内部又读 ②（:1171）
+        MoveToward(st, moveTarget);                                 // 内部读 ③④（:1204/:1213），并写位置
+        bool reachedTarget = XZDistance(st.item.transform.position, ...);                   // 读 ⑤
+        bool enteredRange = ... Vector3.Dot(st.item.transform.position - entrance, ...);    // 读 ⑥
+    }
 }
 ```
 
-只要还有提取批次在推进，**每帧每个批次**都要建一个新的 `List<ExtractState>`（容量还是按
-当前提取数给的）。加上 `HasGridPathfindingPixels`（`:200-218`）在 `:514` 和 `:610`
-**每帧被求值两次**，每次全批次全像素扫描。
+**已做的改动（2026-10-08）**
 
-**建议**：`exiting` 改成成员缓存 `List`（`Clear()` 复用）。`HasGridPathfindingPixels`
-在 `StepExtracting` 里只算一次存进局部变量（`:610` 复用 `:514` 之外的新状态，注意语义是
-「本帧开始 / 本帧结束」两个不同时刻，**不能简单合并** —— 要保留两个求值点，但可以把
-`exiting` 的分配消掉，那是这里唯一纯粹的浪费）。
+**第 1 层 · 复用 `exiting` 快照（省 GC 分配）** —— 新增字段 `:172`，每批次开头重建（`:534`）：
+
+```csharp
+private readonly List<ExtractState> _exitingBuffer = new List<ExtractState>();
+...
+var exiting = _exitingBuffer;
+exiting.Clear();
+```
+
+- 快照本身**必须保留**：处理过程中会边删 `batch.extracting`（`:566`），而 `ApplyEntryQueue`
+  需要**整份** exiting 集合（同列前不追尾）。**不能**改成倒序就地删除。
+- 复用安全：这段不会重入 —— 循环体里的 `EnterPhysical` 只 `StartCoroutine`，
+  其首段（`SmoothScaleToTarget`）碰一下 `localScale` 就 yield，不会回调 `StepExtracting`。
+
+**第 2 层 · 同一像素每帧的 `transform.position` 从 6 次降到 2 次（逐字等价）**
+
+读 ①②③④ 全在 `MoveToward` 写位置**之前**（中间无任何写入 → 值必然相同），读 ⑤⑥ 在写**之后**（也相同）。
+改成开头读一次传进去（`ComputeEntryTarget` 本来就收 `pos`；`ApplyEntryQueue` `:1168` 与
+`MoveToward` `:1202` 各加一个 `Vector3 pos` 参数），`MoveToward` 返回后再读一次给 ⑤⑥ 复用。
+顺带删掉 `MoveToward` 里那句自赋值 `pos.y = st.item.transform.position.y;` ——
+`dir.y` 恒为 0（`to.y` 已清零），它本来就是空操作。
+
+**第 3 层 · `ApplyEntryQueue` 的 O(E²)（未做）**
+
+内层 `foreach (var other in exiting)` 每对读一次 `other.item.transform.position`（`:1178`）
+→ E×(E−1) 次 native 读，这是提取期间最大的一块。**未做**，原因：
+
+- 最容易想到的「帧初把所有位置缓存一次」**不等价** —— `exiting` 是**按序**处理的，
+  每个像素 `MoveToward` 后位置就变了，所以后面处理的像素读到的「前面那些」已是**移动后**的值。
+  缓存帧初值会把「部分已更新」这套语义抹平。
+- 等价的写法要把 `prog`/`lat` 存进 `ExtractState`、在 `MoveToward` 写完位置后**同步刷新**，
+  并在 `entrance`/`axis`/`perp` 变化时整体失效（这三个值每帧由 `RefreshGeometry` 重算，
+  取决于 `gapPoint.position`）。把「派生值缓存」和「每帧重算的几何」绑在一起，
+  **风险与收益不成比例**。
+- **先测**：确认 E 的典型值。E ≤ 20 时这点算术可以不管；上百才值得动。
+
+**明确不做**：合并 `:524` 与 `:625` 那次 `HasGridPathfindingPixels` —— 语义是
+「本帧**开始**还有 / 本帧**结束**还有没有」两个**不同时刻**，是刻意的边沿判定（`:623-626`），
+而且 `&&` 已经短路，正常情况下每帧只算 1 次。
+
+**顺带（不属于 P12，未改）**：`SmoothScaleToTarget` 每次进入物理都
+`new WaitForSeconds(scaleDelay)`（`:1314`）—— 事件级、很小，要抠可换成缓存的等待对象。
 
 ---
 
@@ -755,9 +807,11 @@ private void UpdateCountText()
 ## 7. 建议的动手顺序
 
 > **状态更新（2026-10-08）**：
-> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）—— 见 §3.1 / §3.6 / §3.2
+> - **✅ 已改码**：第 2 条（P10）、第 3 条（P11）、第 5 条（P7）、第 7 条（P12）
+>   —— 见 §3.1 / §3.6 / §3.2 / §3.3
 > - **✅ 已禁用 / 免做**：第 1 条（P2，场景 / 预制体已关）、第 8 条（P1，`FrameItem` 不再被调用）
 > - **已定方案、未改码**：第 15 条（P13，`IceItem` 仅关卡开始重建，见 §4.1）
+> - **只做了一半**：第 7 条（P12）的 `ApplyEntryQueue` O(E²) 那层**未做**，先测 E 再定（§3.3）
 >
 > 各条都保留在原编号位置上，只标状态，**不重排序号**，以免打乱下表的 `#` ↔ `P#` 对应关系。
 
@@ -780,7 +834,7 @@ private void UpdateCountText()
 |---|---|---|---|
 | 5 | **P7** | `PixelItem` 缓存 `Rigidbody`，消掉物理帧里的 `GetComponent` —— **✅ 已处理**（§3.2） | `CrowdBufferZone.cs:472` + `PixelItem.cs` + `:1421` |
 | 6 | **P9** | `minTrackRow` 提到 sweep 开头算一次 | `CrowdBufferZone.cs:878` |
-| 7 | **P12** | `exiting` 等临时 `List` 改成员缓存复用 | `CrowdBufferZone.cs:524` |
+| 7 | **P12** | `exiting` 快照改成员缓存复用 + 同一像素的 `transform.position` 读取 6→2 次 —— **✅ 已处理**（§3.3）；`ApplyEntryQueue` 的 O(E²) 未做，先测 E | `CrowdBufferZone.cs:172/534` |
 | 8 | **P1** | ~~`FrameItem` 角块走 `SpawnPool`~~ —— **✅ 已禁用**：已确定 `FrameItem` 不再被调用，本条免做（§2.1）；同一手法可留给 §4.1 的 `IceItem` | — |
 | 9 | **P4** | `BoxItem.TryOpen` 把空格判定提到建容器之前（即 §2.4 的 (a)） | `BoxItem.cs:361-386` |
 | 10 | **P3** | `LevelLoader` 合并为一次 `RebuildGrid` | `LevelLoader.cs:56-63` |
