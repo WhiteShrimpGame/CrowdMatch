@@ -609,6 +609,9 @@ namespace CrowdMatch
         private int seed = 0;
         private int columnOverride = 0;
 
+        /// <summary>整窗滚动位置：分段 / 洗牌组加多了会超出窗口高度，由滚动条兜住（内容不超出时不显示）。</summary>
+        private Vector2 scroll;
+
         /// <summary>校验洗牌组列号要用到「当前几列」，按选中的关卡 JSON 缓存解析结果（换关卡才重解析）。</summary>
         private TextAsset cachedColumnsFor;
         private int cachedColumns;
@@ -618,6 +621,10 @@ namespace CrowdMatch
 
         private void OnGUI()
         {
+            // 内容随分段 / 洗牌组数量增长，会超出窗口高度：整窗套一层滚动视图，
+            // 不传 alwaysShow 参数 = 只在该方向内容超出时才出现对应滚动条。
+            scroll = EditorGUILayout.BeginScrollView(scroll);
+
             EditorGUILayout.Space(4);
             EditorGUILayout.HelpBox("根据 Record Mode 的像素取出顺序重排容器并导出新关卡 JSON（像素保持不变，lockContainer=true）。", MessageType.Info);
 
@@ -689,6 +696,8 @@ namespace CrowdMatch
             EditorGUILayout.Space(8);
             if (GUILayout.Button("生成并导出", GUILayout.Height(28)))
                 GenerateAndExport();
+
+            EditorGUILayout.EndScrollView();
         }
 
         private void AddSegment()

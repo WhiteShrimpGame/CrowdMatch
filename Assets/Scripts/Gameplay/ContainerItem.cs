@@ -437,15 +437,48 @@ namespace CrowdMatch
         /// 尝试上车：选一个空闲落点、DOLocalJump 到 0 点、随后触发弹性缩放。
         /// 无空闲落点返回 false（调用方回退旧 Lerp）。onBoarded 在「每个上车像素的弹性归位」后回调（供失败判定与出库用）。
         /// </summary>
-        public bool TryBoardPixel(PixelItem pixel, Action onBoarded)
+        /// <param name="timing">
+        /// 表现时长覆盖（复活专用，见 <see cref="ContainerGroup.BoardingTiming"/>）。不传 = 用本预制体的
+        /// <see cref="boardJumpDuration"/> 与弹性两段时长，即正常玩法的行为。
+        /// </param>
+        public bool TryBoardPixel(PixelItem pixel, Action onBoarded, ContainerGroup.BoardingTiming timing = default)
         {
             if (pixel == null)
                 return false;
-            var pos = AcquireFreePos();
-            if (pos == null)
+            int seat = ReserveSeatIndex();
+            if (seat < 0)
                 return false;   // 无空闲落点，回退旧处理
+            return TryBoardPixelAt(pixel, seat, onBoarded, timing);
+        }
+
+        /// <summary>
+        /// 预占一个空闲落点并返回它在 <see cref="posList"/> 里的下标；无空位返回 -1。
+        /// 与 <see cref="TryBoardPixelAt"/> 配对使用。
+        ///
+        /// 复活队列用它在**登记那一刻**就把每颗像素的座位定下来：跳跃组要按
+        /// 「车行 → 车列 → 空位」升序依次起播（见 GameController.Revive），排序键必须提前可知；
+        /// 顺带也保证这几秒里传送带不会把座位抢走。
+        /// </summary>
+        public int ReserveSeatIndex()
+        {
+            var pos = AcquireFreePos();
+            return pos == null ? -1 : posList.IndexOf(pos);
+        }
+
+        /// <summary>
+        /// 在**已预占**的落点上上车（<see cref="ReserveSeatIndex"/> 的配对方法）。
+        /// 与重载的差别只有一处：不再自己抢座位，直接用调用方给的下标。
+        /// </summary>
+        public bool TryBoardPixelAt(PixelItem pixel, int seatIndex, Action onBoarded,
+            ContainerGroup.BoardingTiming timing = default)
+        {
+            if (pixel == null || posList == null || seatIndex < 0 || seatIndex >= posList.Count)
+                return false;
+            var pos = posList[seatIndex];
+            if (pos == null)
+                return false;
             _boardingPixels.Add(pixel);   // 上车中（未落定）：侧倾时逐帧锁定其世界角度，避免侧倾旋转偏移跳跃表现
-            StartCoroutine(BoardRoutine(pixel, pos, onBoarded));
+            StartCoroutine(BoardRoutine(pixel, pos, onBoarded, timing));
             return true;
         }
 
@@ -520,7 +553,8 @@ namespace CrowdMatch
             }
         }
 
-        private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onBoarded)
+        private IEnumerator BoardRoutine(PixelItem pixel, Transform pos, Action onBoarded,
+            ContainerGroup.BoardingTiming timing)
         {
             pixel.transform.SetParent(pos, true);   // 挂到落点下，保持世界位姿（无瞬移）
 
@@ -529,10 +563,12 @@ namespace CrowdMatch
             pixel.SitDownExposeTarget();
 
             // 跳跃与转向并行：DOLocalJump 落到 0 点，同时 localRotation 平滑归 0（各自独立 tween，同时长）
+            // 复活路径会带 timing 覆盖这一时长；传送带路径不传 → 用预制体的 boardJumpDuration
+            float jumpDuration = timing.jumpDuration > 0f ? timing.jumpDuration : boardJumpDuration;
             if (AudioManager.Instance != null)
                 AudioManager.Instance.Play("Jump");
-            var jumpTween = pixel.transform.DOLocalJump(Vector3.zero, boardJumpPower, boardJumpCount, boardJumpDuration);
-            var rotateTween = pixel.transform.DOLocalRotate(Vector3.zero, boardJumpDuration);
+            var jumpTween = pixel.transform.DOLocalJump(Vector3.zero, boardJumpPower, boardJumpCount, jumpDuration);
+            var rotateTween = pixel.transform.DOLocalRotate(Vector3.zero, jumpDuration);
             yield return jumpTween.WaitForCompletion();
             yield return rotateTween.WaitForCompletion();
 
@@ -551,7 +587,7 @@ namespace CrowdMatch
             }
             // 落点不释放：该座位被该像素永久占用，直到整辆车出库销毁时一并带走
 
-            PlayBoardElastic();                 // 触发弹性（叠加规则见 PlayBoardElastic）
+            PlayBoardElastic(timing);           // 触发弹性（叠加规则见 PlayBoardElastic）
             yield return WaitForElasticIdle();  // 等弹性归位
 
             onBoarded?.Invoke();
@@ -610,29 +646,34 @@ namespace CrowdMatch
         /// 复原中（最大值→1）则中断上一动画，自当前 scale 再扩大至最大值再弹回。
         /// 复原中重扩时，按 √(剩余距离比) 缩短重扩时长，使重扩加速度与初始态直接 ease-out 一致（即从中间逐帧还原直接态动画）。
         /// </summary>
-        private void PlayBoardElastic()
+        private void PlayBoardElastic(ContainerGroup.BoardingTiming timing = default)
         {
             if (_rollPhase != 0)
                 return;   // 侧倾中：忽略上车弹性（互斥，避免弹性换轴与侧倾换轴同时改车身父物体）
             if (_elasticPhase == 1)
                 return;   // 尚未到最大值：忽略新动画
+
+            // 复活路径带 timing 覆盖两段时长；传送带路径不传 → 用预制体的值
+            float scaleDuration = timing.elasticScaleDuration > 0f ? timing.elasticScaleDuration : boardElasticScaleDuration;
+
             if (_elasticPhase == 2)
             {
                 if (_elasticRoutine != null)
                     StopCoroutine(_elasticRoutine);
-                _elasticRoutine = StartCoroutine(ElasticRoutine(ElasticScale, ReexpandDuration()));
+                _elasticRoutine = StartCoroutine(ElasticRoutine(ElasticScale, ReexpandDuration(scaleDuration), timing));
                 return;
             }
             SwapElasticAxle();   // 先换轴再缩放
-            _elasticRoutine = StartCoroutine(ElasticRoutine(Vector3.one, boardElasticScaleDuration));
+            _elasticRoutine = StartCoroutine(ElasticRoutine(Vector3.one, scaleDuration, timing));
         }
 
         /// <summary>
         /// 复原中重扩的时长：使重扩加速度与初始态直接 ease-out 一致（即从中间逐帧还原直接态动画）。
         /// 复原进度 p_r ∈ [0,1]（0=在最大值 M，1=已归 1），剩余距离比 |M-S|/|M-1| = p_r²；
         /// 直接态动画在 scale = S 处进度 p_e = 1 - p_r，剩余时长为 T·p_r。故取 T' = T·√(p_r²) = T·p_r。
+        /// <paramref name="scaleDuration"/> = 生效的「放大阶段时长」（复活可覆盖）。
         /// </summary>
-        private float ReexpandDuration()
+        private float ReexpandDuration(float scaleDuration)
         {
             Vector3 target = boardElasticTargetScale;
             Vector3 cur = ElasticScale;
@@ -645,11 +686,16 @@ namespace CrowdMatch
                 remainRatio = Mathf.Max(remainRatio, Mathf.Abs(target[i] - cur[i]) / den);
             }
             remainRatio = Mathf.Clamp01(remainRatio);
-            return Mathf.Sqrt(remainRatio) * boardElasticScaleDuration;
+            return Mathf.Sqrt(remainRatio) * scaleDuration;
         }
 
-        private IEnumerator ElasticRoutine(Vector3 fromScale, float expandDuration)
+        private IEnumerator ElasticRoutine(Vector3 fromScale, float expandDuration,
+            ContainerGroup.BoardingTiming timing = default)
         {
+            float recoverDuration = timing.elasticRecoverDuration > 0f
+                ? timing.elasticRecoverDuration
+                : boardElasticRecoverDuration;
+
             _elasticPhase = 1;
             float t = 0f;
             float dur = Mathf.Max(expandDuration, 0.0001f);   // 防止除零（重扩时剩余距离为 0）
@@ -665,10 +711,10 @@ namespace CrowdMatch
 
             _elasticPhase = 2;
             t = 0f;
-            while (t < boardElasticRecoverDuration)
+            while (t < recoverDuration)
             {
                 t += Time.deltaTime;
-                float p = Mathf.Clamp01(t / boardElasticRecoverDuration);
+                float p = Mathf.Clamp01(t / recoverDuration);
                 float e = p * p;   // 匀加速 ease-in
                 ElasticScale = Vector3.Lerp(boardElasticTargetScale, Vector3.one, e);
                 yield return null;
