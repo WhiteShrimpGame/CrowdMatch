@@ -14,8 +14,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   items:
   - tag: BGM
-    clip: {fileID: 8300000, guid: 00ce2c6c83120e345baa3e2255b08edb, type: 3}
-    volume: 0.3
+    clip: {fileID: 8300000, guid: 657bc24dbf8499243abaa5332f269088, type: 3}
+    volume: 0.45
     isBGM: 1
   - tag: Tap
     clip: {fileID: 8300000, guid: 1e82ee583a49b794eabae6c2ab2e7585, type: 3}

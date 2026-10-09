@@ -31,3 +31,5 @@ MonoBehaviour:
     cmdKey: InfiniteStamina
   - btnName: "\u6E05\u9664\u6570\u636E"
     cmdKey: ClearAllData
+  - btnName: "\u9053\u5177+10"
+    cmdKey: AddItems

@@ -25,6 +25,9 @@ namespace CrowdMatch
     /// ────────────────────────────
     /// 更多工具(900)                      → Create Color Config/从材质主色生成字色与描边色
     ///                                      | 生成升降台预制体/生成挖洞地面材质球/生成圆片 Mesh
+    ///                                      | 导出场景贴图报告 (CSV)          ← Seg3，自画一条分隔线
+    ///                                      | 替换场景字体引用                ← Seg3+1，与上一项同一段
+    ///                                      | 音频裁剪                       ← Seg4，自画一条分隔线
     /// </code>
     /// </summary>
     internal static class MenuPriority
@@ -61,5 +64,8 @@ namespace CrowdMatch
 
         /// <summary>段 3：再下一段（+0..+9）。</summary>
         public const int Seg3 = 50;
+
+        /// <summary>段 4：音频工具（+0..+9）。</summary>
+        public const int Seg4 = 70;
     }
 }
