@@ -59,6 +59,9 @@ namespace CrowdMatch
         [Tooltip("可点击时显示的白描边 Renderer（头骨上的 Cull Front 白球）；随暴露状态显隐")]
         public Renderer outlineRenderer;
 
+        /// <summary>道具「强制取出」高亮：为 true 时无条件点亮描边（绕过 exposed 与 FrameItem 的统一绘制闸门）。</summary>
+        [System.NonSerialized] private bool _propGlow;
+
         /// <summary>是否处于暴露（可点击）状态</summary>
         public bool IsExposed { get; private set; }
 
@@ -475,9 +478,24 @@ namespace CrowdMatch
         private void ApplyExposedState(bool exposed)
         {
             if (outlineRenderer != null)
-                outlineRenderer.enabled = exposed && !FrameItem.InUse;
+                // 道具高亮优先：_propGlow 时无条件点亮。此时 FrameItem 只画「已暴露区域」的轮廓，
+                // 而未暴露像素本来就没有描边，所以不会叠画。
+                outlineRenderer.enabled = _propGlow || (exposed && !FrameItem.InUse);
             if (animator != null)
                 animator.enabled = exposed;
+        }
+
+        /// <summary>
+        /// 道具「强制取出」模式的高亮开关：开启时无条件点亮自身描边，让玩家看清现在哪些像素点得动；
+        /// 关闭时恢复成常规暴露表现。已经暴露的像素不再重复点亮，避免与 FrameItem 的区域描边叠画。
+        /// </summary>
+        public void SetPropGlow(bool on)
+        {
+            if (on && IsExposed)
+                return;                     // 已经亮的不用再点
+
+            _propGlow = on;
+            ApplyExposedState(IsExposed);
         }
 
         /// <summary>管道放置完成：清除放置标记并把暴露状态复位（Animator 关闭、Root 归位），等待后续 RefreshExposed 统一激活。</summary>

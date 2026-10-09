@@ -159,6 +159,87 @@ namespace CrowdMatch
         /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
         private int _clickMask;
 
+        /// <summary>道具「强制取出」模式：开启后点一组即可无视前排连通限制送出（见 <see cref="EnterPropForceMode"/>）。</summary>
+        private bool _propForceMode;
+
+        /// <summary>当前是否处于道具「强制取出」模式。</summary>
+        public bool PropForceMode { get { return _propForceMode; } }
+
+        [Header("道具3「UFO」演出")]
+        [Tooltip("UFO 预制体（Assets/Prefabs/UFO.prefab）。留空则道具3 退化为「这组原地消失」并报错。")]
+        public GameObject prop3UfoPrefab;
+
+        [Tooltip("出场位置：屏幕下方（视口 y，负数 = 屏幕下方之外）")]
+        public float prop3EnterViewportY = -0.25f;
+
+        [Tooltip("离场位置：屏幕上方（视口 y，>1 = 屏幕上方之外）")]
+        public float prop3ExitViewportY = 1.3f;
+
+        [Tooltip("UFO 飞行时长（出场 / 到车阵 / 离场，秒）")]
+        public float prop3FlyDuration = 0.45f;
+
+        [Tooltip("UFO 停在被点组正上方的高度（世界 Y 偏移）")]
+        public float prop3HoverAboveGroup = 4f;
+
+        [Tooltip("UFO 停在前4排车上方的高度（世界 Y 偏移）")]
+        public float prop3HoverAboveCars = 5f;
+
+        [Tooltip("吸人：从原格移动到 UFO 并缩到 0 的时长（秒）")]
+        public float prop3SuckDuration = 0.25f;
+
+        [Tooltip("吸人：逐颗错开的间隔（秒）。只影响「一颗接一颗」的节奏。")]
+        public float prop3SuckStagger = 0.05f;
+
+        [Tooltip("UFO 缩放脉冲的间隔（秒）：吸人期间**每这么久缩一次**（基准 → 基准×倍率 → 基准），" +
+                 "一直重复到人吸完。")]
+        public float prop3PulseInterval = 0.15f;
+
+        [Tooltip("吐出（跳车）：逐颗错开间隔（秒）")]
+        public float prop3SpitInterval = 0.06f;
+
+        [Tooltip("UFO 自转一圈的时长（秒）；<=0 关掉自转。全程沿自身 Y 轴转，不重置预制体自己的朝向。")]
+        public float prop3SpinSeconds = 1.5f;
+
+        [Tooltip("出场到「人上方」这段里，把 UFO 自身 z 滚转逐渐归 0 的时长（秒）。默认与飞行时长一致。")]
+        public float prop3LevelDuration = 0.45f;
+
+        [Tooltip("每吸一个人，UFO 的缩放脉冲倍率（基准 × 该值 → 回基准）。1.05 = 预制体 scale 2 → 2.1 → 2。")]
+        public float prop3GulpPulse = 1.05f;
+
+        [Tooltip("吸人的终点：UFO 本地坐标。人挂到 UFO 下后逐渐移到这个点（默认 (0,-0.5,0)）。")]
+        public Vector3 prop3SuckLocalTarget = new Vector3(0f, -0.5f, 0f);
+
+        /// <summary>道具3「UFO」演出进行中：期间锁点击、锁再点道具。换关时由 CleanupLevel 复位。</summary>
+        private bool _prop3Playing;
+
+        /// <summary>
+        /// **仅吸人阶段**为 true：管道（逐帧判定）靠它暂停投波，
+        /// 免得"人还没吸完、管道里的蛇就先冒出来"。吸完立刻置 false —— 只卡这一段，不卡整场演出。
+        /// 换关时由 CleanupLevel 复位（协程被 StopAllCoroutines 中止时不走收尾，必须兜底）。
+        /// </summary>
+        private bool _prop3SuckPhase;
+
+        /// <summary>道具3 是否正处于「吸人」阶段（管道据此暂停投波）。</summary>
+        public bool Prop3SuckPhase { get { return _prop3SuckPhase; } }
+
+        /// <summary>当前在场的 UFO（演出中）；停协程时靠它兜底销毁，避免残留。</summary>
+        private GameObject _prop3Ufo;
+
+        /// <summary>
+        /// 挂在 UFO 下的人 + **入舱瞬间的世界朝向**。UFO 全程在自转，靠每帧把世界朝向压回这个冻结值，
+        /// 让人只跟着 UFO 平移、不跟着转（见 <see cref="Prop3LevelAndSpin"/>）。
+        /// </summary>
+        private readonly List<Prop3Rider> _prop3Riders = new List<Prop3Rider>();
+
+        private sealed class Prop3Rider
+        {
+            public PixelItem pixel;
+            public Quaternion worldRotation;
+        }
+
+        /// <summary>道具3「UFO」演出是否进行中。</summary>
+        public bool Prop3Playing { get { return _prop3Playing; } }
+
         /// <summary>
         /// 4 邻偏移（+x / −x / +z / −z）。**必须是 `static readonly` 字段**：
         /// 写成方法内的 `int[] dx = {…}` 会**每次调用都 `newarr` 分配**
@@ -735,7 +816,7 @@ namespace CrowdMatch
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
         public void DoRevive()
         {
-            DOVirtual.DelayedCall(0.6f, () =>
+            DOVirtual.DelayedCall(0.3f, () =>
             {
                 Revive();
                 GameState.GameStart();   // 复活后回到游玩态，继续本关
@@ -940,11 +1021,429 @@ namespace CrowdMatch
             }
         }
 
+        // ===== 道具「强制取出」模式 =====
+
+        /// <summary>
+        /// 进入道具3模式：所有人发光提示，之后点击任意一组都能无视前排连通限制、交给 UFO 搬走。
+        /// 由 GameInnerUI 的道具3按钮调用。道具在**点下这一组、UFO 出发时**才扣（见 <see cref="ExitPropForceMode"/>）。
+        /// </summary>
+        public void EnterPropForceMode()
+        {
+            if (_propForceMode)
+                return;
+
+            // UFO 预制体没配就别让进模式 —— 否则玩家点下去只会白扣道具还把像素销毁掉。
+            // 这是装配疏漏，宁可当场拦下来（并报错），也不要造成"道具吃了、人没了"。
+            if (prop3UfoPrefab == null)
+            {
+                Debug.LogError("[Prop3] GameController.prop3UfoPrefab 未配置（应指向 Assets/Prefabs/UFO.prefab），道具3 已拒绝进入。");
+                return;
+            }
+
+            _propForceMode = true;
+            if (pixelGroup != null)
+                pixelGroup.SetPropForceGlow(true);
+        }
+
+        /// <summary>退出道具「强制取出」模式并恢复常规描边。</summary>
+        /// <param name="consumed">true = 成功送出一组（扣 1 个道具）；false = 玩家取消或换关重置（不扣）。</param>
+        public void ExitPropForceMode(bool consumed)
+        {
+            if (!_propForceMode)
+                return;
+
+            _propForceMode = false;
+            if (pixelGroup != null)
+                pixelGroup.SetPropForceGlow(false);
+
+            if (!consumed)
+                return;
+
+            var ui = UIManager.Instance;
+            if (ui != null && ui.gameInnerUI != null)
+                ui.gameInnerUI.ConsumeRemovePropForce();
+        }
+
+        // ===== 道具3「UFO」演出 =====
+
+        /// <summary>
+        /// 道具3「UFO」：把整组像素吸上 UFO →（若像素**真的落在倍乘门区域内**，按各自倍率补齐分身）→
+        /// 飞到前4排车上方 → 能匹配前4排的当场吐出跳车 → 匹配到更后排的参考复活瞬移上车 →
+        /// 匹配不上任何车的随 UFO 一起销毁并打错误日志 → UFO 飞离消失。
+        ///
+        /// 复用：匹配登记走 <see cref="ContainerGroup.MatchPixelsToCars"/>（它已按「车是否在前 maxOpenRows 排」
+        /// 分好 jumps / disappears），播放走 <see cref="ContainerGroup.PlayBoarding"/>。
+        /// 账目：<c>ProgressPixelCount</c> 在 <see cref="ResolveMatch"/> 里已按同一倍率口径记过，这里**不再记**；
+        /// <c>ClearedPixelCount</c> 仍由每颗真实像素进车时各记一次（与正常流程一致）。
+        /// </summary>
+        private IEnumerator Prop3UfoRoutine(List<PixelItem> group)
+        {
+            if (group == null || group.Count == 0)
+                yield break;
+
+            if (prop3UfoPrefab == null || pixelGroup == null || containerGroup == null)
+            {
+                Debug.LogError("[Prop3] 缺少 prop3UfoPrefab / pixelGroup / containerGroup，道具3 无法演出；这组像素将原地销毁。");
+                for (int i = 0; i < group.Count; i++)
+                    if (group[i] != null)
+                        Destroy(group[i].gameObject);
+                yield break;
+            }
+
+            _prop3Playing = true;
+            _prop3Riders.Clear();   // 每次演出重新登记"乘客"与其冻结朝向
+
+            // ★ 吸人闸门必须在这里就置位，**不能等到"吸人"那一段**：
+            // ResolveMatch 一清完格子，管道下一帧就会看到 TrackEmpty()==true 而放蛇；
+            // 而从那帧到「吸人」之间还隔着出场飞行的 yield（约 0.45s），中间这段就是没有闸门的窗口。
+            // 箱子 / 升降台的释放也已在 ResolveMatch 里按 propForce 推迟（见那里）。
+            _prop3SuckPhase = true;
+
+            var cam = Camera.main;
+
+            // 被点组的中心：用格心换算，避免把正在走位的像素算进平均值
+            int sumCol = 0, sumRow = 0;
+            for (int i = 0; i < group.Count; i++)
+            {
+                sumCol += group[i].gridX;
+                sumRow += group[i].gridZ;
+            }
+            Vector3 groupCenter = pixelGroup.GetWorldPosition(
+                Mathf.RoundToInt((float)sumCol / group.Count),
+                Mathf.RoundToInt((float)sumRow / group.Count));
+
+            Vector3 hoverGroup = groupCenter + Vector3.up * prop3HoverAboveGroup;
+            Vector3 hoverCars = FrontRowsCenter() + Vector3.up * prop3HoverAboveCars;
+
+            var ufo = Instantiate(prop3UfoPrefab);
+            ufo.name = "UFO_Prop3";
+            // 不重置朝向：沿用预制体自己的朝向（美术或摄像机调过就按调好的来）
+            ufo.transform.position = ViewportToWorldAtDepth(cam, prop3EnterViewportY, groupCenter);
+            _prop3Ufo = ufo;
+
+            Vector3 ufoBaseScale = ufo.transform.localScale;   // 吸人脉冲的基准（预制体是 2）
+
+            // 姿态：出场这段把**自身 z 滚转逐渐归 0**（到人上方时已经归正），同时全程沿**自身 Y 轴**匀速自转。
+            // 用协程而不是 DOTween —— DORotate 每帧整写旋转，没法既把 z 插值归零、又持续追加 y；
+            // 位置走 DOMove、缩放走脉冲，rotation 交给这条协程，三者互不干扰。
+            StartCoroutine(Prop3LevelAndSpin(ufo.transform, ufo.transform.rotation));
+
+            // 1) 出场：屏幕下方 → 组正上方
+            yield return ufo.transform.DOMove(hoverGroup, prop3FlyDuration).SetEase(Ease.OutCubic).WaitForCompletion();
+
+            // 2) 吸人 + 倍乘
+            // 整个吸人周期内**每 prop3PulseInterval 缩一次**：脉冲一直重复，人吸完就停（见下面 Kill）。
+            // （吸人闸门 Prop3SuckPhase 已在协程开头置位，覆盖出场飞行那一段）
+            var pulse = Prop3StartPulse(ufo.transform, ufoBaseScale);
+
+            var carried = new List<PixelItem>();
+            for (int i = 0; i < group.Count; i++)
+            {
+                var p = group[i];
+                if (p == null)
+                    continue;
+
+                carried.Add(p);
+                StartCoroutine(Prop3SuckOne(p, ufo.transform));
+
+                // 倍乘：只有**真的落在门区域内**的像素才按**它自己的倍率**复制，不多不少
+                //（嵌套门各门连乘已由 GateMultiplierAt 体现）
+                if (pixelGroup.IsInGateRegion(p.gridX, p.gridZ))
+                {
+                    int mult = Mathf.Max(1, pixelGroup.GateMultiplierAt(p.gridX, p.gridZ));
+                    for (int k = 1; k < mult; k++)
+                    {
+                        var clone = Prop3SpawnClone(p, ufo.transform);
+                        if (clone != null)
+                            carried.Add(clone);
+                    }
+                }
+
+                if (prop3SuckStagger > 0f && i + 1 < group.Count)
+                    yield return new WaitForSeconds(prop3SuckStagger);
+            }
+
+            yield return new WaitForSeconds(prop3SuckDuration);   // 等最后一颗落位并隐藏
+
+            // 吸人结束：停掉重复脉冲并把缩放复位 —— 它可能被杀在半途中，不复位会留下一个鼓着的 UFO
+            if (pulse != null && pulse.IsActive())
+                pulse.Kill();
+            ufo.transform.localScale = ufoBaseScale;
+
+            // 人都吸完了：这时候才让**箱子 / 升降台**把人放出来（它们的释放被 ResolveMatch 推迟到这里）。
+            // 管道不用在这里做 —— 它是逐帧判定，把 _prop3SuckPhase 清掉，下一帧自己就会接着投波。
+            _prop3SuckPhase = false;
+            pixelGroup.TryOpenBoxes();
+            pixelGroup.TryAdvanceElevators();
+            pixelGroup.RefreshExposed();   // 释放后暴露变了
+            RefreshFrame();                // 描边跟着重建
+
+            // 3) UFO → 前4排车上方
+            yield return ufo.transform.DOMove(hoverCars, prop3FlyDuration).SetEase(Ease.InOutSine).WaitForCompletion();
+
+            // 4) 登记：能匹配前4排的 → jumps（吐出来跳车）；匹配到更后排的 → disappears（瞬移）
+            var jumps = new List<ContainerGroup.BoardingEntry>();
+            var disappears = new List<ContainerGroup.BoardingEntry>();
+            var unmatched = containerGroup.MatchPixelsToCars(carried, jumps, disappears);
+
+            // 4a) 吐出：逐颗错开起播。像素此刻就挂在 UFO 下，所以跳车起点正好是 UFO 处
+            for (int i = 0; i < jumps.Count; i++)
+            {
+                var entry = jumps[i];
+                if (entry.pixel == null)
+                    continue;
+                entry.pixel.gameObject.SetActive(true);   // 在 UFO 里是隐藏的；唤醒时 scale 已是原大小
+                containerGroup.PlayBoarding(entry);       // timing 用预制体自身时长
+                if (prop3SpitInterval > 0f && i + 1 < jumps.Count)
+                    yield return new WaitForSeconds(prop3SpitInterval);
+            }
+
+            // 4b) 剩余的：参考复活，瞬间飞到各自车上（DisappearWithPop 会还原大小 → 落定仍是原始大小 0.5）
+            for (int i = 0; i < disappears.Count; i++)
+            {
+                var entry = disappears[i];
+                if (entry.pixel == null)
+                    continue;
+                entry.pixel.gameObject.SetActive(true);
+                containerGroup.PlayBoarding(entry);
+            }
+
+            // 5) 匹配不上任何车的：随 UFO 一起销毁 + 打日志（正常关卡不该出现，出现即关卡数据有问题）
+            if (unmatched.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("[Prop3] 第 ").Append(GameData.CurrentLevel)
+                  .Append(" 关有 ").Append(unmatched.Count)
+                  .Append(" 颗像素找不到同色车，将随 UFO 一起销毁。颜色：");
+                for (int i = 0; i < unmatched.Count; i++)
+                    sb.Append(unmatched[i] != null ? unmatched[i].colorId.ToString() : "?").Append(' ');
+                Debug.LogError(sb.ToString());
+            }
+
+            // 6) UFO 飞离（屏幕上方）→ 销毁（未匹配的像素挂在它下面一起走）
+            yield return ufo.transform.DOMove(ViewportToWorldAtDepth(cam, prop3ExitViewportY, hoverCars),
+                prop3FlyDuration).SetEase(Ease.InCubic).WaitForCompletion();
+
+            for (int i = 0; i < unmatched.Count; i++)
+                if (unmatched[i] != null)
+                    Destroy(unmatched[i].gameObject);
+            if (ufo != null)
+            {
+                ufo.transform.DOKill();   // 清掉位置 / 脉冲 tween（自转是协程，靠 while 里的 ufo != null 自行退出）
+                Destroy(ufo.gameObject);
+            }
+
+            _prop3Ufo = null;
+            _prop3Playing = false;
+            _prop3Riders.Clear();
+        }
+
+        /// <summary>
+        /// UFO 姿态：在 <see cref="prop3LevelDuration"/> 内把**自身 z 滚转**逐渐归 0（飞到人上方时已经归正），
+        /// 同时全程沿**自身 Y 轴**匀速自转（<see cref="prop3SpinSeconds"/> 一圈，&lt;=0 关掉自转）。
+        ///
+        /// 用协程而不是 DOTween：<c>DORotate</c> 每帧整写旋转，没法既把 z 插值归零、又持续追加 y。
+        /// 位置走 DOMove、缩放走脉冲，rotation 交给这条协程，三者互不干扰。
+        /// UFO 被销毁或演出结束时本条自然退出。
+        /// </summary>
+        private IEnumerator Prop3LevelAndSpin(Transform ufo, Quaternion startRot)
+        {
+            if (ufo == null)
+                yield break;
+
+            // 目标姿态：保留 x / y，只把 z 滚转归 0
+            Vector3 e = startRot.eulerAngles;
+            Quaternion leveled = Quaternion.Euler(e.x, e.y, 0f);
+
+            float levelDur = Mathf.Max(0.01f, prop3LevelDuration);
+            float t = 0f;
+            float spin = 0f;
+
+            while (ufo != null && _prop3Playing)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / levelDur);
+                if (prop3SpinSeconds > 0.01f)
+                    spin += 360f * Time.deltaTime / prop3SpinSeconds;
+
+                // 先插值到「归正」姿态，再在它的基础上绕自身 Y 追加自转
+                ufo.rotation = Quaternion.Slerp(startRot, leveled, k) * Quaternion.Euler(0f, spin, 0f);
+
+                // 紧接着把挂上来的人的**世界朝向**压回入舱时的值 —— 否则他们会跟着 UFO 一起转。
+                // 必须写在 UFO 旋转之后（同一帧、顺序确定），否则会被上面这行覆盖掉。
+                for (int i = 0; i < _prop3Riders.Count; i++)
+                {
+                    var r = _prop3Riders[i];
+                    if (r.pixel == null)
+                        continue;
+                    var pr = r.pixel.transform;
+                    if (pr.parent != ufo)
+                        continue;   // 已经上车 / 已脱离 UFO：不再管
+                    pr.rotation = r.worldRotation;
+                }
+
+                yield return null;
+            }
+        }
+
+        /// <summary>
+        /// UFO 缩放脉冲（**重复**）：基准 → 基准×<see cref="prop3GulpPulse"/> → 基准，每
+        /// <see cref="prop3PulseInterval"/> 一轮，一直重复到调用方 Kill。
+        /// 用于「整个吸人周期内每 0.15s 缩一次」。
+        ///
+        /// 返回这个 tween：吸人阶段结束后由调用方 Kill 并把缩放复位（它可能被杀在半途中）。
+        /// </summary>
+        private Tweener Prop3StartPulse(Transform ufo, Vector3 baseScale)
+        {
+            if (ufo == null || prop3GulpPulse <= 1.0001f)
+                return null;
+
+            float half = Mathf.Max(0.01f, prop3PulseInterval * 0.5f);
+            ufo.localScale = baseScale;   // 起点硬复位，避免漂移
+            return ufo.DOScale(baseScale * prop3GulpPulse, half)
+                      .SetLoops(-1, LoopType.Yoyo)
+                      .SetEase(Ease.OutQuad);
+        }
+
+        /// <summary>
+        /// 吸走一颗像素：挂到 UFO 下，直线移到 UFO 的 <see cref="prop3SuckLocalTarget"/> 处（默认 (0,-0.5,0)），
+        /// 到位后隐藏 —— 随 UFO 飞行 / 自转时不参与渲染，投喂前再唤醒。
+        ///
+        /// ⚠️ **按世界坐标逐帧写**，不用 <c>DOLocalMove</c>：
+        /// UFO 全程自转，局部位移会被父物体带着走成**圆弧**（人绕着 UFO 转一大圈），朝向也被带转。
+        /// 每帧写 <c>tr.position</c> 让路径是世界空间里的**直线**；<c>tr.rotation</c> 压回入舱瞬间的朝向。
+        /// （目标点在 UFO 本地 Y 轴上，所以自转不影响它的世界位置，起手算一次即可。）
+        ///
+        /// **全程不改缩放**：人保持原本大小（本工程 0.5，即 <c>PixelGroup.unitSize</c>），
+        /// 所以投喂时无论是 <c>DisappearWithPop</c> 还是跳车，拿到的都是正确大小，落定还是 0.5。
+        /// </summary>
+        private IEnumerator Prop3SuckOne(PixelItem pixel, Transform ufo)
+        {
+            if (pixel == null || ufo == null)
+                yield break;
+
+            var tr = pixel.transform;
+            tr.DOKill();   // 清掉可能还在跑的闲置归位 tween，避免和下面抢同一个 transform
+
+            // 入舱瞬间的世界朝向：整个吸 + 带飞过程都把它压回来（乘客表也让姿态协程持续维持）
+            Quaternion frozen = tr.rotation;
+            _prop3Riders.Add(new Prop3Rider { pixel = pixel, worldRotation = frozen });
+
+            Vector3 startWorld = tr.position;
+            Vector3 endWorld = ufo.TransformPoint(prop3SuckLocalTarget);
+
+            tr.SetParent(ufo, true);   // 先挂上去（之后要随它飞向车阵）；位置与朝向下面每帧按世界坐标压住
+
+            float dur = Mathf.Max(0.01f, prop3SuckDuration);
+            float t = 0f;
+            while (t < dur)
+            {
+                if (tr == null)
+                    yield break;
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                float e = k * k * k;   // InCubic（与原来的缓动一致）
+                tr.position = Vector3.Lerp(startWorld, endWorld, e);   // 世界空间直线：不受 UFO 自转影响
+                tr.rotation = frozen;
+                yield return null;
+            }
+
+            if (tr != null)
+            {
+                tr.position = endWorld;
+                tr.rotation = frozen;
+
+                // 进舱那一刻 = 人上传送带的反馈：音效 + 轻震动
+                // （与 ConveyorBeltZone 里「进入传送带」的处理完全一致，含空判断）
+                if (AudioManager.Instance != null)
+                    AudioManager.Instance.Play("OnBelt");
+                if (GameManager.Instance != null)
+                    GameManager.Instance.TriggerVibrate(0);
+
+                tr.gameObject.SetActive(false);   // 到位后藏起来，投喂前再唤醒
+            }
+        }
+
+        /// <summary>
+        /// 倍乘分身：用 <see cref="PixelGroup.SpawnPixel"/> 生成同色（同问号）像素，按正常大小挂在 UFO 下并隐藏
+        /// —— 与本体一致，全程不改缩放（见 <see cref="Prop3SuckOne"/>）。
+        /// </summary>
+        private PixelItem Prop3SpawnClone(PixelItem src, Transform ufo)
+        {
+            var cfg = GameManager.Instance != null ? GameManager.Instance.colorConfig : null;
+            var clone = pixelGroup.SpawnPixel(src.gridX, src.gridZ, src.colorId, cfg,
+                scaleZero: false, isQuestion: src.isQuestion);
+            if (clone == null)
+                return null;
+
+            clone.transform.SetParent(ufo, true);
+            clone.transform.localPosition = Vector3.zero;
+            clone.SetClickable(false);
+            clone.SetWalking(false);
+            clone.gameObject.SetActive(false);
+
+            // 和本体一样登记：克隆挂在 UFO 下也不该跟着转
+            _prop3Riders.Add(new Prop3Rider { pixel = clone, worldRotation = clone.transform.rotation });
+            return clone;
+        }
+
+        /// <summary>前 <c>maxOpenRows</c> 排车的中心（世界坐标）—— UFO 投喂时的悬停点。没有车时退回容器组自身位置。</summary>
+        private Vector3 FrontRowsCenter()
+        {
+            if (containerGroup == null)
+                return Vector3.zero;
+
+            var grid = containerGroup.grid;
+            int rows = Mathf.Min(containerGroup.maxOpenRows, containerGroup.rows);
+            Vector3 sum = Vector3.zero;
+            int n = 0;
+
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < containerGroup.columns; c++)
+                {
+                    var car = grid != null ? grid[c, r] : null;
+                    if (car == null)
+                        continue;
+                    sum += car.transform.position;
+                    n++;
+                }
+
+            return n > 0 ? sum / n : containerGroup.transform.position;
+        }
+
+        /// <summary>
+        /// 视口坐标 → 世界坐标，深度取 <paramref name="depthRef"/> 距相机的距离 ——
+        /// 这样"屏幕下方飞出的 UFO"落在棋盘所在平面附近，而不是贴在相机近裁剪面上。
+        /// 相机缺失时退化为参照点上下偏移，保证不崩。
+        /// </summary>
+        private static Vector3 ViewportToWorldAtDepth(Camera cam, float viewportY, Vector3 depthRef)
+        {
+            if (cam == null)
+                return depthRef + Vector3.up * (viewportY < 1f ? -6f : 6f);
+
+            float depth = Mathf.Max(1f, Vector3.Dot(depthRef - cam.transform.position, cam.transform.forward));
+            return cam.ViewportToWorldPoint(new Vector3(0.5f, viewportY, depth));
+        }
+
         /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
         private void CleanupLevel()
         {
             StopAllCoroutines();
             DestroyPendingRevivePixels();   // 复活序列被打断：清掉队列里还没起播的像素
+
+            // 换关作废道具模式：这关没用掉就不扣道具
+            ExitPropForceMode(false);
+
+            // 道具3 UFO 演出：上面的 StopAllCoroutines 会中止协程，但**不会执行协程里的收尾**，
+            // 所以残留的 UFO（及其下面还挂着的像素）要在这里兜底销毁，并把状态复位。
+            if (_prop3Ufo != null)
+            {
+                Destroy(_prop3Ufo);
+                _prop3Ufo = null;
+            }
+            _prop3Playing = false;
+            _prop3Riders.Clear();
+            _prop3SuckPhase = false;   // 协程被 StopAllCoroutines 中止时不走收尾 —— 这个标志必须兜底复位，否则管道永远不放波
 
             foreach (var item in gatheredItems)
             {
@@ -1165,6 +1664,14 @@ namespace CrowdMatch
                     Debug.Log("[Click] 鼠标在UI上，跳过物理射线");
                 return;
             }
+
+            // 道具3「UFO」演出期间锁点击：那组像素正被 UFO 搬走 / 投喂，再点会打乱状态
+            if (_prop3Playing)
+            {
+                if (debugClickLog)
+                    Debug.Log("[Click] 道具3 UFO 演出中，忽略点击");
+                return;
+            }
             // 提取进行中仍允许点击：每次匹配作为独立批次，各自独立寻路（组间可穿模），无需等待上一批离场。
             if (pixelGroup == null || gatherPoint == null || Camera.main == null)
             {
@@ -1370,9 +1877,14 @@ namespace CrowdMatch
             bool singleRemove = recordMode && Input.GetKey(KeyCode.S);
             List<PixelItem> matched = singleRemove ? new List<PixelItem> { start } : FloodFill(start);
 
+            // 道具「强制取出」：本批要无视阻挡直接飞出去。先记下来 —— 后面的 ExitPropForceMode
+            // 会清掉 _propForceMode，而 EnterBatch 在那之后才调用，不能那时再读。
+            bool propForce = _propForceMode;
+
             // 只有能通过空/组内格连通到首排（row 0）的同色组才可移出；否则点击无效（组被其他像素完全包围）
             // 记录模式不做此限制：被包围的组也允许点击（记录的是取出顺序，与组能否寻路无关）
-            if (!recordMode && !CanReachFront(matched))
+            // 道具「强制取出」模式下跳过这道限制：点哪组都能送出（木箱/冰冻/堆积门槛仍在 HandleClick 里挡着）
+            if (!recordMode && !propForce && !CanReachFront(matched))
             {
                 if (debugClickLog)
                     Debug.Log("[Click] 点击无效：同色组（大小 " + matched.Count + "，颜色 " + start.colorId +
@@ -1429,15 +1941,26 @@ namespace CrowdMatch
                 // 口径与记录模式按倍率补记 N 份、与 PixelGroup.CollectPlanningSources 同源。
                 GameData.ProgressPixelCount += Mathf.Max(1, pixelGroup.GateMultiplierAt(item.gridX, item.gridZ));
                 item.SetExposed(false);
+                item.SetPropGlow(false);   // 道具高亮一并复位：它已离格，不该顶着描边走上传送带
                 item.SetClickable(false);
                 if (!recordMode)
-                    item.SetWalking(true);   // 记录模式下像素随即原地消失，不需要走动画
+                    item.SetWalking(!propForce);   // 道具3：被 UFO 搬走，不播走路（其余照旧走上传送带）
             }
+
+            // 道具「强制取出」：一组成功送出即算用掉 → 退出模式并扣 1 个道具
+            if (_propForceMode)
+                ExitPropForceMode(true);
 
             // 匹配移除后，先让箱子/升降台释放像素占格（占格同步、动画异步），
             // 再统一刷新暴露状态：避免「移除后短暂暴露的像素紧接着被释放像素封路」却已经站起。
-            pixelGroup.TryOpenBoxes();
-            pixelGroup.TryAdvanceElevators();
+            //
+            // ⚠️ 道具3（propForce）例外：箱子 / 升降台是"人"的来源，它们的释放**推迟到吸人之后**
+            // （见 Prop3UfoRoutine）—— 否则 UFO 还在吸这组人，盒子里 / 升降台里的人就先冒出来了。
+            if (!propForce)
+            {
+                pixelGroup.TryOpenBoxes();
+                pixelGroup.TryAdvanceElevators();
+            }
             pixelGroup.RefreshExposed();
             RefreshFrame();
 
@@ -1481,9 +2004,15 @@ namespace CrowdMatch
             if (conveyorZone != null && pixelGroup.IsGridEmpty() && !pixelGroup.HasPendingProducers())
                 conveyorZone.NotifyGridEmptied();
 
+            // 道具3「UFO」：整组交给 UFO 演出（吸走 → 投喂前4排 → 剩余瞬移上车）。
+            // **不走网格寻路、不进传送带**，所以不调 EnterBatch —— 人由 UFO 直接送进车。
+            if (propForce)
+            {
+                StartCoroutine(Prop3UfoRoutine(matched));
+            }
             // 有缓冲区：进入提取阶段（网格寻路离开）；像素离开后后方不再补位
             // 否则：回退到旧的直接散布聚集
-            if (crowdBuffer != null)
+            else if (crowdBuffer != null)
             {
                 crowdBuffer.EnterBatch(matched, pixelGroup);
             }

@@ -93,6 +93,13 @@ namespace CrowdMatch
                  "因此由「离场像素在网格里长距离飞行」引起的重合会明显减少。保留此开关用于对比两种离场时机")]
         public bool exitOnlyFromRow0 = false;
 
+        [Header("道具「强制取出」飞出动效")]
+        [Tooltip("抬起高度 = 网格行距 CellSizeZ 的倍数。像素先原地升到这个高度、平飞越过第一排，再落地。")]
+        public float propFlyHeightInCells = 2.5f;
+
+        [Tooltip("升起 / 落地的垂直速度（世界单位/秒）")]
+        public float propFlyVerticalSpeed = 8f;
+
         [Header("释放")]
         [Tooltip("距缺口中心多近触发释放（缺口已封口，需 ≥ radius + wallThickness/2，否则贴墙像素够不到释放范围、卡死）")]
         public float releaseRadius = 0.6f;
@@ -133,6 +140,12 @@ namespace CrowdMatch
 
             public bool exiting;        // 已离开网格、正在移向入口边
 
+            // 道具「强制取出」的飞出动效：升起 → 平飞到入口（越过第一排）→ 落地
+            public bool flying;         // 本像素走三态飞行动作，而不是地面平移
+            public int flyPhase;        // 0 = 升起，1 = 平飞，2 = 落地
+            public float flyGroundY;    // 起飞前的地面高度（落地回到这里）
+            public float flyCruiseY;    // 平飞高度 = flyGroundY + 抬起高度
+
             // 倍乘门（离开门格时按该门倍数裂变）
             public GateItem gate;         // 正在处理的门；不在门格上时为 null
             public int gateBudget;        // 在这道门格里还要裂变出几个分身（首次进入门格时初始化为 倍数−1）
@@ -158,6 +171,12 @@ namespace CrowdMatch
             /// 门格在半路变成障碍，把已经进门的像素卡死（门上的分身也不是区域格，更算不出来）。
             /// </summary>
             public HashSet<GateItem> passGates = new HashSet<GateItem>();
+
+            /// <summary>
+            /// 道具「强制取出」批次：允许无视前方阻挡直接离场。
+            /// 否则被其他像素围住的组永远走不出去（见 <see cref="CanExit"/>）。
+            /// </summary>
+            public bool forceExit;
         }
 
         /// <summary>提取中的批次（每次匹配一组 = 一个独立批次）</summary>
@@ -329,7 +348,7 @@ namespace CrowdMatch
         /// 一批匹配像素离开网格时调用：按前到后顺序在网格内寻路（BFS）离开，
         /// 只走已腾出或"本 tick 即将腾出"的格子，抵达入口边后进入物理阶段。
         /// </summary>
-        public void EnterBatch(List<PixelItem> matched, PixelGroup group)
+        public void EnterBatch(List<PixelItem> matched, PixelGroup group, bool forceExit = false)
         {
             if (matched == null || matched.Count == 0 || group == null)
                 return;
@@ -338,6 +357,7 @@ namespace CrowdMatch
             _extractTickInterval = group.CellSizeZ / Mathf.Max(0.0001f, extractSpeed);
 
             var batch = new Batch();
+            batch.forceExit = forceExit;   // 道具「强制取出」：本批无视前方阻挡直接离场
             batch.matchedOccupied = new bool[group.columns, group.TotalRows];
             batch.tickTimer = 0f;
             // 来路身份：本批来自哪些门的闭合区域内 → 只有这些门格对它可通行（门对区域外像素等同墙）。
@@ -580,6 +600,26 @@ namespace CrowdMatch
 
                 foreach (var st in exiting)
                 {
+                    // 道具「强制取出」：走「升起 → 平飞 → 落地」三态动作，落地后才交给物理阶段
+                    if (st.flying)
+                    {
+                        if (UpdateFlyOut(st, entrance, perp, dt))
+                        {
+                            st.flying = false;
+                            if (st.item != null)
+                            {
+                                st.item.SetWalking(true);   // 落地恢复走路，进物理阶段挤着排队
+                                batch.extracting.Remove(st);
+                                EnterPhysical(st.item);
+                            }
+                            else
+                            {
+                                batch.extracting.Remove(st);
+                            }
+                        }
+                        continue;
+                    }
+
                     // 位置读一次就够：算目标 / 排队 / 移动这三步之间没有任何写入，直到 MoveToward 落位才改 transform；
                     // 之后再用新值判一次到达（避免同一个像素一帧里反复走「托管→native」的 transform.position）。
                     Vector3 pos = st.item.transform.position;
@@ -873,6 +913,18 @@ namespace CrowdMatch
                 st.waitCount = 0;
                 st.moving = false;
                 st.exiting = true;
+
+                // 道具「强制取出」：本批是飞出去的 —— 原地升起 → 平飞越过第一排 → 落地，
+                // 全程抬起，避免从别的像素身上平移穿透。
+                if (batch.forceExit && st.item != null)
+                {
+                    st.flying = true;
+                    st.flyPhase = 0;
+                    st.flyGroundY = st.item.transform.position.y;
+                    float cellZ = _extractGroup != null ? _extractGroup.CellSizeZ : 1f;
+                    st.flyCruiseY = st.flyGroundY + Mathf.Max(0f, propFlyHeightInCells) * cellZ;
+                    st.item.SetWalking(false);   // 空中不播走路，落地后再切回
+                }
             }
             foreach (var st in movers)
             {
@@ -912,6 +964,16 @@ namespace CrowdMatch
         /// <summary>某格能否直接沿 +Z 退出网格（前方 = 更小的 row，无障碍、非"即将腾出"、且未被本 tick 抢占）</summary>
         private bool CanExit(int col, int row, bool[,] vacated, bool[,] claimed, Batch batch, int minTrackRow)
         {
+            // 道具「强制取出」批次：无视前方阻挡直接离场。被其他像素围住的组必须能飞出去，
+            // 否则道具就白用了 —— 走位寻路那条路对它们永远走不通。
+            // 倍乘门那道守卫仍然保留：区域内的像素必须走到门格，否则裂变不触发、进度口径会失真。
+            if (batch != null && batch.forceExit)
+            {
+                if (_extractGroup != null && _extractGroup.MustWalkToGate(col, row, out _))
+                    return false;
+                return true;
+            }
+
             // 【离场时机 · 可选模式】exitOnlyFromRow0：只有站在最前排（row 0）才允许离场 —— 先把像素
             // 一路导到最前排，再从那里飞出去。关上（默认）是现状：同列前方全空就能在任意 row 直接离场。
             if (exitOnlyFromRow0 && row != 0)
@@ -1300,6 +1362,65 @@ namespace CrowdMatch
 
             // 移向入口边：z 正方向匀速朝向移动方向
             RotateToward(st.item, dir);
+        }
+
+        /// <summary>
+        /// 道具「强制取出」的飞出动效推进：原地升起 → 平飞到入口（越过第一排）→ 落地。
+        /// 全程抬在人群之上，所以不会像地面平移那样从别的像素身上穿透过去。
+        /// 返回 true 表示已经落地，可以交给物理阶段排队。
+        /// </summary>
+        private bool UpdateFlyOut(ExtractState st, Vector3 entrance, Vector3 perp, float dt)
+        {
+            var item = st.item;
+            if (item == null)
+                return true;
+
+            Vector3 pos = item.transform.position;
+
+            switch (st.flyPhase)
+            {
+                case 0:   // 升起：原地抬到平飞高度，不做水平位移
+                    pos.y += propFlyVerticalSpeed * dt;
+                    if (pos.y >= st.flyCruiseY)
+                    {
+                        pos.y = st.flyCruiseY;
+                        st.flyPhase = 1;
+                    }
+                    item.transform.position = pos;
+                    return false;
+
+                case 1:   // 平飞：朝入口飞，到达入口（= 已越过第一排）后开始下落
+                {
+                    Vector3 target = ComputeEntryTarget(pos, entrance, perp);
+                    Vector3 to = target - pos;
+                    to.y = 0f;
+                    float dist = to.magnitude;
+
+                    if (dist <= ArriveEpsilon)
+                    {
+                        st.flyPhase = 2;
+                        return false;
+                    }
+
+                    Vector3 dir = to / dist;
+                    pos += dir * Mathf.Min(extractSpeed * dt, dist);
+                    pos.y = st.flyCruiseY;
+                    item.transform.position = pos;
+                    RotateToward(item, dir);
+                    return false;
+                }
+
+                default:  // 落地：降回起飞前的地面高度
+                    pos.y -= propFlyVerticalSpeed * dt;
+                    if (pos.y <= st.flyGroundY)
+                    {
+                        pos.y = st.flyGroundY;
+                        item.transform.position = pos;
+                        return true;
+                    }
+                    item.transform.position = pos;
+                    return false;
+            }
         }
 
         /// <summary>匀速旋转像素使 z 正方向朝向指定世界方向（XZ 平面，角速度由 extractRotateSpeed 决定）。</summary>

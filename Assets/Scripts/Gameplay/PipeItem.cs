@@ -305,6 +305,14 @@ namespace CrowdMatch
                 return;
             if (Group == null)
                 return;
+
+            // 道具3「吸人阶段」暂停投波：那组像素正被 UFO 吸走、网格已腾空，
+            // 此时放任 TrackEmpty() 通过会让管道立刻开始放蛇 —— 出现「人还没吸上去，管道里的蛇先冒出来」。
+            // 只卡吸人这一段：吸完（Prop3SuckPhase 置 false）下一帧就照常继续，没放出去的波次不会丢（_waveIndex 未动）。
+            var gc = GameController.Instance;
+            if (gc != null && gc.Prop3SuckPhase)
+                return;
+
             if (_spawning)
                 return;
             if (_waveIndex >= colors.Count)

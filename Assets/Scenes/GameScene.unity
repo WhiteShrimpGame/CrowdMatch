@@ -484,6 +484,8 @@ MonoBehaviour:
   extractRotateSpeed: 360
   entryQueueSpacing: 0.5
   exitOnlyFromRow0: 0
+  propFlyHeightInCells: 2.5
+  propFlyVerticalSpeed: 8
   releaseRadius: 0.8
   minReleaseInterval: 0.3
   releaseSpeed: 8
@@ -1317,7 +1319,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 4
+      value: 3.82
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalPosition.y
@@ -1325,7 +1327,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 18
+      value: 18.5
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalRotation.w
@@ -1859,6 +1861,20 @@ MonoBehaviour:
   debugClickLog: 1
   debugFailLog: 1
   gatheredItems: []
+  prop3UfoPrefab: {fileID: 469491375844441990, guid: 1f49239e32c3fa14bb03e34afb440e24, type: 3}
+  prop3EnterViewportY: -0.25
+  prop3ExitViewportY: 1.3
+  prop3FlyDuration: 0.45
+  prop3HoverAboveGroup: 4
+  prop3HoverAboveCars: 5
+  prop3SuckDuration: 0.25
+  prop3SuckStagger: 0.05
+  prop3PulseInterval: 0.15
+  prop3SpitInterval: 0.06
+  prop3SpinSeconds: 1.5
+  prop3LevelDuration: 0.45
+  prop3GulpPulse: 1.1
+  prop3SuckLocalTarget: {x: 0, y: -0.5, z: 0}
 --- !u!4 &1669523324
 Transform:
   m_ObjectHideFlags: 0
