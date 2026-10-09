@@ -26,8 +26,34 @@ namespace CrowdMatch
         [Tooltip("显示聚集点单位数量的 UI 文本")]
         public Text gatherCountText;
 
+        /*[Tooltip("聚集数量的机械卷轴（十位 + 个位，0~30）；留空则只用上面的文本。" +
+                 "挂上后只在数值变化时驱动它，切关时直接落位不滚")]
+        public DoubleDigitRoller gatherCountRoller;*/
+
         [Tooltip("实时显示关卡进度的 UI 文本（形如 45%）；口径与复活 / 失败面板的进度条完全一致，见 GameData.ProgressPercent")]
         public Text progressText;
+
+        [Tooltip("显示当前关卡文本（如「北京」）的 UI 文本；留空则不更新。文本取自 GameManager.levelDataConfig 的 levelTexts / levelTextsLoop")]
+        public Text levelNameText;
+
+        [Header("关卡文本入场动画")]
+        [Tooltip("入场动画作用的 3D 物体；留空则用 levelNameText 的父物体的父物体（即祖父物体）")]
+        public Transform levelNameTextRoot;
+
+        [Tooltip("切关后等多久才开始播入场动画（秒）；0 = 立即开始")]
+        public float levelTextIntroDelay = 0.1f;
+
+        [Tooltip("父物体 y 上升 1 单位的时长（秒）")]
+        public float levelTextRiseDuration = 0.3f;
+
+        [Tooltip("父物体自转 3 圈的时长（秒）")]
+        public float levelTextRotateDuration = 0.6f;
+
+        [Tooltip("父物体自转的缓动；慢快慢要明显就选更陡的 InOutQuad / InOutCubic / InOutQuart（InOutSine 最平）")]
+        public Ease levelTextRotateEase = Ease.InOutCubic;
+
+        [Tooltip("父物体 y 落下 1 单位的时长（秒）")]
+        public float levelTextFallDuration = 0.3f;
 
         [Tooltip("管理的 PixelGroup，留空会自动查找")]
         public PixelGroup pixelGroup;
@@ -75,6 +101,25 @@ namespace CrowdMatch
         [Tooltip("复活时在传送带上保留的像素数量（其余溢出像素直接匹配后排车）")]
         public int reviveKeepBeltCount = 10;
 
+        [Tooltip("复活跳跃组每颗之间起播的固定间隔（秒）。0 = 同帧全部起播；消失组不走间隔，在 t=0 一次性播完")]
+        public float reviveInterval = 0.06f;
+
+        [Header("复活表现 · 单颗时长（只影响复活，不动正常玩法）")]
+        [Tooltip("消失·放大阶段时长（秒）—— 只覆盖复活调用的 DisappearWithPop，不动开盖 / 木箱摘封条")]
+        public float reviveDisappearPopDuration = 0.2f;
+
+        [Tooltip("消失·缩小阶段时长（秒）—— 同上")]
+        public float reviveDisappearShrinkDuration = 0.2f;
+
+        [Tooltip("跳跃上车时长（秒）—— 只覆盖复活，不动车预制体上的 boardJumpDuration")]
+        public float reviveJumpDuration = 0.35f;
+
+        [Tooltip("落地弹性放大时长（秒）—— 只覆盖复活")]
+        public float reviveElasticScaleDuration = 0.1f;
+
+        [Tooltip("弹性复原时长（秒）—— 只覆盖复活")]
+        public float reviveElasticRecoverDuration = 0.15f;
+
         [Header("堆积")]
         [Tooltip("堆积进入限制：累计 2 次后，未进传送带球数小于等于此值仍放行点击")]
         public int overflowPendingLimit = 9;
@@ -96,6 +141,12 @@ namespace CrowdMatch
         private int _recordedCount;       // 当前记录文件已写入的像素数
         private bool _transitioning;
 
+        /// <summary>本次复活的**跳跃**队列（匹配与座位都已定好，只等按次序起播）；播完或被打断时置空。</summary>
+        private List<ContainerGroup.BoardingEntry> _reviveJumpQueue;
+
+        /// <summary>复活跳跃队列正在播放：期间挡住失败判定（见 <see cref="TryCheckFail"/>）。</summary>
+        private bool _revivePlaying;
+
         /// <summary>本关是否已经宣告过胜利。胜利是事件驱动的，用它防重入；进关时复位（见 <see cref="InitLevel"/>）。</summary>
         private bool _winDeclared;
 
@@ -108,6 +159,30 @@ namespace CrowdMatch
         /// <summary>点击射线检测使用的层遮罩（「Click」层）。</summary>
         private int _clickMask;
 
+        /// <summary>
+        /// 4 邻偏移（+x / −x / +z / −z）。**必须是 `static readonly` 字段**：
+        /// 写成方法内的 `int[] dx = {…}` 会**每次调用都 `newarr` 分配**
+        /// （实测：Roslyn 的 blob 缓存只对静态字段的常量初始化生效，对局部字面量不生效）。
+        /// 顺序不要重排 —— BFS 的访问顺序决定了返回列表的元素顺序，下游的动画次序依赖它。
+        /// </summary>
+        private static readonly int[] Dx4 = { 1, -1, 0, 0 };
+        private static readonly int[] Dz4 = { 0, 0, 1, -1 };
+
+        /// <summary>关卡文本入场动画的父物体（3D 物体）；懒解析一次，见 <see cref="CacheLevelTextRoot"/>。</summary>
+        private Transform _levelTextRoot;
+
+        /// <summary>父物体的初始位姿：每次起播前复位到它，避免上一次动画被杀在半空时从错的位置起播。</summary>
+        private Vector3 _levelTextRootBasePos;
+        private Quaternion _levelTextRootBaseRot;
+        private bool _levelTextRootCached;
+
+        /// <summary>正在播放的入场序列；重入时先 Kill，避免切关时两套动画同时改同一个 Transform。</summary>
+        private Sequence _levelTextSeq;
+
+        /// <summary>上一次写进聚集数量滚轮的值。滚轮必须只在数值变化时驱动：每帧都调 SetTargetNumber 会每帧
+        /// Kill 上一段 tween 再重开，轮子永远滚不到终点，只剩原地抖。</summary>
+        private int _lastGatherRollerCount;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -116,6 +191,12 @@ namespace CrowdMatch
                 return;
             }
             Instance = this;
+
+            // 文本不再在这里隐藏：入场动画一开头就要显示「上一关的文本」（见 PlayLevelTextIntro）。
+            // 想恢复「动画跑完才出现」的旧行为，把下面这段注释放开、并在动画末尾再 SetActive(true)。
+            /*if (levelNameText != null)
+                levelNameText.gameObject.SetActive(false);*/
+            CacheLevelTextRoot();
         }
 
         private void Start()
@@ -181,6 +262,11 @@ namespace CrowdMatch
             // 而 SetCovered 是幂等的（同值直接返回），事后再改这个开关不会重刷。
             pixelGroup.recordRevealCrates = recordMode;
 
+            // 关卡加载期间抑制「同色连成一片」惊讶表情：随后的 RebuildGrid 与首次 RefreshExposed 会把
+            // 开局就贴着首排 / 连着出口空格的问号像素当场揭晓 —— 那不是动态事件，不该撒一片表情。
+            // 必须在 LevelLoader.Apply **之前**写入（那一步的 RebuildGrid 与随后的 RefreshExposed 都会读它）。
+            pixelGroup.suppressMergeSurprise = true;
+
             LevelLoader.Apply(pixelGroup, containerGroup, data, gm != null ? gm.colorConfig : null);
 
             // 建绳必须在 Apply 之后（依赖已重建的网格与车的列位置）；洗牌开启时不建绳、绳组不生效。
@@ -189,6 +275,9 @@ namespace CrowdMatch
                 containerGroup.BuildRopes(!data.container.lockContainer);
 
             pixelGroup.RefreshExposed();
+
+            // 开局的问号揭晓已经过去了：复位抑制开关，之后的动态事件照常判定
+            pixelGroup.suppressMergeSurprise = false;
             RefreshFrame();
 
 #if UNITY_EDITOR
@@ -207,6 +296,144 @@ namespace CrowdMatch
             //更新道具状态
             var gp= UIManager.Instance.gameInnerUI;
             gp.UpdateCurrentButtonInfo();
+
+            RefreshLevelText();
+
+            /*// 聚集数量卷轴：切关直接落位（不放进位/借位动画），否则会从上一关的数字一路滚过来
+            if (gatherCountRoller != null)
+            {
+                _lastGatherRollerCount = CurrentGatherCount();
+                gatherCountRoller.SetNumberImmediate(_lastGatherRollerCount);
+            }*/
+        }
+
+        /// <summary>
+        /// 按当前关卡刷新关卡文本：动画开头先显示上一关的文本（第一关为空白），转过 180° 后再换成当前关卡的文本。
+        /// </summary>
+        private void RefreshLevelText()
+        {
+            if (levelNameText == null)
+                return;
+
+            int level = GameData.CurrentLevel;
+            PlayLevelTextIntro(GetLevelText(level), level > 1 ? GetLevelText(level - 1) : string.Empty);
+        }
+
+        /// <summary>取指定关卡的文本；关卡配置缺失、没有这一关、或该关没配文本时返回空串。下标口径与关卡 JSON 一致（含循环关）。</summary>
+        private string GetLevelText(int level)
+        {
+            var gm = GameManager.Instance;
+            LevelDataConfig config = gm != null ? gm.levelDataConfig : null;
+            return config != null ? config.GetLevelText(level) : string.Empty;
+        }
+
+        /// <summary>写关卡文本；对象若被别处关掉了顺手打开，避免文本整段不显示。</summary>
+        private void SetLevelNameText(string text)
+        {
+            if (levelNameText == null)
+                return;
+
+            if (!levelNameText.gameObject.activeSelf)
+                levelNameText.gameObject.SetActive(true);
+            levelNameText.text = text ?? string.Empty;
+        }
+
+        /// <summary>解析入场动画作用的 3D 物体并记下初始位姿；未指定 <see cref="levelNameTextRoot"/> 时用文本的父物体的父物体。</summary>
+        private void CacheLevelTextRoot()
+        {
+            if (_levelTextRootCached || levelNameText == null)
+                return;
+
+            Transform parent = levelNameText.transform.parent;
+            _levelTextRoot = levelNameTextRoot != null
+                ? levelNameTextRoot
+                : (parent != null ? parent.parent : null);
+            if (_levelTextRoot == null)
+                return;   // 层级不足（没有祖父物体）：无动画可播，也不缓存，留待下次刷新再试
+
+            _levelTextRootBasePos = _levelTextRoot.position;
+            _levelTextRootBaseRot = _levelTextRoot.rotation;
+            _levelTextRootCached = true;
+        }
+
+        /// <summary>
+        /// 关卡文本入场：开头先把<b>上一关</b>的文本摆上（第一关为空白），3D 物体（文本的父物体的父物体）
+        /// 自转一圈（冲过 420° 再回弹到 360°）；转到 180° 那一刻换成<b>当前关卡</b>的文本 ——
+        /// 此时物体正好背对镜头，换字过程看不见。层级不足时不做动画，直接显示当前文本。
+        /// </summary>
+        private void PlayLevelTextIntro(string currentText, string previousText)
+        {
+            if (levelNameText == null)
+                return;
+
+            // 上一套还没跑完（连续切关 / 连点重载）：先杀掉，否则两套动画会同时改同一个 Transform
+            if (_levelTextSeq != null)
+            {
+                _levelTextSeq.Kill();
+                _levelTextSeq = null;
+            }
+
+            SetLevelNameText(previousText);
+
+            CacheLevelTextRoot();
+            if (_levelTextRoot == null)
+            {
+                SetLevelNameText(currentText);
+                return;
+            }
+
+            Transform root = _levelTextRoot;
+
+            // 先清掉挂在这个物体上的其它 tween：上一轮残留或别的脚本的动画会每帧回写 position / rotation，
+            // 只做复位不 Kill 的话，复位会在同一帧被覆盖 —— 表现就是「第一次对，切关后不从头开始」
+            root.DOKill();
+
+            // 复位到初始位姿（被杀在半空时位置也不对）
+            root.SetPositionAndRotation(_levelTextRootBasePos, _levelTextRootBaseRot);
+
+            _levelTextSeq = DOTween.Sequence();
+            // 切关后先空等一段再起播；这段时间里文本停在上面的「上一关文本」上
+            if (levelTextIntroDelay > 0f)
+                _levelTextSeq.AppendInterval(levelTextIntroDelay);
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos + Vector3.up, levelTextRiseDuration));
+            // 自转 3 整圈（360° × 3）：LocalAxisAdd 是在自身朝向基础上追加角度，终点朝向与起点一致
+            // InOutSine 的峰值速度只有平均速度的 1.57 倍，转 3 圈几乎看不出快慢；默认改用峰值 3 倍的 InOutCubic
+            /*_levelTextSeq.Append(root
+                .DORotate(new Vector3(0f, 360f, 0f), levelTextRotateDuration, RotateMode.LocalAxisAdd)
+                //.SetEase(levelTextRotateEase));
+                .SetEase(Ease.OutBack,1.8f));*/
+
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos, levelTextFallDuration));
+            /*_levelTextSeq.OnComplete(() =>
+            {
+                if (levelNameText != null)
+                    levelNameText.gameObject.SetActive(true);
+            });*/
+            float overshootAngle = 420f;
+            float finalTotalAngle = 360f;
+            float bounceDelta = finalTotalAngle - overshootAngle; // -40
+
+            float timeGo = levelTextRotateDuration * 0.75f;
+            float timeBounce = levelTextRotateDuration * 0.25f;
+
+            _levelTextSeq.Append(
+                root.DORotate(new Vector3(0f, overshootAngle, 0f), timeGo, RotateMode.LocalAxisAdd)
+                    //.SetEase(Ease.InOutSine)
+                    .SetEase(Ease.InOutCirc)
+            );
+            _levelTextSeq.Append(
+                root.DORotate(new Vector3(0f, bounceDelta, 0f), timeBounce, RotateMode.LocalAxisAdd)
+                    .SetEase(Ease.OutBack, 1.5f)
+            );
+
+            // 转过 180° 的时间点：反解 InOutCirc 前半段（p = (1 − √(1 − 4t²)) / 2）得到
+            // t = √(1 − (1 − 2p)²) / 2，其中 p = 180 / 420 ≈ 0.43 < 0.5，正好落在前半段。
+            // 换了别的缓动（含改 overshootAngle）这个公式就不再成立，换缓动时记得同步改这里。
+            float p180 = 180f / overshootAngle;
+            float t180 = Mathf.Sqrt(1f - (1f - 2f * p180) * (1f - 2f * p180)) * 0.5f;
+            float rotStart = levelTextIntroDelay > 0f ? levelTextIntroDelay : 0f;
+            // 物体背对镜头的那一瞬间换字：换的过程看不见
+            _levelTextSeq.InsertCallback(rotStart + timeGo * t180, () => SetLevelNameText(currentText));
         }
 
         /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
@@ -298,6 +525,10 @@ namespace CrowdMatch
             _winDeclared = true;
             Debug.Log("[胜利判定] 检查点=" + checkpoint + " ｜ 板上所有车均已完成匹配 → 判胜");
             GameState.GameWin();
+            //如果胜利时其他面板打开，关闭对应面板，包括后需可能的道具提示框
+            UIManager.Instance.ShowSettingPanel(false);
+            UIManager.Instance.showFailTipPanel(false);
+            UIManager.Instance.ShowPropGetTip(false);
             Invoke(nameof(DoGameWin), 2.5f);
             UIManager.Instance.ShowWinPart();
         }
@@ -324,6 +555,14 @@ namespace CrowdMatch
             if (_transitioning)
             {
                 LogFailCheck(checkpoint, "已锁定 _transitioning（胜负过渡中）");
+                return;
+            }
+            if (IsReviveSequenceRunning())
+            {
+                // 复活序列期间：保留像素还占着传送带 / 缓冲区，而它们被排除在匹配之外 ——
+                // 门禁 8 会因此找不到任何「可匹配」的带上像素而**误判失败**，所以整段窗口一律不判。
+                // （正常情形门禁 7 也挡得住，但「溢出像素全部无同色车」时没有任何 consumingCount。）
+                LogFailCheck(checkpoint, "复活表现播放中");
                 return;
             }
             if (recordMode)
@@ -496,18 +735,42 @@ namespace CrowdMatch
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
         public void DoRevive()
         {
-            Revive();
-            GameState.GameStart();   // 复活后回到游玩态，继续本关
-            _transitioning = false;
-            // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
-            // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
-            if (containerGroup != null)
-                containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            DOVirtual.DelayedCall(0.6f, () =>
+            {
+                Revive();
+                GameState.GameStart();   // 复活后回到游玩态，继续本关
+                _transitioning = false;
+                // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
+                // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
+                if (containerGroup != null)
+                    containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            });
         }
 
         /// <summary>
         /// 复活：保留 reviveKeepBeltCount 个像素在传送带上，其余像素（传送带溢出 + 缓冲区全部，含未上传送带的）
-        /// 直接匹配后排车（优先前排、同排列小）。无同色后排车的像素销毁并计入已清除，保持胜负计数一致。
+        /// 直接匹配后排车（优先前排、同排列小）。无同色后排车的像素并入「消失」组、
+        /// 同样 pop 一下再销毁并计入已清除，保持胜负计数一致。
+        ///
+        /// **匹配与座位同步做完，只有跳跃组按 reviveInterval 依次起播**（本方法组队，起播交给
+        /// <see cref="PlayReviveJumpQueue"/>）：这样 <see cref="DoRevive"/> 里「此刻计数已是终值」的前提不变，
+        /// 失败门禁 7 也会在整段跳跃期间一直挡住重复判失败。
+        ///
+        /// **溢出像素不提前离场**：整段序列期间它们**仍然留在传送带槽位 / 缓冲区里被正常驱动**
+        /// （跟着带移动、被物理推挤），只是被标了 <see cref="PixelItem.reviveReserved"/> 而从
+        /// 「匹配 / 进传送带 / 表情候选」三条链路里排除；轮到自己时（跳跃 = 起跳前，消失 = pop 完成）
+        /// 才由 <see cref="ReleaseRevivePixel"/> 真正摘下来。代价是这段窗口里带 / 缓冲区被它们占着，
+        /// 所以 <see cref="TryCheckFail"/> 在窗口内一律不判失败。
+        ///
+        /// 两组的时序：
+        /// · **消失组**（深排原地消失 + 无同色车的）在 t=0 **一次性全部起播**，不走间隔；
+        /// · **跳跃组**与消失组同帧起播第一颗，之后每 <see cref="reviveInterval"/> 一颗，
+        ///   次序按「车行 → 车列 → 空位」升序（见 <see cref="CompareJumpOrder"/>）——
+        ///   座位在 <c>PrepareBoarding</c> 登记那一刻就已预占，所以这个次序是确定的。
+        ///
+        /// 单颗时长全部取自本组件「复活表现 · 单颗时长」的五项（消失两段 / 跳跃 / 弹性两段），
+        /// 打包成 <see cref="ContainerGroup.BoardingTiming"/> 传给起播端 —— **只影响复活**，
+        /// 传送带路径不传（= <c>default</c>），继续用预制体与扩展方法自己的默认值。
         /// </summary>
         private void Revive()
         {
@@ -523,35 +786,165 @@ namespace CrowdMatch
             if (emoji != null)
                 emoji.ClearAngryEmojis();
 
-            // 1. 收集溢出像素：传送带溢出（保留 reviveKeepBeltCount 个）+ 缓冲区全部（含未上传送带的）
+            // 0. 上一轮序列若还没播完，先把残留清干净（连同它们的保留标志一起解除）
+            DestroyPendingRevivePixels();
+
+            // 1. 收集溢出像素：传送带第 reviveKeepBeltCount 个之后的所有占用槽 + 缓冲区。
+            //    **只标记 reviveReserved、不从带 / 缓冲区里摘下来** —— 它们在轮到自己之前仍被带 / 物理驱动。
+            //    收集顺序与改动前一致（带 → 提取中 → 物理），保证 MatchPixelsToCars 的选车顺位不变。
             var overflow = new List<PixelItem>();
-            overflow.AddRange(conveyorZone.DrainBeltKeep(reviveKeepBeltCount));
+            overflow.AddRange(conveyorZone.ReserveBeltBeyond(reviveKeepBeltCount));
+
             if (crowdBuffer != null)
-                overflow.AddRange(crowdBuffer.DrainAllPixels());
-
-            // 2. 按颜色匹配车（前排优先，开盖 tween + 正常跳车）
-            var unmatched = containerGroup.MatchPixelsToCars(overflow);
-
-            // 3. 无同色后排车的像素：销毁并计入已清除
-            for (int i = 0; i < unmatched.Count; i++)
             {
-                var p = unmatched[i];
-                if (p == null)
-                    continue;
-                GameData.ClearedPixelCount++;
-                Destroy(p.gameObject);
+                overflow.AddRange(crowdBuffer.DrainExtracting());   // 还在网格里走路的：照旧直接取出，不标保留
+                overflow.AddRange(crowdBuffer.ReservePhysical());
+            }
+
+            // 2. 按颜色匹配车（同步扣容量 / 开盖 / 预占座位，但不起播动画），并按「前排跳车 / 深排原地消失」分表
+            var jumps = new List<ContainerGroup.BoardingEntry>();
+            var disappears = new List<ContainerGroup.BoardingEntry>();
+            var unmatched = containerGroup.MatchPixelsToCars(overflow, jumps, disappears);
+
+            // 3. 无同色后排车的像素：并入「消失」组（同样 pop 后销毁并计入已清除），不再瞬间凭空消失
+            for (int i = 0; i < unmatched.Count; i++)
+                if (unmatched[i] != null)
+                    disappears.Add(new ContainerGroup.BoardingEntry { pixel = unmatched[i] });
+
+            // 4. 表现时长：复活专用的 5 个参数（消失两段 / 跳跃 / 弹性两段）。
+            //    不传时各项 <= 0，退回 DisappearWithPop 的 0.2 与车预制体上的 boardJumpDuration / 弹性时长。
+            var timing = new ContainerGroup.BoardingTiming
+            {
+                popDuration            = reviveDisappearPopDuration,
+                shrinkDuration         = reviveDisappearShrinkDuration,
+                jumpDuration           = reviveJumpDuration,
+                elasticScaleDuration   = reviveElasticScaleDuration,
+                elasticRecoverDuration = reviveElasticRecoverDuration,
+            };
+
+            // 5. 消失组：t=0 一次性全部起播，不走间隔（上一轮残留已在步骤 0 清掉）
+            for (int i = 0; i < disappears.Count; i++)
+                containerGroup.PlayBoarding(disappears[i], timing);
+
+            // 6. 跳跃组：按「车行 → 车列 → 空位」升序依次起播，第一颗与消失组同帧
+            jumps.Sort(CompareJumpOrder);
+            if (jumps.Count > 0)
+            {
+                _reviveJumpQueue = jumps;
+                _revivePlaying = true;
+                StartCoroutine(PlayReviveJumpQueue(timing));
             }
 
             if (debugClickLog)
                 Debug.Log("[复活] 溢出=" + overflow.Count +
                     " 已匹配后排=" + (overflow.Count - unmatched.Count) +
-                    " 无同色车销毁=" + unmatched.Count);
+                    " 无同色车销毁=" + unmatched.Count +
+                    " ｜ 跳车=" + jumps.Count + " 消失=" + disappears.Count +
+                    " ｜ 间隔=" + reviveInterval + "s");
+        }
+
+        /// <summary>
+        /// 复活跳跃组的起播次序：**车行 → 车列 → 空位**，均由小到大
+        /// （车行 / 车列 = 登记那一刻的车格坐标；空位 = 登记时预占的落点下标）。
+        /// </summary>
+        private static int CompareJumpOrder(ContainerGroup.BoardingEntry a, ContainerGroup.BoardingEntry b)
+        {
+            int c = a.row.CompareTo(b.row);
+            if (c != 0)
+                return c;
+            c = a.col.CompareTo(b.col);
+            if (c != 0)
+                return c;
+            return a.seatIndex.CompareTo(b.seatIndex);
+        }
+
+        /// <summary>
+        /// 复活**跳跃组**按 <see cref="reviveInterval"/> 依次起播（<see cref="Revive"/> 排好序后启动）。
+        /// <c>reviveInterval = 0</c> 时整个循环不 yield、同帧跑完。
+        /// 跑在 GameController 上是为了蹭 <see cref="CleanupLevel"/> 的 <c>StopAllCoroutines</c>：
+        /// 换关 / 重开时序列自然中止（残留像素由 <see cref="DestroyPendingRevivePixels"/> 兜底）。
+        /// </summary>
+        private IEnumerator PlayReviveJumpQueue(ContainerGroup.BoardingTiming timing)
+        {
+            var queue = _reviveJumpQueue;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                if (queue[i].pixel == null)
+                    continue;   // 跨帧期间已被销毁
+                if (containerGroup == null)
+                    break;      // 关卡正在拆除（正常路径由 CleanupLevel 的 StopAllCoroutines 中止）
+                ReleaseRevivePixel(queue[i].pixel);   // 起跳前才摘：此前一直跟着带 / 缓冲区动
+                containerGroup.PlayBoarding(queue[i], timing);
+                if (reviveInterval > 0f && i + 1 < queue.Count)
+                    yield return new WaitForSeconds(reviveInterval);
+            }
+
+            _reviveJumpQueue = null;
+            _revivePlaying = false;
+        }
+
+        /// <summary>
+        /// 复活序列是否还在跑：要么跳跃队列协程没结束，要么**还有保留像素没被摘下来**
+        /// （它们占着传送带 / 缓冲区且被排除在匹配外，见 <see cref="TryCheckFail"/>）。
+        /// 故意用扫描而不是计数器：像素一旦销毁就自然不再计入，不会把守卫永久卡死。
+        /// </summary>
+        private bool IsReviveSequenceRunning()
+        {
+            if (_revivePlaying)
+                return true;
+            if (conveyorZone != null && conveyorZone.HasReservedPixel())
+                return true;
+            if (crowdBuffer != null && crowdBuffer.HasReservedPixel())
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// 把一颗复活保留的像素从它当前的来源真正摘下来（传送带清槽位 / 缓冲区解除物理并出队），
+        /// 并解除 <see cref="PixelItem.reviveReserved"/> 标志。
+        /// 消失组在 pop 完成时（<c>ContainerGroup.PlayDisappear</c> 的回调里）、跳跃组在起跳前各调一次。
+        /// 已经不在带 / 缓冲区里（已销毁 / 已被取走）时只清标志。
+        /// </summary>
+        public void ReleaseRevivePixel(PixelItem pixel)
+        {
+            if (pixel == null)
+                return;
+
+            pixel.reviveReserved = false;
+            if (conveyorZone != null)
+                conveyorZone.ReleaseReserved(pixel);
+            if (crowdBuffer != null)
+                crowdBuffer.ReleaseReserved(pixel);
+        }
+
+        /// <summary>
+        /// 清掉复活序列里**还没起播**的残留像素：先 <see cref="ReleaseRevivePixel"/>（清保留标志、把像素
+        /// 从带 / 缓冲区摘下来）再销毁。序列被打断（重开关卡 / 返回主界面）时调用 ——
+        /// 不然它们会既占着带 / 缓冲区、又永远等不到起播。
+        /// </summary>
+        private void DestroyPendingRevivePixels()
+        {
+            var queue = _reviveJumpQueue;
+            _reviveJumpQueue = null;
+            _revivePlaying = false;
+            if (queue == null)
+                return;
+
+            for (int i = 0; i < queue.Count; i++)
+            {
+                var pixel = queue[i].pixel;
+                if (pixel == null)
+                    continue;
+                ReleaseRevivePixel(pixel);
+                Destroy(pixel.gameObject);
+            }
         }
 
         /// <summary>清理上一关残留：停止自身协程，销毁聚集/传送带/缓冲区中的像素，为重建腾出空间。</summary>
         private void CleanupLevel()
         {
             StopAllCoroutines();
+            DestroyPendingRevivePixels();   // 复活序列被打断：清掉队列里还没起播的像素
 
             foreach (var item in gatheredItems)
             {
@@ -688,15 +1081,31 @@ namespace CrowdMatch
         /// <summary>刷新每帧变化的文本：聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。</summary>
         private void UpdateCountText()
         {
+            int count = CurrentGatherCount();
+
             if (gatherCountText != null)
             {
                 if (conveyorZone != null)
-                    gatherCountText.text = conveyorZone.OccupiedSlots + "/" + conveyorZone.TotalSlots;
+                    gatherCountText.text = count + "/" + conveyorZone.TotalSlots;
                 else
-                    gatherCountText.text = gatheredItems.Count.ToString();
+                    gatherCountText.text = count.ToString();
             }
+
+            /*// 卷轴只在数值变化时驱动一次（理由见 _lastGatherRollerCount）
+            if (gatherCountRoller != null && count != _lastGatherRollerCount)
+            {
+                _lastGatherRollerCount = count;
+                gatherCountRoller.SetTargetNumber(count);
+            }*/
+
             if (progressText != null)
                 progressText.text = GameData.ProgressPercent + "%";
+        }
+
+        /// <summary>聚集数量口径：有传送带取「已占用槽位」，否则退回聚集点里的单位数。文本与卷轴共用，避免两处口径漂移。</summary>
+        private int CurrentGatherCount()
+        {
+            return conveyorZone != null ? conveyorZone.OccupiedSlots : gatheredItems.Count;
         }
 
         /// <summary>当前「传送带 + 已点未进带」的总占用数。</summary>
@@ -878,9 +1287,7 @@ namespace CrowdMatch
                 visited[it.gridX, it.gridZ] = true;
             }
 
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
-
+            // 4 邻偏移用类级 static readonly（原来在这里 new 两个 int[4]，每次点击都分配一遍）
             while (queue.Count > 0)
             {
                 var cur = queue.Dequeue();
@@ -889,8 +1296,8 @@ namespace CrowdMatch
 
                 for (int d = 0; d < 4; d++)
                 {
-                    int nx = cur.x + dx[d];
-                    int nz = cur.y + dz[d];
+                    int nx = cur.x + Dx4[d];
+                    int nz = cur.y + Dz4[d];
                     if (!pixelGroup.IsInRange(nx, nz))
                         continue;
                     if (visited[nx, nz])
@@ -1102,8 +1509,10 @@ namespace CrowdMatch
                 var cur = queue.Dequeue();
                 result.Add(cur);
 
-                foreach (var nb in GetNeighbors(cur))
+                // 4 邻内联（原来是 GetNeighbors 迭代器：每遍历一个像素都分配一个状态机 + 两个 int[4]）
+                for (int d = 0; d < 4; d++)
                 {
+                    var nb = pixelGroup.GetItem(cur.gridX + Dx4[d], cur.gridZ + Dz4[d]);
                     if (nb == null || nb.colorId != color)
                         continue;
                     // 未揭晓问号 Pixel 断开连通：不参与移除、不扩散
@@ -1178,8 +1587,10 @@ namespace CrowdMatch
                 var cur = queue.Dequeue();
                 result.Add(cur);
 
-                foreach (var nb in GetNeighbors(cur))
+                // 4 邻内联（同 FloodFill，消掉迭代器与 int[4] 分配）
+                for (int d = 0; d < 4; d++)
                 {
+                    var nb = pixelGroup.GetItem(cur.gridX + Dx4[d], cur.gridZ + Dz4[d]);
                     if (nb == null || nb.colorId != color)
                         continue;
                     if (nb.isQuestion && !nb.revealed)
@@ -1192,18 +1603,6 @@ namespace CrowdMatch
             }
 
             return result;
-        }
-
-        private IEnumerable<PixelItem> GetNeighbors(PixelItem item)
-        {
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
-            for (int i = 0; i < dx.Length; i++)
-            {
-                var nb = pixelGroup.GetItem(item.gridX + dx[i], item.gridZ + dz[i]);
-                if (nb != null)
-                    yield return nb;
-            }
         }
 
         private void GatherItem(PixelItem item)

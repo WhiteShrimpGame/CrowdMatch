@@ -29,7 +29,7 @@ namespace CrowdMatch
         [Tooltip("关卡 JSON 列表（调试用，优先级高于 levelDataConfig；非空时按序号循环取关）")]
         public List<TextAsset> levelJsons = new List<TextAsset>();
 
-        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用")]
+        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用；关卡显示文本也在它里面（levelTexts / levelTextsLoop）")]
         public LevelDataConfig levelDataConfig;
 
         [Header("对象池")]
@@ -88,6 +88,7 @@ namespace CrowdMatch
                 {   
                     GameData.IsGaming=false;
                     //刚进游戏时，体力不足回主页
+                    CleanupSpawnPool();
                     AudioManager.Instance.PlayButtonAudioAndVibrate();
                     UIManager.Instance.showGamePanel(false);
                     UIManager.Instance.ShowMenuPanel(true);
@@ -107,11 +108,6 @@ namespace CrowdMatch
             else if (Input.GetKeyDown(KeyCode.B))
             {
                 PrevLevel();
-            }
-            else if (Input.GetKeyDown(KeyCode.G))
-            {
-                PlayerPrefs.DeleteAll();
-                Debug.Log("清除数据");
             }
         }
 #endif
@@ -246,10 +242,10 @@ namespace CrowdMatch
         /// </summary>
         /// <param name="id"></param>
         /// <returns></returns>
-        public PropInfo GetAimPropInfo(string id)
+        /*public PropInfo GetAimPropInfo(string id)
         {
             return propInfos.Find(a => a.propId == id);
-        }
+        }*/
 
         public PropInfo GetPropInfo(ItemType propType)
         {

@@ -20,6 +20,7 @@ public class UIManager : MonoBehaviour
     [HideInInspector] public Transform mainPanel;
     [HideInInspector] public Transform gamePanel;
     [HideInInspector] public Transform failPanel;
+    [HideInInspector] public Transform failTipPanel;
     [HideInInspector] public Transform revivePanel;
     [HideInInspector] public Transform winPanel;
     [HideInInspector] public Transform settingPanel;
@@ -37,6 +38,7 @@ public class UIManager : MonoBehaviour
     public GameObject revivePanelPrefab;
     public GameObject winPanelPrefab;
     public GameObject failPanelPrefab;
+    public GameObject failTipPanelPrefab;
     public GameObject getRewardPanelPrefab;
     public GameObject retryPanelPrefab;
     public GameInnerUI gameInnerUI;
@@ -95,12 +97,8 @@ public class UIManager : MonoBehaviour
         if (GameData.IsGaming)
         {
             IsPanelShow = false;
-
             showGamePanel(true);
             showMainPanel(false);
-
-            
-
             gameInnerUI?.GetComponent<GameInnerUI>().ResetLevel();
             ShowBanner();
             ShowMenuPanel(false);
@@ -117,6 +115,9 @@ public class UIManager : MonoBehaviour
         showFailPanel(false);
         showWinPanel(false);
         ShowFeaturePanel(false);
+        showFailTipPanel(false);
+        ShowPropGetTip(false);
+        //ShowRetryPanel(false);
         featurePanel = null; 
         GameManager.Instance.CheckShowFeature();
     }
@@ -178,7 +179,16 @@ public class UIManager : MonoBehaviour
         if (failPanel != null)
             failPanel.gameObject.SetActive(isShow);
     }
+    public void showFailTipPanel(bool isShow)
+    {
+        if (failTipPanel == null && isShow)
+        {
+            failTipPanel = Instantiate(failTipPanelPrefab, transform).transform;
+        }
 
+        if (failTipPanel != null)
+            failTipPanel.gameObject.SetActive(isShow);
+    }
     public void showRevivePanel(bool isShow)
     {
         if (revivePanel == null && isShow)

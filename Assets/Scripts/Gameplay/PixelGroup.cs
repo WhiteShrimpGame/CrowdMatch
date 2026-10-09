@@ -132,6 +132,46 @@ namespace CrowdMatch
         /// <summary>运行时收集到的所有管道（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<PipeItem> pipes = new List<PipeItem>();
 
+        /// <summary>
+        /// 「活跃管道覆盖格」缓存 [column, row]：true = 该格被仍有未释放波次的管道覆盖（自身格 + 轨道格）。
+        /// 只为 <see cref="IsActivePipeBlocked"/> 服务 —— 它被暴露判定 / 开箱判定的 BFS **逐格**调用，
+        /// 原本每次都要把所有活跃管道的折线从头走一遍，是这两条链路的乘性开销。
+        /// 掩码内容只由「哪些管道还有未释放波次」与它们的 <c>points</c> 决定，而 <c>points</c> 进关后不变、
+        /// <c>PipeItem._waveIndex</c> 只增不减（见 <see cref="PipeItem.HasRemainingWaves"/>），
+        /// 所以「活跃管道数」就是一个可靠的版本号，见 <see cref="EnsureActivePipeMask"/>。
+        /// </summary>
+        [System.NonSerialized] private bool[,] _activePipeMask;
+
+        /// <summary>上面那张掩码对应的「活跃管道数」；-1 = 已失效，下次查询时重建。</summary>
+        [System.NonSerialized] private int _activePipeMaskCount = -1;
+
+        // ===== RefreshExposed 的复用缓冲 =====
+        // 这几张表都是**纯局部**用途（只在 RefreshExposed 内部读写，无外部读法），所以可以按需扩容后反复复用，
+        // 不必每次点击重新分配。用法见 ClearedGrid：尺寸不符就重建，相符就清零复用。
+        // **前提：RefreshExposed 不可重入** —— 目前成立：它既不 yield，也没有任何回调会同步调回自己
+        // （SetExposed → ApplyMaterial / RefreshQuestionObject / ApplyExposedState 都只写自己的渲染器 /
+        // Animator，不回 PixelGroup）；唯一可能回调的 SameColorMergeWatcher.Notify 在函数最后一句，
+        // 那时这几张表已经用完。
+        [System.NonSerialized] private bool[,] _reachableEmptyBuf;
+        [System.NonSerialized] private bool[,] _directlyExposedBuf;
+        [System.NonSerialized] private bool[,] _exposureVisitedBuf;
+        [System.NonSerialized] private bool[,] _exposureActiveBuf;
+        [System.NonSerialized] private readonly Queue<Vector2Int> _exposureQueue = new Queue<Vector2Int>();
+        [System.NonSerialized] private readonly List<Vector2Int> _componentCellsBuf = new List<Vector2Int>();
+
+        /// <summary>4 邻偏移。提成静态只读：写成方法内的 <c>int[] dx = {…}</c> 局部数组字面量会每次调用都分配一次。</summary>
+        private static readonly int[] Dx4 = { 1, -1, 0, 0 };
+        private static readonly int[] Dz4 = { 0, 0, 1, -1 };
+
+        /// <summary>取一张「已清零、尺寸正确」的复用布尔网格：尺寸不符就重建，相符就 <see cref="System.Array.Clear"/> 复用。</summary>
+        private static bool[,] ClearedGrid(ref bool[,] buf, int cols, int rows)
+        {
+            if (buf == null || buf.GetLength(0) != cols || buf.GetLength(1) != rows)
+                return buf = new bool[cols, rows];
+            System.Array.Clear(buf, 0, buf.Length);
+            return buf;
+        }
+
         /// <summary>运行时收集到的所有倍乘门（重建 grid 时刷新）。</summary>
         [System.NonSerialized] public List<GateItem> gates = new List<GateItem>();
 
@@ -182,6 +222,9 @@ namespace CrowdMatch
             gates = new List<GateItem>();
             iceGroups = new List<IceItem>();
             crates = new List<CrateItem>();
+            // pipes 换了一批，活跃管道掩码作废。**必须显式失效**：换关时新旧关卡的活跃管道数
+            // 可能恰好相同，只靠计数版本号会误用上一关的掩码（几何不同 → 判据出错）。
+            _activePipeMaskCount = -1;
 
             foreach (var item in GetComponentsInChildren<PixelItem>())
             {
@@ -393,20 +436,57 @@ namespace CrowdMatch
             return grid[col, row] == null && !IsBlocked(col, row);
         }
 
-        /// <summary>该格是否被「仍有未释放波次的管道」覆盖（管道自身格 + 轨道格）。暴露判定时视为阻挡。</summary>
+        /// <summary>该格是否被「仍有未释放波次的管道」覆盖（管道自身格 + 轨道格）。暴露判定时视为阻挡。
+        /// 走 <see cref="_activePipeMask"/> 缓存，不再每次重走管道折线。</summary>
         public bool IsActivePipeBlocked(int col, int row)
         {
-            if (pipes == null)
+            if (pipes == null || pipes.Count == 0)
                 return false;
+            if (!IsInRange(col, row))
+                return false;
+            EnsureActivePipeMask();
+            return _activePipeMask[col, row];
+        }
+
+        /// <summary>
+        /// 按需重建 <see cref="_activePipeMask"/>。先数一遍还有未释放波次的管道数（≤ 管道总数 次 bool 读、
+        /// 零分配）：与缓存版本不同才重建，所以同一波次状态下 BFS 里成千上万次查询只付一次重建。
+        /// 重建用 <see cref="PipeItem.CoversCell"/> 逐格问一遍 —— 判据与旧实现完全同源，不另写一套遍历，
+        /// 避免两边口径日后分叉。触发时机是「某条管道最后一波已生成」这类事件，每关次数 ≤ 管道数。
+        /// </summary>
+        private void EnsureActivePipeMask()
+        {
+            int count = 0;
+            for (int i = 0; i < pipes.Count; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe != null && pipe.HasRemainingWaves)
+                    count++;
+            }
+
+            int cols = columns;
+            int totalRows = TotalRows;
+            if (_activePipeMask != null && count == _activePipeMaskCount &&
+                _activePipeMask.GetLength(0) == cols && _activePipeMask.GetLength(1) == totalRows)
+                return;
+
+            if (_activePipeMask == null || _activePipeMask.GetLength(0) != cols || _activePipeMask.GetLength(1) != totalRows)
+                _activePipeMask = new bool[cols, totalRows];
+            else
+                System.Array.Clear(_activePipeMask, 0, _activePipeMask.Length);
+
             for (int i = 0; i < pipes.Count; i++)
             {
                 var pipe = pipes[i];
                 if (pipe == null || !pipe.HasRemainingWaves)
                     continue;
-                if (pipe.CoversCell(col, row))
-                    return true;
+                for (int c = 0; c < cols; c++)
+                    for (int r = 0; r < totalRows; r++)
+                        if (!_activePipeMask[c, r] && pipe.CoversCell(c, r))
+                            _activePipeMask[c, r] = true;
             }
-            return false;
+
+            _activePipeMaskCount = count;
         }
 
         /// <summary>所有「正在释放中」管道的轨迹（管道自身格 + 轨道格）占据的 row 最小值。
@@ -743,6 +823,9 @@ namespace CrowdMatch
         ///   · 「使之暴露的那一次点击」也不消耗 —— 那一刻按点击前的状态它仍未暴露。
         ///
         /// 只有真有冰组融化到 0 时才重建（冰面 / 冻结掩码 / 暴露），避免每次点击都跑全网格刷新。
+        ///
+        /// **刚化开的组内像素**算一次「新揭示」（它们的颜色之前被冰盖着看不见）：交给
+        /// <see cref="SameColorMergeWatcher"/> 判定是否与旁边的同色已显色区域连成一片，命中就播惊讶表情。
         /// </summary>
         public void NotifyClickMovedOut()
         {
@@ -750,6 +833,7 @@ namespace CrowdMatch
                 return;
 
             bool anyMelted = false;
+            List<PixelItem> thawed = null;       // 本次刚化开的组内像素（颜色才变可见）
             for (int i = 0; i < iceGroups.Count; i++)
             {
                 var ice = iceGroups[i];
@@ -763,6 +847,7 @@ namespace CrowdMatch
                 {
                     anyMelted = true;
                     ice.PlayMeltEffect();        // 刚化开：生成融化特效 + 播音效（冰上自己配 tag）
+                    CollectIcePixels(ice, ref thawed);
                 }
                 else
                     ice.UpdateDisplay();         // 计数变了（或已归 0）：刷新数字显示
@@ -776,6 +861,28 @@ namespace CrowdMatch
                 if (iceGroups[i] != null)
                     iceGroups[i].BuildVisual(this);
             RefreshExposed();   // 冰化开后组内像素要立刻恢复可点
+
+            // 冰化开 = 一批像素的颜色刚变可见：与旁边同色已显色区域连成一片时播惊讶表情。
+            // 放在 RefreshExposed 之后：那时冻结掩码已撤、这些像素才算「可见」。
+            if (thawed != null)
+                SameColorMergeWatcher.Notify(this, thawed);
+        }
+
+        /// <summary>收集该冰组成员格上当前仍在网格里的像素（融化瞬间用来判定「新揭示的一批」）。</summary>
+        private void CollectIcePixels(IceItem ice, ref List<PixelItem> outPixels)
+        {
+            if (ice == null || grid == null)
+                return;
+
+            foreach (var cell in ice.CellSet)
+            {
+                if (!IsInRange(cell.x, cell.y))
+                    continue;
+                var p = grid[cell.x, cell.y];
+                if (p == null)
+                    continue;
+                (outPixels ??= new List<PixelItem>()).Add(p);
+            }
         }
 
         // ===== 木箱 =====
@@ -794,6 +901,17 @@ namespace CrowdMatch
         /// （Record 模式不走拆箱计数，见 <c>GameController.ResolveMatch</c> 的提前返回）。
         /// </summary>
         [System.NonSerialized] public bool recordRevealCrates;
+
+        /// <summary>
+        /// 「同色连成一片」惊讶表情的**抑制开关**（口径见 Docs/EmojiSurpriseMergeDesign.md）：true 时
+        /// <see cref="SameColorMergeWatcher.Notify"/> 直接返回。
+        ///
+        /// 由 <c>GameController.InitLevel</c> 在关卡加载期间置 true、首次 <see cref="RefreshExposed"/> 之后复位。
+        /// 不抑制的话：开局就贴着首排 / 连着出口空格的问号像素会在首次 <see cref="RefreshExposed"/> 里
+        /// 当场揭晓 —— 那不是「动态事件」，却会撒一片惊讶表情。**必须在 <c>LevelLoader.Apply</c> 之前写入**
+        /// （那一步的 RebuildGrid 与随后的 RefreshExposed 都会读它）。
+        /// </summary>
+        [System.NonSerialized] public bool suppressMergeSurprise;
 
         /// <summary>
         /// 该格所属的木箱（口径与 <see cref="crateMask"/> 一致：已拆掉、且已过放大阶段的木箱不再算）；无则 null。
@@ -1025,11 +1143,10 @@ namespace CrowdMatch
             // 0. 计算「能连通到首排的空格」：从首排空/出口出发 BFS，只通过 IsEmptyForExposure 的空格扩散。
             //    「空」必须是真正通向出口的空——被活跃管道（新蛇即将填充）隔开的空格不算，
             //    避免蛇被移出后，紧邻非蛇同色 Pixel 的其他颜色块因「局部空」被误激活 Animator。
-            var reachableEmpty = new bool[cols, totalRows];
+            var reachableEmpty = ClearedGrid(ref _reachableEmptyBuf, cols, totalRows);
             {
-                int[] edx = { 1, -1, 0, 0 };
-                int[] edz = { 0, 0, 1, -1 };
-                var q = new Queue<Vector2Int>();
+                var q = _exposureQueue;
+                q.Clear();
                 for (int c = 0; c < cols; c++)
                 {
                     if (IsEmptyForExposure(c, 0))
@@ -1043,8 +1160,8 @@ namespace CrowdMatch
                     var cur = q.Dequeue();
                     for (int d = 0; d < 4; d++)
                     {
-                        int nx = cur.x + edx[d];
-                        int nz = cur.y + edz[d];
+                        int nx = cur.x + Dx4[d];
+                        int nz = cur.y + Dz4[d];
                         if (nx < 0 || nx >= cols || nz < 0 || nz >= totalRows)
                             continue;
                         if (reachableEmpty[nx, nz])
@@ -1060,7 +1177,7 @@ namespace CrowdMatch
             // 1. 标记「直接暴露」格子：首排，或四周任一紧邻格为「连通首排的空格」（墙体/管道/活跃管道覆盖视为占用）。
             //    门格另有一条：只对**该门闭合区域内**的格子作数 —— 区域外的像素把门格当墙，
             //    于是「门框外侧紧邻的像素」不再因为贴着门格而点亮（口径见 IsGateBlockedFor）。
-            var directlyExposed = new bool[cols, totalRows];
+            var directlyExposed = ClearedGrid(ref _directlyExposedBuf, cols, totalRows);
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -1077,10 +1194,8 @@ namespace CrowdMatch
             }
 
             // 2. BFS 扩散同色连通块：含直接暴露格的连通块整块激活
-            var visited = new bool[cols, totalRows];
-            var active = new bool[cols, totalRows];
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
+            var visited = ClearedGrid(ref _exposureVisitedBuf, cols, totalRows);
+            var active = ClearedGrid(ref _exposureActiveBuf, cols, totalRows);
 
             for (int c = 0; c < cols; c++)
             {
@@ -1092,10 +1207,12 @@ namespace CrowdMatch
                         continue;
 
                     int color = grid[c, r].colorId;
-                    var cells = new List<Vector2Int>();
+                    var cells = _componentCellsBuf;
+                    cells.Clear();
                     bool hasExposed = false;
                     bool hasExposedQuestion = false;
-                    var queue = new Queue<Vector2Int>();
+                    var queue = _exposureQueue;
+                    queue.Clear();
                     queue.Enqueue(new Vector2Int(c, r));
                     visited[c, r] = true;
 
@@ -1113,8 +1230,8 @@ namespace CrowdMatch
 
                         for (int d = 0; d < 4; d++)
                         {
-                            int nx = cur.x + dx[d];
-                            int nz = cur.y + dz[d];
+                            int nx = cur.x + Dx4[d];
+                            int nz = cur.y + Dz4[d];
                             if (nx < 0 || nx >= cols || nz < 0 || nz >= totalRows)
                                 continue;
                             if (visited[nx, nz])
@@ -1186,6 +1303,11 @@ namespace CrowdMatch
             }
 
             // 4. 应用到各像素
+            //    顺带收集「本次调用里由未揭晓 → 揭晓」的问号像素：揭晓等于把一批颜色显出来，
+            //    若它们与旁边的同色已显色区域连成一片，要各播一个惊讶表情（见 SameColorMergeWatcher）。
+            //    判定放在循环之后（那时 SetExposed 已跑完、材质已换成原色）。isQuestion / revealed 都是托管字段，
+            //    在调用前预判与 SetExposed 内部那一句等价。
+            List<PixelItem> newlyRevealed = null;
             for (int c = 0; c < cols; c++)
             {
                 for (int r = 0; r < totalRows; r++)
@@ -1193,9 +1315,17 @@ namespace CrowdMatch
                     var item = grid[c, r];
                     if (item == null)
                         continue;
+
+                    bool revealing = item.isQuestion && !item.revealed && active[c, r];
                     item.SetExposed(active[c, r]);
+                    if (revealing)
+                        (newlyRevealed ??= new List<PixelItem>()).Add(item);
                 }
             }
+
+            // 问号揭晓作为一次独立的「新揭示」事件（与生产者自己的那批互不影响，各判各的）
+            if (newlyRevealed != null)
+                SameColorMergeWatcher.Notify(this, newlyRevealed);
         }
 
         /// <summary>清空所有 PixelItem 子物体（先脱离父物体再销毁，避免同帧 GetComponentsInChildren 捡到旧物体）。</summary>
@@ -1250,6 +1380,7 @@ namespace CrowdMatch
             }
             pipeGrid = new bool[columns, TotalRows];
             pipes = new List<PipeItem>();
+            _activePipeMaskCount = -1;   // pipes 清空，活跃管道掩码作废（见 EnsureActivePipeMask）
         }
 
         /// <summary>清空所有 GateItem 子物体（供关卡重载时重建倍乘门）。</summary>
@@ -1751,7 +1882,9 @@ namespace CrowdMatch
 
             box.BuildVisual(this, config);
 
-            // 立即占用 boxGrid（供后续箱子的容量计算看到本箱本体）；ApplyBoxes 末尾的 RebuildGrid 会重建权威表。
+            // 立即占用 boxGrid（供同一批里后续箱子的容量计算看到本箱本体）。
+            // 注意：ApplyBoxes 自己**不再**收尾重建网格了 —— 加载期最后一次权威重建在 ApplyCrates 末尾
+            // （见 Docs/PerformanceReview.md §2.3）。这里这份增量写就是本批内后续箱子读到的全部来源。
             if (boxGrid != null)
             {
                 for (int r = box.rowMin; r <= box.rowMax; r++)

@@ -411,7 +411,7 @@ MonoBehaviour:
   disappearDropDuration: 0.8
   holdStaticChild: {fileID: 6468907882315105035}
   holdStaticDuration: 0.4
-  debugOpenLog: 1
+  debugOpenLog: 0
   cornerPrefab: {fileID: 0}
   edgePrefab: {fileID: 0}
   centerPrefab: {fileID: 0}

@@ -339,6 +339,19 @@ public class SettingPanel : MonoBehaviour
                 {
                     StaminaSystemData.AddInfiniteStamina(600,"GM");
                 }
+            },
+            {
+                "AddItems", ()=>
+                {
+                    GameData.itemPlayerData.AddCount(ItemType.Refresh, 10, way: "GM", needReport: false);
+                    GameData.itemPlayerData.AddCount(ItemType.Remove, 10, way: "GM", needReport: false);
+                    GameData.itemPlayerData.AddCount(ItemType.Magnet, 10, way: "GM", needReport: false);
+                    var gp = UIManager.Instance.gameInnerUI;
+                    if (gp != null && gp.gameObject.activeSelf)
+                    {
+                        gp.UpdateCurrentButtonInfo();
+                    }
+                }
             }
         };
     }

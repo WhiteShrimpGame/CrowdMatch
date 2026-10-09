@@ -88,6 +88,33 @@ namespace CrowdMatch
         /// <summary>蛇形生成中，蛇当前占据的格子（蛇头→蛇尾顺序，含蛇头正在前往的格子）。仅 IsReleasing 期间有效。</summary>
         [System.NonSerialized] public List<Vector2Int> snakeCells = new List<Vector2Int>();
 
+        /// <summary>
+        /// 轨道格缓存，由 <see cref="EnsureTrackCache"/> 惰性建立。
+        ///
+        /// **为什么要有它**：<see cref="TrackEmpty"/> 是**每帧每管道**调的（`Update` 里），
+        /// 而轨道格只由 `points` 决定 —— `points` 运行期不变（只有关卡加载 / 编辑器会**整份替换**），
+        /// 所以每帧重算折线并新建 `List` + `HashSet` 是纯白跑（关卡前半程轨道被占满时尤其明显）。
+        ///
+        /// **只给内部用**：<see cref="TrackCells"/> 仍返回**新列表**（对外的既有契约不变，
+        /// 调用方可以随便改），缓存的这份只有 <see cref="TrackEmpty"/> / <see cref="TrackCellCount"/> 读。
+        ///
+        /// **失效判据**（任一变化即重建，都极便宜）：`points` 的**引用**、`points.Count`、网格尺寸。
+        /// 现有两处写入都是整份替换（`PixelGroup.SpawnPipe` 与 `PipeItemEditor`），所以引用比对足够；
+        /// 就地改元素的情况由 <see cref="OnValidate"/> 兜住（编辑模式下改了 points 就清缓存）。
+        /// </summary>
+        [System.NonSerialized] private List<Vector2Int> _trackCache;
+        [System.NonSerialized] private List<Vector2> _trackCachePointsRef;
+        [System.NonSerialized] private int _trackCachePointCount = -1;
+        [System.NonSerialized] private int _trackCacheCols = -1;
+        [System.NonSerialized] private int _trackCacheRows = -1;
+
+        /// <summary>丢掉轨道格缓存，下次用到时重建。</summary>
+        public void InvalidateTrackCache()
+        {
+            _trackCachePointsRef = null;
+            _trackCachePointCount = -1;
+        }
+
         /// <summary>所属 PixelGroup（惰性：先读运行时赋值，为空则向上查找）。</summary>
         public PixelGroup Group => group != null ? group : (group = GetComponentInParent<PixelGroup>());
 
@@ -181,7 +208,10 @@ namespace CrowdMatch
             }
         }
 
-        /// <summary>轨道格 = 折线经过的所有格（去首点、去重、仅限网格范围内），按路径顺序（近管道 → 远）。</summary>
+        /// <summary>
+        /// 轨道格 = 折线经过的所有格（去首点、去重、仅限网格范围内），按路径顺序（近管道 → 远）。
+        /// **每次调用都返回新列表**（调用方可以随便改 / 持有）；内部热路径请用 <see cref="EnsureTrackCache"/>。
+        /// </summary>
         public List<Vector2Int> TrackCells()
         {
             var result = new List<Vector2Int>();
@@ -192,16 +222,49 @@ namespace CrowdMatch
             return result;
         }
 
-        /// <summary>轨道格数量（每波生成的像素数）。</summary>
-        public int TrackCellCount() => TrackCells().Count;
+        /// <summary>
+        /// 轨道格缓存（**只读，勿改 / 勿跨调用持有**）。`points` 与网格尺寸都没变时直接命中，
+        /// 于是每帧调用的 <see cref="TrackEmpty"/> 不再分配。
+        /// </summary>
+        private List<Vector2Int> EnsureTrackCache()
+        {
+            var g = Group;
+            _trackCache ??= new List<Vector2Int>();
 
-        /// <summary>轨道上是否已无像素（所有轨道格 grid 均为空）。</summary>
+            if (points == null || points.Count < 2 || g == null)
+            {
+                InvalidateTrackCache();
+                _trackCache.Clear();
+                return _trackCache;
+            }
+
+            if (_trackCachePointCount == points.Count
+                && _trackCacheCols == g.columns
+                && _trackCacheRows == g.TotalRows
+                && ReferenceEquals(_trackCachePointsRef, points))
+            {
+                return _trackCache;   // 命中
+            }
+
+            _trackCache.Clear();
+            CollectTrackCells(points, g.columns, g.TotalRows, _trackCache);
+            _trackCachePointsRef = points;
+            _trackCachePointCount = points.Count;
+            _trackCacheCols = g.columns;
+            _trackCacheRows = g.TotalRows;
+            return _trackCache;
+        }
+
+        /// <summary>轨道格数量（每波生成的像素数）。</summary>
+        public int TrackCellCount() => EnsureTrackCache().Count;
+
+        /// <summary>轨道上是否已无像素（所有轨道格 grid 均为空）。**每帧调用，走缓存不分配。**</summary>
         public bool TrackEmpty()
         {
             var g = Group;
             if (g == null || g.grid == null)
                 return false;
-            foreach (var c in TrackCells())
+            foreach (var c in EnsureTrackCache())
             {
                 if (g.GetItem(c.x, c.y) != null)
                     return false;
@@ -226,6 +289,10 @@ namespace CrowdMatch
 #if UNITY_EDITOR
         private void OnValidate()
         {
+            // 任何序列化字段一改就丢掉轨道格缓存 —— 兜住「就地改 points 元素」这种引用/点数都没变的情况
+            // （Play 模式也要丢：编辑器工具可能在运行中改 points）。见 _trackCache 的说明。
+            InvalidateTrackCache();
+
             // 编辑器里改 points 后实时刷新朝向（Play 模式交给 Start，避免运行时误触）
             if (!Application.isPlaying)
                 OrientBody();
@@ -303,6 +370,9 @@ namespace CrowdMatch
         /// 生成一波同色像素：从管道格 scale=0 蛇形前进填满轨道，移动中平滑缩放到 unitSize。
         /// 流式补位：蛇头逐格推进，每步仅当蛇头目标格不再被提取像素占用（停靠/进入视为占用，正在离开不算）时才前进，
         /// 身体同步跟进一格。这样轨道不必整体清空即可开始补位，显著缩短等待时间。
+        ///
+        /// 全部就位后把本波交给 <see cref="SameColorMergeWatcher"/>：与旁边同色已显色区域连成一片时
+        /// 播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。
         /// </summary>
         private IEnumerator SpawnWave(int color)
         {
@@ -387,6 +457,11 @@ namespace CrowdMatch
                 item.SetClickable(true);
             }
             Group?.RefreshExposed();
+
+            // 本波就位 = 一批像素刚被放进网格：与旁边同色已显色区域连成一片时播惊讶表情。
+            // 传整波像素；中途已被匹配移出的那些由判定器按 grid 引用复核剔掉。
+            SameColorMergeWatcher.Notify(g, items);
+
             snakeCells.Clear();
             _spawning = false;
         }

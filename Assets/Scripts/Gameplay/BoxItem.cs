@@ -358,24 +358,16 @@ namespace CrowdMatch
 
             // 1. 收集候选格：本体 + 相邻（上下左右 4 方向）+ 连通（相邻出发 4 方向 BFS 的空格）
             //    「空」按 IsEmptyForBoxRelease 判：活跃管道的轨迹格不算 —— 管道优先（见类注释）
-            var body = new List<Vector2Int>();
-            EnumerateBody(body);
+            //    本体格数直接算术得出（BodyCount），未就绪路径上不白建一份格子列表；
+            //    判定通过后（第 3 步）才真正 EnumerateBody 出来供规划用。
+            int bodyCount = BodyCount;
             var adjacent = CollectAdjacentEmpty();
             var connected = CollectConnectedEmpty(adjacent);
 
-            // 优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）
-            var score = new Dictionary<Vector2Int, int>();
-            foreach (var c in body)
-                score[c] = 0;
-            foreach (var c in adjacent)
-                score[c] = 1;
-            foreach (var pair in connected)
-                score[pair.cell] = 2 + pair.distance;
-
-            int available = body.Count + adjacent.Count + connected.Count;
+            int available = bodyCount + adjacent.Count + connected.Count;
             if (debugOpenLog)
             {
-                Debug.Log("[Box] 开箱判定 " + name + "：本体=" + body.Count +
+                Debug.Log("[Box] 开箱判定 " + name + "：本体=" + bodyCount +
                     " 相邻=" + adjacent.Count +
                     " 连通=" + connected.Count +
                     " 可用=" + available + " 容量=" + capacity +
@@ -392,6 +384,19 @@ namespace CrowdMatch
 
             // 3. 整体规划：把隐藏像素按颜色分组，每种颜色分配到一组 4 方向连通的候选格，
             //    确保释放后同色像素各自连通（优先级：本体 > 相邻 > 连通距离）。
+            //    优先级分数：本体 0 < 相邻 1 < 连通 2+距离（越小越优先）。
+            //    **只在这里建**：未就绪的箱子走上面那个 return，为它白建一张几百项的字典没有意义
+            //    （「未就绪」是常态 —— 容量总是比本体大 8~32 格）；本体格子列表同理。
+            var body = new List<Vector2Int>();
+            EnumerateBody(body);
+            var score = new Dictionary<Vector2Int, int>();
+            foreach (var c in body)
+                score[c] = 0;
+            foreach (var c in adjacent)
+                score[c] = 1;
+            foreach (var pair in connected)
+                score[pair.cell] = 2 + pair.distance;
+
             var allCells = new List<Vector2Int>(available);
             allCells.AddRange(body);
             allCells.AddRange(adjacent);
@@ -460,6 +465,10 @@ namespace CrowdMatch
         {
             var result = new List<(Vector2Int, int)>();
             if (group == null)
+                return result;
+            // 没有相邻空格 ⇒ BFS 没有种子 ⇒ 结果必然为空。直接返回，省掉下面那个 body 集合
+            // 与 3 个 HashSet + Queue 的分配 —— 箱子被像素围死时每次点击都会走到这里（「未就绪」的常见形态）。
+            if (adjacent.Count == 0)
                 return result;
 
             var body = new HashSet<Vector2Int>();
@@ -885,9 +894,14 @@ namespace CrowdMatch
             FinalizeRelease(assignments);
         }
 
-        /// <summary>全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）。</summary>
+        /// <summary>
+        /// 全部动画结束：统一 MarkPlaced + 恢复可点击 + RefreshExposed（判定连通性 + 站起）；
+        /// 最后把这批刚放出来的像素交给 <see cref="SameColorMergeWatcher"/> —— 与旁边同色已显色区域
+        /// 连成一片时播惊讶表情（见 Docs/EmojiSurpriseMergeDesign.md）。
+        /// </summary>
         private void FinalizeRelease(List<(PixelItem pixel, Vector2Int cell)> assignments)
         {
+            var released = new List<PixelItem>(assignments.Count);
             for (int i = 0; i < assignments.Count; i++)
             {
                 var pixel = assignments[i].pixel;
@@ -896,12 +910,19 @@ namespace CrowdMatch
                 // 已被后续匹配移出网格：不再处理（其 placing 标记无副作用，交由匹配流程接管）
                 if (!group.IsInRange(pixel.gridX, pixel.gridZ) || group.grid[pixel.gridX, pixel.gridZ] != pixel)
                     continue;
+                released.Add(pixel);
                 pixel.MarkPlaced();
                 pixel.SetClickable(true);
             }
 
             if (group != null)
+            {
                 group.RefreshExposed();
+
+                // 就位之后才判：此刻这批像素才算「已显色」，别的生产者还没落地的像素由
+                // 判定器的 placing 守卫排除在外（不会被误当成本次的「原有区域」）。
+                SameColorMergeWatcher.Notify(group, released);
+            }
         }
 
         /// <summary>

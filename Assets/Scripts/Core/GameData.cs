@@ -169,29 +169,15 @@ namespace CrowdMatch
         {
             get
             {
-                //var levelIndex = CurrentLevelIndex;
-                int count = GameManager.Instance.levelDataConfig.levels.Count;
-                int countLoop = GameManager.Instance.levelDataConfig.loopLevels.Count;
-                /*Debug.Log(count);
-                Debug.Log(countLoop);*/
-                if (CurrentLevel <= count)
-                {
-                    //Debug.Log(CurrentLevel-1);
-                    return GameManager.Instance.levelDataConfig.levelDiff[CurrentLevel-1];
-                }
-                else if (countLoop > 0)
-                {
-                    int level = (CurrentLevel - count) % (countLoop)-1;
-                    if (level == -1)
-                    {
-                        level = countLoop - 1;
-                    }
-                    if (level < countLoop)
-                    {
-                        return GameManager.Instance.levelDataConfig.levelDiffLoop[level];
-                    }
-                }
-                return 0;
+                // 下标口径与 LevelDataConfig.GetLevel / GetLevelText 共用，见 ResolveIndex
+                var config = GameManager.Instance != null ? GameManager.Instance.levelDataConfig : null;
+                if (config == null || !config.ResolveIndex(CurrentLevel, out bool isLoop, out int index))
+                    return 0;
+
+                var table = isLoop ? config.levelDiffLoop : config.levelDiff;
+                if (table == null || index >= table.Count)
+                    return 0;
+                return table[index];
             }
         }
         public static ItemPlayerData itemPlayerData
