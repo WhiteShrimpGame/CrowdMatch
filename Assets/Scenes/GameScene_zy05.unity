@@ -778,6 +778,7 @@ MonoBehaviour:
   mainPanel: {fileID: 0}
   gamePanel: {fileID: 0}
   failPanel: {fileID: 0}
+  failTipPanel: {fileID: 0}
   revivePanel: {fileID: 0}
   winPanel: {fileID: 0}
   settingPanel: {fileID: 0}
@@ -794,6 +795,7 @@ MonoBehaviour:
   revivePanelPrefab: {fileID: 8783159860097895648, guid: 25d7700c4ce4c1a419a58fa4d5b3f651, type: 3}
   winPanelPrefab: {fileID: 8783159860097895648, guid: 8cdb88d12acc19246b57ef257ebff253, type: 3}
   failPanelPrefab: {fileID: 8783159860097895648, guid: 3125d3a69f84c9b4ca7b310cb341c322, type: 3}
+  failTipPanelPrefab: {fileID: 0}
   getRewardPanelPrefab: {fileID: 0}
   retryPanelPrefab: {fileID: 8783159860097895648, guid: 148d41f141af69c4fa1b84e4d5f6c5d0, type: 3}
   gameInnerUI: {fileID: 1607977078}
@@ -1614,6 +1616,13 @@ MonoBehaviour:
   gatherPoint: {fileID: 786388044}
   gatherCountText: {fileID: 1097098087}
   progressText: {fileID: 1036499090}
+  levelNameText: {fileID: 0}
+  levelNameTextRoot: {fileID: 0}
+  levelTextIntroDelay: 0.1
+  levelTextRiseDuration: 0.3
+  levelTextRotateDuration: 0.6
+  levelTextRotateEase: 10
+  levelTextFallDuration: 0.3
   pixelGroup: {fileID: 882082744}
   containerGroup: {fileID: 1428373511}
   frameItem: {fileID: 0}
@@ -1897,35 +1906,23 @@ MonoBehaviour:
   newFeatureConfig: {fileID: 11400000, guid: aa1bfd311f5a14d4aab5fd1b79a701d4, type: 2}
   propInfos:
   - propType: 1
-    propId: AddSlot
     propName: "\u5237\u65B0"
     buyLogWay: AddSlot
     adSceneId: AddSlot
     propSpr: {fileID: 21300000, guid: 17e07ec686b0798498def3e32e7201a2, type: 3}
-    propSmallSpr: {fileID: 21300000, guid: 7fdf925e202d81f41819b30a798d4485, type: 3}
-    price: 100
     propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u5237\u65B0"
-    isShowTextTip: 0
   - propType: 2
-    propId: RemoveAimTape
     propName: "\u78C1\u94C1"
     buyLogWay: RemoveAimTape
     adSceneId: RemoveAimTape
     propSpr: {fileID: 21300000, guid: 47378b39a98911e4fa2d5429a125634e, type: 3}
-    propSmallSpr: {fileID: 21300000, guid: eb0825458d526c6449f7951e8503724f, type: 3}
-    price: 100
     propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u78C1\u94C1"
-    isShowTextTip: 0
   - propType: 3
-    propId: ClearWaitSlot
     propName: "\u79FB\u9664"
     buyLogWay: ClearWaitSlot
     adSceneId: ClearWaitSlot
     propSpr: {fileID: 21300000, guid: 7fd579ff1ddb77f428d1c9320e7ee4be, type: 3}
-    propSmallSpr: {fileID: 21300000, guid: f750399b31651f943b56f3c485d546b8, type: 3}
-    price: 100
     propContent: "\u8D2D\u4E70\u4ECB\u7ECD\u79FB\u9664"
-    isShowTextTip: 0
   itemData: {fileID: 11400000, guid: 4963b67d6b49bfe4c8171feb119768f0, type: 2}
 --- !u!4 &1940794605
 Transform:
