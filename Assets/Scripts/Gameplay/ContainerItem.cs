@@ -516,7 +516,14 @@ namespace CrowdMatch
         /// 用于复活深排匹配——像素已通过 DisappearWithPop 原地消失，这里只需「出现在目标位置」。
         /// 无空闲落点返回 false（调用方销毁像素并计数）。
         /// </summary>
-        public bool PlacePixelInstant(PixelItem pixel)
+        /// <param name="sitDownDuration">
+        /// 「上车坐下」（把身体移到座位偏移）的时长；&lt;= 0 = 用预制体自己的 <c>exposeMoveDuration</c>。
+        /// </param>
+        /// <param name="onSeated">
+        /// **坐定之后**回调（没有 exposeMoveTarget 时立即回调）。调用方用它把"这车上车流程结束"推迟到落座之后。
+        /// </param>
+        public bool PlacePixelInstant(PixelItem pixel, float sitDownDuration = -1f,
+            System.Action onSeated = null)
         {
             if (pixel == null)
                 return false;
@@ -528,7 +535,7 @@ namespace CrowdMatch
             pixel.transform.localRotation = Quaternion.identity;
             pixel.boardedAt = Time.time;            // 记录上车时刻（供「在车上等了多久」判定）
             pixel.SetWalking(false);            // 落定即 Idle（同 BoardRoutine）
-            pixel.SitDownExposeTarget();
+            pixel.SitDownExposeTarget(sitDownDuration, onSeated);
             return true;
         }
 

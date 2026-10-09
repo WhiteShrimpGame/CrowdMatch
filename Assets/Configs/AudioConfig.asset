@@ -97,3 +97,7 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 2f694fbbbc267d143b9156966354241c, type: 3}
     volume: 0.25
     isBGM: 0
+  - tag: Magnet
+    clip: {fileID: 8300000, guid: 0514590f9ff1c1f48a6b57a14f203ecb, type: 3}
+    volume: 1
+    isBGM: 0

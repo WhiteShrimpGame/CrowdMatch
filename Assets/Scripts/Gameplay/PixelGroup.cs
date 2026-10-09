@@ -134,8 +134,10 @@ namespace CrowdMatch
 
         /// <summary>
         /// 「活跃管道覆盖格」缓存 [column, row]：true = 该格被仍有未释放波次的管道覆盖（自身格 + 轨道格）。
-        /// 只为 <see cref="IsActivePipeBlocked"/> 服务 —— 它被暴露判定 / 开箱判定的 BFS **逐格**调用，
-        /// 原本每次都要把所有活跃管道的折线从头走一遍，是这两条链路的乘性开销。
+        /// 只为 <see cref="IsActivePipeBlocked"/> 服务。它的调用点只剩两处、都不在热路径上：
+        /// 箱子释放的 <see cref="IsEmptyForBoxRelease"/>（管道优先，见那里），以及暴露判定里
+        /// "这个同色块有没有踩到管道轨道"的廉价预筛（见 <see cref="RefreshExposed"/>）。
+        /// 缓存仍然值得留：那个预筛是逐块逐格问的，原本每次都要把所有活跃管道的折线从头走一遍。
         /// 掩码内容只由「哪些管道还有未释放波次」与它们的 <c>points</c> 决定，而 <c>points</c> 进关后不变、
         /// <c>PipeItem._waveIndex</c> 只增不减（见 <see cref="PipeItem.HasRemainingWaves"/>），
         /// 所以「活跃管道数」就是一个可靠的版本号，见 <see cref="EnsureActivePipeMask"/>。
@@ -515,11 +517,26 @@ namespace CrowdMatch
         /// 箱子释放（<see cref="BoxItem.TryOpen"/>）判定用的「空」：无像素 / 非障碍，
         /// **且不被「还有未释放波次」的管道轨迹覆盖** —— 那几格是管道下一波要占的，**管道优先**：
         /// 箱子若把释放出来的像素放到轨道上，管道就该因轨道被占而放不出下一波了（两者抢同一批空格）。
-        /// 判据与 <see cref="IsEmptyForExposure"/> 相同（活跃管道轨迹 = 阻挡，理由见那里的注释）。
+        ///
+        /// **注意它已经不再是 <see cref="IsEmptyForExposure"/> 的别名**：暴露那侧把「活跃管道轨道」
+        /// 从障碍里去掉了，而箱子释放**必须**保留这一条，否则箱子会把像素丢到管道下一波要用的格子上。
         /// </summary>
-        public bool IsEmptyForBoxRelease(int col, int row) => IsEmptyForExposure(col, row);
+        public bool IsEmptyForBoxRelease(int col, int row)
+        {
+            if (!IsEmptyForExposure(col, row))
+                return false;
+            return !IsActivePipeBlocked(col, row);
+        }
 
-        /// <summary>暴露判定用的「空」：无像素、非墙体/管道障碍、且未被活跃管道覆盖。</summary>
+        /// <summary>
+        /// 暴露判定用的「空」：无像素、非墙体 / 管道本体 / 箱子 / 木箱。
+        ///
+        /// **活跃管道轨道不再算占用**（原来算）。原来那样有两条恶果：管道自己的人被自己管道的遮挡
+        /// 困死在轨道上（横向是墙、纵向走不动），管道也因此永远等不到「轨道全空」而不再投波 —— 自锁；
+        /// 而贴着轨道的人也被那道"墙"挡着，明明轨道已经空了还是出不去。
+        /// 现在轨道格就是普通格子：**空着就能走**，被别的颜色占着才是障碍（格子内容规则本来就管这个）。
+        /// 「管道下一波要占这几格」由 <see cref="IsEmptyForBoxRelease"/> 负责 —— 那才是它该管的地方。
+        /// </summary>
         public bool IsEmptyForExposure(int col, int row)
         {
             if (!IsInRange(col, row))
@@ -528,9 +545,7 @@ namespace CrowdMatch
                 return false;
             if (grid[col, row] != null)
                 return false;
-            if (IsBlocked(col, row))
-                return false;
-            return !IsActivePipeBlocked(col, row);
+            return !IsBlocked(col, row);
         }
 
         /// <summary>
@@ -660,6 +675,79 @@ namespace CrowdMatch
             if (passGates == null)
                 return false;                                   // 无门上下文：保持旧行为
             return !passGates.Contains(gate);
+        }
+
+        /// <summary>
+        /// 这一组同色像素能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、
+        /// 从组连通到首排（row 0）的路径。
+        ///
+        /// **这是点击判定与暴露判定共用的唯一实现**（原本只在 <c>GameController.CanReachFront</c> 里，
+        /// 挪过来是为了让「白光」也用同一条判据 —— 否则会出现"点得出去却不发白光"）。
+        ///
+        /// 障碍逐条：墙体 / 管道本体 / 箱子 / 木箱 → 倍乘门门格（只对来自该门区域的组放行，
+        /// 见 <see cref="IsGateBlockedFor"/>）→ 格上若有非本组像素也算障碍。
+        /// **活跃管道轨道不在其中** —— 轨道格就是普通格子，空着就能走（见 <see cref="IsEmptyForExposure"/>）。
+        /// </summary>
+        public bool CanGroupReachFront(IEnumerable<PixelItem> group)
+        {
+            if (group == null || grid == null)
+                return false;
+
+            int cols = columns;
+            int rows = TotalRows;
+
+            var inGroup = new HashSet<PixelItem>();
+            var seeds = new List<Vector2Int>();
+            foreach (var it in group)
+            {
+                if (it == null || !inGroup.Add(it))
+                    continue;
+                seeds.Add(new Vector2Int(it.gridX, it.gridZ));
+            }
+            if (seeds.Count == 0)
+                return false;
+
+            var passGates = CollectPassGates(inGroup);
+
+            var visited = new bool[cols, rows];
+            var queue = new Queue<Vector2Int>();
+            for (int i = 0; i < seeds.Count; i++)
+            {
+                var sc = seeds[i];
+                if (sc.x < 0 || sc.x >= cols || sc.y < 0 || sc.y >= rows)
+                    continue;
+                visited[sc.x, sc.y] = true;
+                queue.Enqueue(sc);
+            }
+
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (cur.y == 0)
+                    return true;   // 到达首排
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = cur.x + Dx4[d];
+                    int nz = cur.y + Dz4[d];
+                    if (nx < 0 || nx >= cols || nz < 0 || nz >= rows)
+                        continue;
+                    if (visited[nx, nz])
+                        continue;
+                    if (IsBlocked(nx, nz))
+                        continue;   // 墙体 / 管道本体 / 箱子 / 木箱
+                    if (IsGateBlockedFor(nx, nz, passGates))
+                        continue;
+
+                    var cell = grid[nx, nz];
+                    if (cell != null && !inGroup.Contains(cell))
+                        continue;   // 非组内像素 = 障碍
+
+                    visited[nx, nz] = true;
+                    queue.Enqueue(new Vector2Int(nx, nz));
+                }
+            }
+            return false;
         }
 
         /// <summary>落在该门闭合区域内的静态网格像素数（供 Inspector 显示与校验提示）。</summary>
@@ -1283,6 +1371,31 @@ namespace CrowdMatch
 
                             visited[nx, nz] = true;
                             queue.Enqueue(new Vector2Int(nx, nz));
+                        }
+                    }
+
+                    // 补一条暴露通路（与上面那套 reachableEmpty 互补）：
+                    // 暴露只认**空格**连通，而点击那套（<see cref="CanGroupReachFront"/>）还允许穿过组内像素
+                    // —— 两者不是一回事，于是会出现"点得出去却不发白光"（典型：同色两颗被一个空格隔开，
+                    // 同色连通块因此被拆成两半、各自都够不到首排，而整组其实是能走出去的）。
+                    // 所以这里直接复用点击那份实现兜一道，保证两边结论一致。只在块里有格被活跃管道覆盖时才跑。
+                    if (!hasExposed)
+                    {
+                        bool onActivePipeTrack = false;
+                        for (int i = 0; i < cells.Count && !onActivePipeTrack; i++)
+                            if (IsActivePipeBlocked(cells[i].x, cells[i].y))
+                                onActivePipeTrack = true;
+
+                        if (onActivePipeTrack)
+                        {
+                            var pipeGroup = new List<PixelItem>(cells.Count);
+                            for (int i = 0; i < cells.Count; i++)
+                            {
+                                var cellItem = grid[cells[i].x, cells[i].y];
+                                if (cellItem != null)
+                                    pipeGroup.Add(cellItem);
+                            }
+                            hasExposed = CanGroupReachFront(pipeGroup);
                         }
                     }
 

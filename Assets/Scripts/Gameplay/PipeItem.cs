@@ -76,6 +76,18 @@ namespace CrowdMatch
         [System.NonSerialized] private int _waveIndex;   // 已生成波数（下一波用 colors[_waveIndex]）
         [System.NonSerialized] private bool _spawning;
 
+        /// <summary>
+        /// 道具「磁铁」预支的欠账：颜色 → 还欠本管道几颗。
+        ///
+        /// 磁铁可以把「管道将来才会产出的人」提前取走一颗送去匹配，账记在这里；
+        /// 之后该颜色那一波生成时**少产同样多**。开局 <c>GameData.TotalPixelCount</c> 已按
+        /// <c>轨道格数 × colors.Count</c> 把这些人算作本管道的产出，所以「提前造一颗 + 后面少产一颗」
+        /// 总数守恒，进度分子分母都不用动。
+        ///
+        /// 按颜色记（不是单个 int）：磁铁取的时候，该颜色那一波可能还在很后面。
+        /// </summary>
+        [System.NonSerialized] private readonly Dictionary<int, int> _prepaid = new Dictionary<int, int>();
+
         /// <summary>剩余波次数字父物体**相对管道根**的原始位置（局部坐标）：只在第一次应用偏移时记一次，
         /// 之后一切以它为基准重算 —— 反复调朝向 / 反复调偏移量都不会叠加，管道根被拖动时数字也跟着走。
         ///
@@ -134,6 +146,71 @@ namespace CrowdMatch
 
         /// <summary>是否还有未释放的波次（colors 未耗尽）。</summary>
         public bool HasRemainingWaves => colors != null && _waveIndex < colors.Count;
+
+        /// <summary>
+        /// 道具「磁铁」：该颜色**还**能从本管道预支几颗 = 未来该颜色的总产出 − 已欠的账。
+        /// 已经投出去的波次（下标 &lt; <see cref="_waveIndex"/>）不算。
+        /// </summary>
+        public int PendingColorCount(int colorId)
+        {
+            if (colors == null)
+                return 0;
+
+            int waves = 0;
+            for (int i = _waveIndex; i < colors.Count; i++)
+                if (colors[i] == colorId)
+                    waves++;
+            if (waves == 0)
+                return 0;
+
+            int debt;
+            _prepaid.TryGetValue(colorId, out debt);
+            return Mathf.Max(0, waves * TrackCellCount() - debt);
+        }
+
+        /// <summary>
+        /// **还没吐出来的这一组**（<c>colors[_waveIndex]</c>）是不是已经被预支光了：欠账 ≥ 这波原本要吐的颗数。
+        ///
+        /// 磁铁从"管道将来才会产出的人"里提前取走（<see cref="PrepayOne"/>），累计到把整组预支光时，
+        /// 这一组就等于没了 —— 放出来也是空的，由 <see cref="Update"/> 当场跳过并推进显示。
+        /// </summary>
+        private bool WavePrepaidEmpty()
+        {
+            if (colors == null || _waveIndex >= colors.Count)
+                return false;
+
+            int debt;
+            if (!_prepaid.TryGetValue(colors[_waveIndex], out debt))
+                return false;
+            return debt >= TrackCellCount();
+        }
+
+        /// <summary>
+        /// 道具「磁铁」：预支一颗该颜色的人 —— 记一笔欠账，并当场在**管道口**把这颗人造出来交回调用方
+        /// （不落网格、不进轨道；调用方直接送去匹配）。
+        ///
+        /// 只有 <see cref="PendingColorCount"/> &gt; 0 时才允许：否则后面还不上，这颗就成了净多出来的，
+        /// 进度会超过 100%。还账由 <see cref="SpawnWave"/> 在该颜色那一波少生成同样多来完成。
+        /// </summary>
+        public PixelItem PrepayOne(int colorId)
+        {
+            if (PendingColorCount(colorId) <= 0)
+                return null;
+
+            var g = Group;
+            if (g == null)
+                return null;
+
+            var config = GameManager.Instance != null ? GameManager.Instance.colorConfig : null;
+            var item = SpawnPixelAtPipe(colorId, config, GetPipeCell(points));
+            if (item == null)
+                return null;
+
+            int debt;
+            _prepaid.TryGetValue(colorId, out debt);
+            _prepaid[colorId] = debt + 1;
+            return item;
+        }
 
         /// <summary>是否正在释放一波（蛇形生成动画进行中，_spawning）。</summary>
         public bool IsReleasing => _spawning;
@@ -315,6 +392,21 @@ namespace CrowdMatch
 
             if (_spawning)
                 return;
+
+            // ★ **还没吐出来的这一组被吸光（计数 0）＝ 这一组没了**：当场推进波次与显示，**不等轨道腾空**
+            //   —— 它本来也吐不出人来了。磁铁那条"从管道将来才会产出的、这个颜色的人里提前拿走几颗"
+            //   （<see cref="PrepayOne"/>）累计到把整组预支光时，就是这一刻；连续几组都被预支光就一次跳几组。
+            //   欠账要**同步扣掉这一组的分量**，否则会赖到同颜色的下一组头上（那组就少吐人）。
+            bool consumedPrepaidEmpty = false;
+            while (_waveIndex < colors.Count && WavePrepaidEmpty())
+            {
+                _prepaid[colors[_waveIndex]] -= TrackCellCount();
+                _waveIndex++;
+                consumedPrepaidEmpty = true;
+            }
+            if (consumedPrepaidEmpty)
+                ApplyNextColorForWave();   // 组数 + 颜色 + 材质
+
             if (_waveIndex >= colors.Count)
                 return;
             // 上一波已被完全匹配（轨道格 grid 全空）即触发补位；具体每格能否进入由 SpawnWave 的蛇头逐格等待决定，
@@ -389,6 +481,21 @@ namespace CrowdMatch
 
             var track = TrackCells();
             int n = track.Count;
+
+            // 道具「磁铁」预支的欠账：该颜色之前被提前取走过几颗，本波少生成同样多。
+            //
+            // **只改 n**：下面的 path / 目标格 / 蛇头逐格推进全部由 n 推导，整条蛇于是只铺满轨道
+            // 靠近管道的那一段（track 是「近管道 → 远」序），远端留出空格 —— 表现就是「这波少出来一个人」。
+            // 减到 0 时落进下面的「无轨道」分支：照常算用掉这一波（_waveIndex 已前进），一个人都不出。
+            int debt;
+            _prepaid.TryGetValue(color, out debt);
+            if (debt > 0)
+            {
+                int skip = Mathf.Min(debt, n);
+                _prepaid[color] = debt - skip;
+                n -= skip;
+            }
+
             if (n == 0)
             {
                 ApplyNextColorForWave();   // 无轨道：立即切换下一颜色材质（或隐藏）

@@ -239,14 +239,23 @@ namespace CrowdMatch
                 ApplyWalking();
         }
 
-        /// <summary>把 exposeMoveTarget 匀速坐到 boardSitDownYOffset（上车起跳时调用）。</summary>
-        public void SitDownExposeTarget()
+        /// <summary>
+        /// 把 exposeMoveTarget 匀速坐到 boardSitDownYOffset（上车时调用）。
+        /// <paramref name="duration"/> &lt;= 0 时用预制体自己的 <see cref="exposeMoveDuration"/>。
+        /// <paramref name="onDone"/> 在**坐定之后**回调（没有 exposeMoveTarget 时立即回调）——
+        /// 道具磁铁用它把"车出库"推迟到人落座之后。
+        /// </summary>
+        public void SitDownExposeTarget(float duration = -1f, System.Action onDone = null)
         {
             if (exposeMoveTarget == null)
+            {
+                onDone?.Invoke();
                 return;
+            }
             if (_exposeMove != null)
                 StopCoroutine(_exposeMove);
-            _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset, exposeMoveDuration));
+            _exposeMove = StartCoroutine(MoveExposeTargetToY(boardSitDownYOffset,
+                duration > 0f ? duration : exposeMoveDuration, onDone));
         }
 
         /// <summary>
@@ -391,6 +400,22 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 强制揭晓问号像素：换成真实颜色的材质 + 收掉头顶的问号物体（幂等；非问号、已揭晓都直接返回）。
+        ///
+        /// 与 <see cref="SetExposed"/> 里那条"被暴露才揭晓"的区别：这是一条**不等暴露**的主动揭晓，
+        /// 给"问号的人被道具直接从棋盘上搬上车"用 —— 人都要坐进车里了，还顶着问号没有意义。
+        /// </summary>
+        public void RevealQuestion()
+        {
+            if (!isQuestion || revealed)
+                return;
+
+            revealed = true;
+            ApplyMaterial();          // 换回 colorId 对应的真实颜色
+            RefreshQuestionObject();  // 收掉问号物体
+        }
+
+        /// <summary>
         /// 设置暴露（可点击）状态：进入暴露时激活 Animator，退出暴露时关闭 Animator。
         /// 起身上升/坐下逻辑已移除（预制体 Root 无 y 偏移），全程保持站立位置，只切换描边与 Animator。
         /// </summary>
@@ -509,10 +534,13 @@ namespace CrowdMatch
         }
 
         /// <summary>把 exposeMoveTarget（localPosition）在 duration 内匀速移动到指定 y（x/z 保持）。</summary>
-        private IEnumerator MoveExposeTargetToY(float targetY, float duration)
+        private IEnumerator MoveExposeTargetToY(float targetY, float duration, System.Action onDone = null)
         {
             if (exposeMoveTarget == null)
+            {
+                onDone?.Invoke();
                 yield break;
+            }
 
             Transform t = exposeMoveTarget;
             Vector3 start = t.localPosition;
@@ -522,6 +550,7 @@ namespace CrowdMatch
             if (dur <= 0.0001f)
             {
                 t.localPosition = target;
+                onDone?.Invoke();
                 yield break;
             }
 
@@ -535,6 +564,7 @@ namespace CrowdMatch
             }
 
             t.localPosition = target;
+            onDone?.Invoke();
         }
     }
 }

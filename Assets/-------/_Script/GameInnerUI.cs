@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using CrowdMatch;
 using UnityEngine;
 using UnityEngine.UI;
+using WsGame.HooksJam;
 
 public class GameInnerUI : MonoBehaviour
 {
@@ -16,6 +17,16 @@ public class GameInnerUI : MonoBehaviour
     [SerializeField] Button removeBtn;
     [SerializeField] Button magnetBtn;
     [SerializeField] Button removeAimTapeCloseBtn;
+
+    [Header("道具特效")]
+    [Tooltip("道具2「磁铁」的特效预制体（Assets/_Prefabs/UI/MagnetPropEffect.prefab）。留空则不放特效，直接吸人")]
+    [SerializeField] MagnetPropEffect magnetPropEffectPrefab;
+
+    [Tooltip("磁铁特效播放多久之后才真正吸人（秒）")]
+    [SerializeField] float magnetEffectDelay = 0.6f;
+
+    [Tooltip("磁铁特效出现多久之后收掉（秒）")]
+    [SerializeField] float magnetEffectHideDelay = 1f;
 
     public GameObject removeTip;
 
@@ -184,12 +195,58 @@ public class GameInnerUI : MonoBehaviour
                 return;
             }*/
             Debug.Log("使用了道具2磁铁");
+            // 表现：先在第一排车中间的正上方生成磁铁 UI 特效，**0.6s 之后**才真正吸人
+            //（被吸的人**原地消失、直接在车上落点出现**，见 GameController.MagnetClearFrontRow）。
+            ShowMagnetPropEffect();
+            var gc = GameController.Instance;
+            DOVirtual.DelayedCall(magnetEffectDelay, () =>
+            {
+                if (gc != null)
+                    gc.MagnetClearFrontRow();
+            });
             CousmeProp(itemType);
             UpdateCurrentButtonInfo();
             //LogicOnMagnetBtnClick();
             //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
             PlayerPrefs.Save();
         }
+    }
+
+    /// <summary>
+    /// 道具2「磁铁」的道具特效：在第一排车队的**正中间偏上 100** 处生成磁铁 UI 并播放。
+    ///
+    /// 位置口径：把"第一排车中间"的**世界坐标**用 <see cref="WSGameTools.WorldPosToUgui"/> 换成 UGUI 锚点坐标
+    /// （以屏幕中心为原点），再加 100 —— 与 <c>MagnetPropEffect.Show</c> 收的 target 是同一套坐标。
+    ///
+    /// **注意 MagnetPropEffect 的 Start() 里原来有一句占位的 Show(...)，会覆盖这里的调用**，
+    /// 已删掉（见该脚本）。
+    ///
+    /// 朝向是**固定值** `(0, 0, -120)`：脚本那边不再叠加预制体上的偏移量，传进去多少就是多少。
+    /// </summary>
+    private void ShowMagnetPropEffect()
+    {
+        if (magnetPropEffectPrefab == null)
+            return;
+
+        var gc = GameController.Instance;
+        var cam = Camera.main;
+        if (gc == null || cam == null || UIManager.Instance == null)
+            return;
+
+        var effect = Instantiate(magnetPropEffectPrefab, UIManager.Instance.transform);
+        if (effect == null)
+            return;
+
+        Vector3 center = gc.FirstRowCenter();
+        Vector2 uiPos = WSGameTools.WorldPosToUgui(center, cam);
+        effect.Show(uiPos + new Vector2(-100f, 100f), -120f);
+
+        // 出现 magnetEffectHideDelay 秒后收掉（此时人早飞完了）
+        DOVirtual.DelayedCall(magnetEffectHideDelay, () =>
+        {
+            if (effect != null)
+                effect.Hide();
+        });
     }
 
     /*private void LogicOnMagnetBtnClick()

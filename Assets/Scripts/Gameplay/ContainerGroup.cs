@@ -460,6 +460,7 @@ namespace CrowdMatch
             public float jumpDuration;             // 跳跃（DOLocalJump / DOLocalRotate）
             public float elasticScaleDuration;     // 落地弹性放大
             public float elasticRecoverDuration;   // 弹性复原
+            public float sitDownDuration;          // 上车坐回（exposeMoveTarget 移到 boardSitDownYOffset）
         }
 
         /// <summary>消失两段时长的兜底值（与 <c>DisappearWithPop</c> 的默认参数一致）。</summary>
@@ -476,6 +477,24 @@ namespace CrowdMatch
             if (!PrepareBoarding(pixel, container, jump: true, ref entry))
                 return;
             PlayBoarding(entry);
+        }
+
+        /// <summary>
+        /// 吸收一个像素的**瞬移版**：像素**原地消失**（DisappearWithPop）后**直接在车上落点出现**，不播跳车。
+        /// 与 <see cref="ConsumePixel"/> 唯一的差别是登记时用 <c>jump = false</c>，其余完全一致
+        /// （<see cref="PlayBoarding"/> 会据此走 <see cref="PlayInstantBoarding"/>）。
+        /// 供道具「磁铁」使用。
+        /// </summary>
+        /// <param name="timing">
+        /// 表现时长覆盖（磁铁用它把"原地消失"的弹出 / 缩小放慢）。不传 = 用 <c>DisappearWithPop</c> 自己的 0.2 / 0.2。
+        /// </param>
+        public void ConsumePixelInstant(PixelItem pixel, ContainerItem container,
+            BoardingTiming timing = default)
+        {
+            var entry = default(BoardingEntry);
+            if (!PrepareBoarding(pixel, container, jump: false, ref entry))
+                return;
+            PlayBoarding(entry, timing);
         }
 
         /// <summary>
@@ -672,8 +691,11 @@ namespace CrowdMatch
 
         /// <summary>
         /// 起播一个「原地消失」条目（<see cref="PrepareBoarding"/> 以 <c>jump = false</c> 登记之后调）：
-        /// 像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
+        /// 像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现 → **落座坐定**。
         /// 仍走 OnPixelConsumed（失败判定 + 出库 / 原地销毁）完整链路，只是省略 jump。
+        ///
+        /// **"上车完成"（onConsumed）推迟到落座之后** —— 与跳车那条路在 <c>BoardRoutine</c> 里
+        /// "等弹性和落地都播完才 onBoarded" 是同一条口径：否则车会在人还没坐稳时就开走。
         /// </summary>
         private void PlayInstantBoarding(PixelItem pixel, ContainerItem container, int col, bool isLast,
             bool destroyInPlace, BoardingTiming timing)
@@ -685,11 +707,14 @@ namespace CrowdMatch
             {
                 if (pixel == null)
                     return;
-                bool placed = container != null && container.PlacePixelInstant(pixel);
+                bool placed = container != null
+                    && container.PlacePixelInstant(pixel, timing.sitDownDuration, onConsumed);
                 if (!placed)
+                {
                     Destroy(pixel.gameObject);   // 无空闲落点（或车已销毁）：销毁
+                    onConsumed();                // 没落座，上车流程到此结束
+                }
                 GameData.ClearedPixelCount++;
-                onConsumed();
             });
         }
 
@@ -1672,8 +1697,13 @@ namespace CrowdMatch
         /// 说明：失败仅保证「传送带上的像素不匹配」，缓冲区/带溢出里仍可能有匹配前排车的颜色，
         /// 因此必须优先补第 0 排车，否则会把这类像素误判为无车可匹配而销毁，留下被掏空的前排车堵死整列。
         /// </summary>
+        /// <param name="forceInstant">
+        /// true = **一律走"原地消失 → 直接在落点出现"**（连前 maxOpenRows 排的车也不跳车），全部进
+        /// <paramref name="disappears"/>、<paramref name="jumps"/> 保持为空。道具「磁铁」用它 ——
+        /// 磁铁吸的人是"原地消失"上车的，倍乘多出来的那些不该突然又跳起来。
+        /// </param>
         public List<PixelItem> MatchPixelsToCars(List<PixelItem> pixels,
-            List<BoardingEntry> jumps, List<BoardingEntry> disappears)
+            List<BoardingEntry> jumps, List<BoardingEntry> disappears, bool forceInstant = false)
         {
             var unmatched = new List<PixelItem>();
             if (pixels == null)
@@ -1708,7 +1738,7 @@ namespace CrowdMatch
 
                 car.OpenLid();              // 有车被匹配 → 播放开盖 tween（幂等）
 
-                bool jump = car.gridZ < maxOpenRows;
+                bool jump = !forceInstant && car.gridZ < maxOpenRows;
                 var entry = default(BoardingEntry);
                 if (!PrepareBoarding(pixel, car, jump, ref entry))
                     continue;               // IsEmpty 兜底：正常不会发生（FindCarForColor 已滤掉空车）

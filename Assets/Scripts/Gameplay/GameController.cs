@@ -1021,6 +1021,734 @@ namespace CrowdMatch
             }
         }
 
+        // ===== 道具2「磁铁」 =====
+
+        [Header("道具2「磁铁」· 上车表现")]
+        [Tooltip("被吸的人·原地消失的「弹出」阶段时长（秒）。原来用预制体默认的 0.2，这里放慢")]
+        public float magnetPopDuration = 0.4f;
+
+        [Tooltip("被吸的人·原地消失的「缩小」阶段时长（秒）。原来用预制体默认的 0.2，这里放慢")]
+        public float magnetShrinkDuration = 0.4f;
+
+        [Tooltip("被吸的人·「上车坐下」的时长（秒）—— 人出现在车上、身体坐到座位偏移所花的时间。**车会等它坐完才出库**")]
+        public float magnetSitDownDuration = 0.4f;
+
+        /// <summary>磁铁上车用的表现时长：把"原地消失"的弹出 / 缩小放慢（其余项留 0 = 用该处自己的默认）。</summary>
+        private ContainerGroup.BoardingTiming MagnetBoardingTiming()
+        {
+            return new ContainerGroup.BoardingTiming
+            {
+                popDuration = magnetPopDuration,
+                shrinkDuration = magnetShrinkDuration,
+                sitDownDuration = magnetSitDownDuration,
+            };
+        }
+
+        /// <summary>
+        /// 道具2「磁铁」：把**最前面一排**车（每列 <c>grid[col, 0]</c>）用同色像素喂满，装满的车随即走正常出库链路。
+        ///
+        /// **取人优先级（6 层，逐层降级）**
+        /// | 层 | 来源 | 区域 | 颜色 | 产出 |
+        /// | 1 | 棋盘 | 非倍乘 | 明确 | 1 个 |
+        /// | 2 | 棋盘 | 非倍乘 | 问号 | 1 个 |
+        /// | 3 | 棋盘 | 倍乘 | 明确 | 该格倍率个（补分身） |
+        /// | 4 | 棋盘 | 倍乘 | 问号 | 该格倍率个 |
+        /// | 5 | 木箱盖住 / 盒子 / 管道 | 非倍乘 | 任意 | 1 个 |
+        /// | 6 | 木箱盖住 | 倍乘 | 任意 | 该格倍率个 |
+        ///
+        /// **在倍乘区域取人 = 磁铁替玩家把这个人"送过了门"**：按 <see cref="PixelGroup.GateMultiplierAt"/>
+        /// 补出分身（与道具3 的 UFO 同一套口径），于是总量不多不少。分身装不下目标车时交正常匹配链路
+        /// 送给后方的同色车，见 <see cref="FeedCarWithUnits"/>。
+        ///
+        /// 其他口径：
+        /// · **压在管道轨道上的同色人优先取**：按层序扫到的同色人若正落在某条管道的**轨道格**里，
+        ///   就先取那条轨道**最远端**（远离管道那端）的同色人 —— 顺手把管道腾空；
+        ///   扫到的这一颗**不会被丢掉**，本车还要同色的人时照旧轮得到它。
+        ///   正在投波的管道不参与（轨道上的人还在飞），见 <see cref="PreferPipeTail"/>；
+        /// · **不碰传送带 / 缓冲区**：那里的像素本来就会按正常流程匹配到同色车，而把它们抽出来只有破坏性的
+        ///   Drain API（复活那套会把没匹配上的像素直接销毁），磁铁不该带这种副作用；
+        /// · **冰组冻住的一律不取**（冰组记着自己在哪些格上，取走会让它的账错乱）；
+        /// · 盒子 / 管道的人不在网格上、坐标是哨兵 (-1,-1)，**永远不在倍乘区域**，所以第 6 层对它们没有变体；
+        /// · 装不满的车**留在前排等待**（能吸多少吸多少，不强求出库）。
+        ///
+        /// 表现走 <see cref="ContainerGroup.ConsumePixelInstant"/>：**原地消失、直接在车上落点出现**（不播跳车、不走路）。
+        /// </summary>
+        public void MagnetClearFrontRow()
+        {
+            if (pixelGroup == null || containerGroup == null)
+                return;
+
+            var carGrid = containerGroup.grid;
+            if (carGrid == null)
+                return;
+
+            // 一次成桶：避免每取一颗都按层重扫一遍全盘（层数 × 每颗一次扫描的常数太大）
+            var buckets = BuildMagnetBuckets();
+            bool harvestedAny = false;
+
+            // 本次磁铁从棋盘上取走的人（木箱拆箱计数用，见循环之后的 NotifyPixelsMovedOut）
+            var boardHarvested = new List<PixelItem>();
+
+            // 诊断用：**取走之前**先记下"轨道上当时还点得动的人"，好把"磁铁弄闷死的"和"本来就闷着的"分开。
+            // 不加这一步，日志会把所有点不动的轨道人都算到磁铁头上 —— 那是归因错误。
+            var clickableBefore = debugClickLog ? SnapshotClickableTrackPixels() : null;
+
+            for (int col = 0; col < containerGroup.columns; col++)
+            {
+                var car = carGrid[col, 0];
+                if (car == null)
+                    continue;
+
+                car.OpenLid();   // 幂等：前排车本来就是开盖的
+
+                while (!car.IsEmpty)
+                {
+                    int mult;
+                    var pixel = HarvestForMagnet(car.colorId, buckets, boardHarvested, out mult);
+                    if (pixel == null)
+                        break;   // 这个颜色已经没有任何可取来源 → 装不满，留在前排等待
+
+                    harvestedAny = true;
+                    FeedCarWithUnits(pixel, mult, car);
+                }
+            }
+
+            // 刚取完：查管道轨道上剩下的人有没有点不出去的，有就把原因和归因打出来
+            if (harvestedAny && debugClickLog)
+                LogMagnetTrackStranding(boardHarvested, clickableBefore);
+
+            // 木箱拆箱计数：与正常点击**同口径** —— 一次磁铁算一组，每个相邻的木箱只计 1 次
+            // （正常点击是"同一次点击移出的一组只算 1 次"，见 <see cref="PixelGroup.NotifyPixelsMovedOut"/>）。
+            // 不通知的话，相邻像素被磁铁吃光的木箱永远等不到计数、拆不掉 → 那些格永远是障碍 → 死锁。
+            // 它读的是各自"移出前"的 gridX / gridZ，所以先清格再调也没关系。
+            if (boardHarvested.Count > 0)
+                pixelGroup.NotifyPixelsMovedOut(boardHarvested);
+
+            if (harvestedAny)
+                MagnetRefreshAfterRemoval();
+        }
+
+        /// <summary>磁铁的分层数（层序见 <see cref="MagnetClearFrontRow"/>）。</summary>
+        private const int MagnetTierCount = 6;
+
+        /// <summary>
+        /// 棋盘像素按层分桶（一次成桶，出桶即移除，不会重复取）。
+        /// 桶下标 0~5 对应第 1~6 层；层序见 <see cref="MagnetClearFrontRow"/>。
+        ///
+        /// 盒子 / 管道的像素不在这里 —— 它们必须**按颜色现取**（<see cref="ExtractFromAnyBox"/> /
+        /// <see cref="PrepayFromAnyPipe"/>），没法预先枚举。
+        /// 冰组冻住的一律不进桶（取走会让冰组的账错乱）。
+        /// </summary>
+        private List<PixelItem>[] BuildMagnetBuckets()
+        {
+            var buckets = new List<PixelItem>[MagnetTierCount];
+            for (int i = 0; i < MagnetTierCount; i++)
+                buckets[i] = new List<PixelItem>();
+
+            var grid = pixelGroup.grid;
+            if (grid == null)
+                return buckets;
+
+            int cols = pixelGroup.columns;
+            int totalRows = pixelGroup.TotalRows;
+
+            // 正在投波的管道：它轨道上的人是"还在飞的"（目标格已在 grid 里登记，位置却还在逐格移动），
+            // 这时摘走它，MoveCell 的移动协程还会继续往车上的座位上写 localPosition → 人错位。
+            // 整条轨道本次一律不碰；等那波落定，下次磁铁再来。
+            var midFlight = CollectReleasingPipeCells();
+
+            for (int row = 0; row < totalRows; row++)
+                for (int col = 0; col < cols; col++)
+                {
+                    var p = grid[col, row];
+                    if (p == null)
+                        continue;
+                    if (p.IsFrozen)
+                        continue;                        // 冰组：不取
+                    if (midFlight.Count > 0 && midFlight.Contains(new Vector2Int(col, row)))
+                        continue;                        // 还在飞的管道人：不取
+
+                    bool inGate = pixelGroup.IsInGateRegion(col, row);
+                    bool unknown = p.isQuestion && !p.revealed;
+
+                    int tier;
+                    if (p.IsCovered)
+                        tier = inGate ? 5 : 4;           // 木箱盖住：最低两档
+                    else if (inGate)
+                        tier = unknown ? 3 : 2;
+                    else
+                        tier = unknown ? 1 : 0;
+
+                    buckets[tier].Add(p);
+                }
+
+            return buckets;
+        }
+
+        /// <summary>正在投波的管道的轨道格（这些格上的人是"还在飞的"，本次磁铁一律不碰）。</summary>
+        private HashSet<Vector2Int> CollectReleasingPipeCells()
+        {
+            var cells = new HashSet<Vector2Int>();
+            var pipes = pixelGroup.GetComponentsInChildren<PipeItem>();
+            for (int i = 0; i < pipes.Length; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null || !pipe.IsReleasing)
+                    continue;
+
+                var track = pipe.TrackCells();
+                if (track == null)
+                    continue;
+                for (int k = 0; k < track.Count; k++)
+                    cells.Add(track[k]);
+            }
+            return cells;
+        }
+
+        /// <summary>
+        /// 扫到的人若正压在一条管道的**轨道格**上，就**先取那条轨道最远端**的同色人（"尾部" = 远离管道那端）；
+        /// 扫到的这一颗**不受影响、照旧留在桶里**——本车还要同色的人时自然会轮回到它。
+        /// 没压在轨道上就原样返回 <paramref name="found"/>。
+        ///
+        /// 为什么值得先拿尾部那颗：压在轨道上的同色人正是挡住管道的那个（管道靠"轨道清空"才放下一波），
+        /// 磁铁顺水推舟先拿它 —— 既没抢别处的人，又顺手把管道解开。
+        /// <see cref="PipeItem.TrackCells"/> 是"近管道 → 远"序，所以从末尾往回找。
+        ///
+        /// 正在投波的管道不参与：轨道上的人是"还在飞的"（目标格已登记、位置还在逐格移动），
+        /// 这时摘走它，`PipeItem.MoveCell` 的移动协程会继续往车上的座位写 localPosition → 人错位。
+        /// </summary>
+        private PixelItem PreferPipeTail(PixelItem found, List<PixelItem>[] buckets)
+        {
+            if (found == null)
+                return null;
+
+            var pipes = pixelGroup.GetComponentsInChildren<PipeItem>();
+            for (int i = 0; i < pipes.Length; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null || pipe.IsReleasing)
+                    continue;
+
+                var track = pipe.TrackCells();
+                if (track == null || track.Count == 0)
+                    continue;
+
+                bool onTrack = false;
+                for (int k = 0; k < track.Count; k++)
+                {
+                    if (track[k].x == found.gridX && track[k].y == found.gridZ)
+                    {
+                        onTrack = true;
+                        break;
+                    }
+                }
+                if (!onTrack)
+                    continue;
+
+                // 尾部（远离管道那端）优先
+                for (int k = track.Count - 1; k >= 0; k--)
+                {
+                    var cell = track[k];
+                    var p = pixelGroup.grid[cell.x, cell.y];
+                    if (p == null || p.colorId != found.colorId || p.IsFrozen)
+                        continue;
+                    if (p == found)
+                        return found;      // 尾部就是它自己（或前面几颗已被取走）
+
+                    RemoveFromBuckets(buckets, p);   // 先取的那颗从桶里摘掉，免得之后又被取一次
+                    return p;
+                }
+                return found;   // 轨道上没有别的同色（found 自己就在轨道上）
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// 磁铁取完之后，检查**被取走的人所在那条管道轨道**上剩下的同色人还点不点得动；点不动就把原因打出来。
+        ///
+        /// 起因是"闷死"：以前管道**还有未释放波次**时整条轨道都算障碍，压在轨道上的人只能当起点、
+        /// 不能当通道，整组只能借某一颗的横向出口（"门"）出去；磁铁按"优先尾部"把门取走，剩下的就再也
+        /// 点不出去。**那条规则已经改掉了** —— 轨道格不再参与障碍判定（见 <c>PixelGroup.IsEmptyForExposure</c>
+        /// 与 <c>CanGroupReachFront</c>），所以这一类闷死理论上不该再有。
+        ///
+        /// 这条日志留在那里**当探针**：它要是再响，就说明是别的原因（墙 / 别的颜色 / 倍乘门），四邻那几行会写明。
+        /// <paramref name="clickableBefore"/> = 本次取走**之前**"轨道上还点得动的人"
+        /// （见 <see cref="SnapshotClickableTrackPixels"/>），用来把"磁铁造成的"和"本来就点不动的"分开。
+        ///
+        /// 由 <see cref="debugClickLog"/> 开关控制；没闷死就什么都不打。
+        /// </summary>
+        private void LogMagnetTrackStranding(List<PixelItem> taken, HashSet<PixelItem> clickableBefore)
+        {
+            if (taken == null || taken.Count == 0 || pixelGroup == null)
+                return;
+
+            var pipes = pixelGroup.GetComponentsInChildren<PipeItem>();
+            var reported = new HashSet<PipeItem>();   // 同一条轨道只报一次（一次磁铁可能从它取走好几颗）
+            for (int i = 0; i < taken.Count; i++)
+            {
+                var gone = taken[i];
+                if (gone == null)
+                    continue;
+
+                for (int p = 0; p < pipes.Length; p++)
+                {
+                    var pipe = pipes[p];
+                    if (pipe == null || pipe.IsReleasing)
+                        continue;
+
+                    var track = pipe.TrackCells();
+                    if (track == null || track.Count == 0)
+                        continue;
+                    if (!IsOnTrack(track, gone.gridX, gone.gridZ))
+                        continue;
+                    if (!reported.Add(pipe))
+                        continue;
+
+                    LogTrackStrandingDetail(pipe, track, gone, clickableBefore);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 快照：**当前**所有非投波管道轨道上、还能点得动的人（判据与玩家一致：<c>FloodFill</c> + <see cref="CanReachFront"/>）。
+        /// 磁铁取走之前调一次，之后拿来区分"磁铁新弄闷死的"与"本来就闷着的"。只读，不改状态。
+        /// </summary>
+        private HashSet<PixelItem> SnapshotClickableTrackPixels()
+        {
+            var ok = new HashSet<PixelItem>();
+            if (pixelGroup == null)
+                return ok;
+
+            var pipes = pixelGroup.GetComponentsInChildren<PipeItem>();
+            for (int i = 0; i < pipes.Length; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null || pipe.IsReleasing)
+                    continue;
+
+                var track = pipe.TrackCells();
+                if (track == null)
+                    continue;
+
+                for (int k = 0; k < track.Count; k++)
+                {
+                    var cell = track[k];
+                    var q = pixelGroup.grid[cell.x, cell.y];
+                    if (q == null || q.IsFrozen)
+                        continue;
+
+                    var group = FloodFill(q);
+                    if (group.Count > 0 && CanReachFront(group))
+                        ok.Add(q);
+                }
+            }
+            return ok;
+        }
+
+        private static bool IsOnTrack(List<Vector2Int> track, int col, int row)
+        {
+            for (int k = 0; k < track.Count; k++)
+                if (track[k].x == col && track[k].y == row)
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// 某条管道轨道上的详情：谁点不动、四邻为什么通不过、以及**归因**（磁铁造成的 / 本来就闷着的）。
+        /// </summary>
+        private void LogTrackStrandingDetail(PipeItem pipe, List<Vector2Int> track, PixelItem gone,
+            HashSet<PixelItem> clickableBefore)
+        {
+            // 轨道上剩下的同色人（不含刚被取走的那颗）
+            var rest = new List<PixelItem>();
+            for (int k = 0; k < track.Count; k++)
+            {
+                var cell = track[k];
+                var q = pixelGroup.grid[cell.x, cell.y];
+                if (q == null || q == gone || q.colorId != gone.colorId || q.IsFrozen)
+                    continue;
+                rest.Add(q);
+            }
+            if (rest.Count == 0)
+                return;   // 轨道上没剩下同色的人，谈不上卡住
+
+            // 逐颗按玩家口径验一遍（FloodFill 取组 + CanReachFront），谁点不动就报谁；同时按"取走之前点不点得动"归因
+            var stranded = new List<PixelItem>();
+            int causedByMagnet = 0;
+            int preExisting = 0;
+            for (int i = 0; i < rest.Count; i++)
+            {
+                var group = FloodFill(rest[i]);
+                if (group.Count > 0 && CanReachFront(group))
+                    continue;   // 还点得动
+
+                stranded.Add(rest[i]);
+                if (clickableBefore != null && clickableBefore.Contains(rest[i]))
+                    causedByMagnet++;    // 之前还点得动 → 是磁铁取走那几颗把它弄闷死的
+                else
+                    preExisting++;       // 之前就点不动 → 既有问题，跟磁铁无关
+            }
+            if (stranded.Count == 0)
+                return;   // 都还点得动 → 不打扰
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Magnet][闷死] 第 ").Append(GameData.CurrentLevel)
+              .Append(" 关：管道 ").Append(pipe.name).Append(" 的轨道上 ")
+              .Append(stranded.Count).Append('/').Append(rest.Count)
+              .Append(" 颗颜色 ").Append(gone.colorId).Append(" 的人点不出去")
+              .Append("（磁铁本次从该轨道取走了 (").Append(gone.gridX).Append(',').Append(gone.gridZ).Append(")）。")
+              .Append("\n  · 归因：磁铁造成 ").Append(causedByMagnet).Append(" 颗；磁铁之前就点不动 ")
+              .Append(preExisting).Append(" 颗")
+              .Append(preExisting > 0 ? "（← 既有问题，与磁铁无关）" : "")
+              .Append("\n  · 该管道剩余波次：")
+              .Append(pipe.HasRemainingWaves ? "有" : "无")
+              .Append("（轨道格已不再参与障碍判定，所以它不再是原因；请看下面四邻）");
+
+            for (int i = 0; i < stranded.Count; i++)
+            {
+                var s = stranded[i];
+                bool wasOk = clickableBefore != null && clickableBefore.Contains(s);
+                sb.Append("\n  · ").Append(wasOk ? "【磁铁造成】" : "【既有】")
+                  .Append("点不动的 (").Append(s.gridX).Append(',').Append(s.gridZ).Append(") 四邻：");
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = s.gridX + Dx4[d];
+                    int nz = s.gridZ + Dz4[d];
+                    sb.Append("\n      ").Append(DirLabel(d)).Append('(').Append(nx).Append(',').Append(nz).Append(") ")
+                      .Append(DescribeMagnetBlock(nx, nz, s.colorId, gone));
+                }
+            }
+
+            sb.Append("\n  · 判读：四邻若全为「障碍」→ 它根本没有出口；若有「可通行」→ 那条路走不到首排。");
+            Debug.Log(sb.ToString());
+        }
+
+        private static string DirLabel(int d)
+        {
+            switch (d)
+            {
+                case 0: return "X+列";
+                case 1: return "X-列";
+                case 2: return "Z+行(远离首排)";
+                default: return "Z-行(靠首排)";
+            }
+        }
+
+        /// <summary>
+        /// 给"闷死"日志用：某一格为什么通不过 —— 判定顺序与 <see cref="PixelGroup.CanGroupReachFront"/> 对齐
+        /// （越界 → 墙体 / 管道本体 / 箱子 / 木箱 → 格子内容）。
+        /// **活跃管道轨道不在其中**：轨道格已经不是障碍了（空着就算可通行）。
+        /// </summary>
+        private string DescribeMagnetBlock(int col, int row, int colorId, PixelItem gone)
+        {
+            if (!pixelGroup.IsInRange(col, row))
+                return "越界 → 不算路";
+            if (gone != null && col == gone.gridX && row == gone.gridZ)
+                return "刚被磁铁取走（原来的出口位）";
+            if (pixelGroup.IsBlocked(col, row))
+            {
+                string what = pixelGroup.IsWall(col, row) ? "墙体"
+                    : pixelGroup.IsPipe(col, row) ? "管道本体"
+                    : pixelGroup.IsBox(col, row) ? "箱子" : "木箱格";
+                return what + " → 障碍";
+            }
+
+            var cell = pixelGroup.grid[col, row];
+            if (cell == null)
+                return "空格 → 可通行";
+            if (cell.colorId == colorId)
+                return "同色「" + cell.name + "」→ 组内，可通行";
+            return "别色「" + cell.name + "」→ 障碍";
+        }
+
+        /// <summary>桶里第一颗该颜色的（**只找不摘**：真正取走哪一颗由调用方决定后再 RemoveFromBuckets）。</summary>
+        private static PixelItem PeekFromBucket(List<PixelItem> bucket, int colorId)
+        {
+            for (int i = 0; i < bucket.Count; i++)
+            {
+                var p = bucket[i];
+                if (p != null && p.colorId == colorId)
+                    return p;
+            }
+            return null;
+        }
+
+        private static void RemoveFromBuckets(List<PixelItem>[] buckets, PixelItem p)
+        {
+            for (int i = 0; i < buckets.Length; i++)
+                buckets[i].Remove(p);
+        }
+
+        /// <summary>
+        /// 按层序取一颗该颜色的源像素。<paramref name="mult"/> 出参 = 这颗人"代表"几个
+        /// （倍乘区域的格 = 该格倍率，其余恒为 1）。返回 null = 这个颜色已经没有任何可取来源。
+        /// 取出的像素**已经离格 / 离源**（棋盘像素已摘网格，盒子 / 管道来的已交出来）。
+        /// <paramref name="boardHarvested"/> 收集本次从**棋盘**取走的人（盒子 / 管道的不进，它们不在木箱邻域里），
+        /// 交给调用方在整次磁铁结束时一次性地做木箱拆箱计数。
+        /// </summary>
+        private PixelItem HarvestForMagnet(int colorId, List<PixelItem>[] buckets,
+            List<PixelItem> boardHarvested, out int mult)
+        {
+            mult = 1;
+
+            // 第 1~4 层：棋盘。前两层倍率恒 1，后两层在倍乘区域、按该格倍率补分身。
+            for (int tier = 0; tier <= 3; tier++)
+            {
+                var p = PeekFromBucket(buckets[tier], colorId);
+                if (p == null)
+                    continue;
+
+                // 压在管道轨道上 → 先取那条轨道最远端的同色人；扫到的这颗不动，留在桶里等下一轮
+                var pick = PreferPipeTail(p, buckets);
+                RemoveFromBuckets(buckets, pick);
+
+                mult = tier >= 2 ? Mathf.Max(1, pixelGroup.GateMultiplierAt(pick.gridX, pick.gridZ)) : 1;
+                DetachPixelForMagnet(pick);
+                boardHarvested.Add(pick);
+                return pick;
+            }
+
+            // 第 5 层：木箱 → 盒子 → 管道。
+            // 顺序按"越靠后越不自然"排：木箱本来就是棋盘上的人（只是被盖住）、盒子的人已经实例化、
+            // 管道的人还要凭空造出来并让管道后面少产一颗。
+            var crateFound = PeekFromBucket(buckets[4], colorId);
+            if (crateFound != null)
+            {
+                var pick = PreferPipeTail(crateFound, buckets);
+                RemoveFromBuckets(buckets, pick);
+                DetachPixelForMagnet(pick);
+                boardHarvested.Add(pick);
+                return pick;
+            }
+
+            var boxPixel = ExtractFromAnyBox(colorId);
+            if (boxPixel != null)
+                return boxPixel;
+
+            var pipePixel = PrepayFromAnyPipe(colorId);
+            if (pipePixel != null)
+                return pipePixel;
+
+            // 第 6 层：木箱盖住 + 倍乘区域
+            var crateGateFound = PeekFromBucket(buckets[5], colorId);
+            if (crateGateFound != null)
+            {
+                var pick = PreferPipeTail(crateGateFound, buckets);
+                RemoveFromBuckets(buckets, pick);
+                mult = Mathf.Max(1, pixelGroup.GateMultiplierAt(pick.gridX, pick.gridZ));
+                DetachPixelForMagnet(pick);
+                boardHarvested.Add(pick);
+                return pick;
+            }
+
+            return null;
+        }
+
+        /// <summary>第 5 层 · 盒子：从任意箱子里取一颗该颜色的隐藏 Pixel（这个箱子没有就下一个）。</summary>
+        private PixelItem ExtractFromAnyBox(int colorId)
+        {
+            var boxes = pixelGroup.GetComponentsInChildren<BoxItem>();
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                var box = boxes[i];
+                if (box == null)
+                    continue;
+
+                var p = box.TryExtractOne(colorId);
+                if (p == null)
+                    continue;
+
+                PrepareOffGridUnit(p);
+                return p;
+            }
+            return null;
+        }
+
+        /// <summary>第 5 层 · 管道：从任意管道预支一颗该颜色（管道后面那一波会少产一颗还账）。</summary>
+        private PixelItem PrepayFromAnyPipe(int colorId)
+        {
+            var pipes = pixelGroup.GetComponentsInChildren<PipeItem>();
+            for (int i = 0; i < pipes.Length; i++)
+            {
+                var pipe = pipes[i];
+                if (pipe == null)
+                    continue;
+
+                var p = pipe.PrepayOne(colorId);
+                if (p == null)
+                    continue;
+
+                PrepareOffGridUnit(p);
+                return p;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 盒子 / 管道来的像素是隐藏的、坐标是哨兵 (-1,-1)：唤醒、置回正常大小、清掉"生成中"标记、关掉交互。
+        /// **位置留在原处**（箱子中心下方 / 管道口）—— 后面的消失动画就在那里播，表现成"从这里被吸走"。
+        ///
+        /// 必须清 <c>placing</c> / <c>walkableDuringExtraction</c>：那是管道蛇形生成期间的两个标记
+        /// （<see cref="PipeItem"/> 的 SpawnPixelAtPipe 会置位），而磁铁预支的这颗**永远不会走生成流程**，
+        /// 留着会让它此后 <c>SetExposed</c> 全被闸门挡掉、并且一直自诩"提取中可穿行"。
+        /// </summary>
+        private void PrepareOffGridUnit(PixelItem p)
+        {
+            if (p == null)
+                return;
+
+            p.gameObject.SetActive(true);
+            float unit = pixelGroup != null ? pixelGroup.unitSize : 1f;
+            p.transform.localScale = Vector3.one * unit;
+            p.walkableDuringExtraction = false;
+            p.MarkPlaced();          // 清 placing 并把暴露状态归位（没置位时内部直接返回）
+            p.SetClickable(false);
+            p.SetWalking(false);
+        }
+
+        /// <summary>
+        /// 把一颗源像素"兑现"给车：倍乘区域来的先按 <paramref name="mult"/> 补出分身，
+        /// 然后先喂目标车；装不下的**交正常匹配链路送给后方的同色车**（前排优先、含未实例化的深排车）。
+        ///
+        /// 例：目标车还差 3 个，只找得到倍乘门里的绿人 → 取 2 颗（每颗 ×2 = 4 个），
+        /// 3 个喂本车、多出来的 1 个匹配到后面。
+        /// </summary>
+        private void FeedCarWithUnits(PixelItem src, int mult, ContainerItem car)
+        {
+            if (src == null || car == null)
+                return;
+
+            var units = new List<PixelItem>(Mathf.Max(1, mult)) { src };
+            for (int i = 1; i < mult; i++)
+            {
+                var clone = MagnetSpawnUnit(src);
+                if (clone != null)
+                    units.Add(clone);
+            }
+
+            var timing = MagnetBoardingTiming();
+
+            // 本车这一轮能吃几颗：Remaining 是登记口径（ConsumePixelInstant 内部同步扣），一次算准
+            int feed = Mathf.Min(units.Count, car.Remaining);
+            for (int i = 0; i < feed; i++)
+                containerGroup.ConsumePixelInstant(units[i], car, timing);   // 原地消失 → 直接在车上落点出现
+
+            if (feed >= units.Count)
+                return;
+
+            // 溢出的：走正常匹配的分发口径 —— 前排优先、同排列小优先、**含未实例化的深排车**。
+            // **forceInstant**：磁铁的人一律"原地消失 → 直接在落点出现"，**连前 4 排也不跳车** ——
+            // 倍乘多出来的那些不该突然又跳起来（它们和本体是同一批人）。
+            var spill = units.GetRange(feed, units.Count - feed);
+            var jumps = new List<ContainerGroup.BoardingEntry>();
+            var disappears = new List<ContainerGroup.BoardingEntry>();
+            containerGroup.MatchPixelsToCars(spill, jumps, disappears, forceInstant: true);
+
+            for (int i = 0; i < jumps.Count; i++)
+                containerGroup.PlayBoarding(jumps[i], timing);
+            for (int i = 0; i < disappears.Count; i++)
+                containerGroup.PlayBoarding(disappears[i], timing);
+
+            // 兜底：MatchPixelsToCars 内部 PrepareBoarding 落空时**既不登记也不返回**（那里只是一句 continue），
+            // 所以不能只看它吐出来的 unmatched —— 按"实际登记了谁"取补集，免得漏下没人管的活像素。
+            var handled = new HashSet<PixelItem>();
+            for (int i = 0; i < jumps.Count; i++)
+                if (jumps[i].pixel != null) handled.Add(jumps[i].pixel);
+            for (int i = 0; i < disappears.Count; i++)
+                if (disappears[i].pixel != null) handled.Add(disappears[i].pixel);
+
+            var leftover = new List<PixelItem>();
+            for (int i = 0; i < spill.Count; i++)
+                if (spill[i] != null && !handled.Contains(spill[i]))
+                    leftover.Add(spill[i]);
+
+            if (leftover.Count > 0)
+                LogMagnetLeftover(leftover);
+        }
+
+        /// <summary>
+        /// 倍乘分身：造一颗同色（同问号）像素，摆到源像素的位置、同缩放。
+        /// 与道具3 的 <see cref="Prop3SpawnClone"/> 同源；区别是不挂 UFO、不进 <c>_prop3Riders</c>
+        /// （磁铁的分身不挂在任何会自转的物体下，没有这个问题）。
+        /// <see cref="PixelGroup.SpawnPixel"/> 只实例化、**不写 pixelGroup.grid**，所以不会在源格留下幽灵。
+        /// </summary>
+        private PixelItem MagnetSpawnUnit(PixelItem src)
+        {
+            if (pixelGroup == null || src == null)
+                return null;
+
+            var cfg = GameManager.Instance != null ? GameManager.Instance.colorConfig : null;
+            var clone = pixelGroup.SpawnPixel(src.gridX, src.gridZ, src.colorId, cfg,
+                scaleZero: false, isQuestion: src.isQuestion);
+            if (clone == null)
+                return null;
+
+            var t = clone.transform;
+            t.position = src.transform.position;
+            t.rotation = src.transform.rotation;
+            t.localScale = src.transform.localScale;
+            clone.SetClickable(false);
+            clone.SetWalking(false);
+            clone.RevealQuestion();   // 本体若已揭晓，分身也得跟着揭晓（否则一颗问号一颗原色，穿帮）
+            return clone;
+        }
+
+        /// <summary>
+        /// 溢出的分身两边都接不住（后方没有同色车 / 车全满）：销毁并打日志。
+        /// 正常关卡不该出现 —— 出现即说明这一关的颜色配比真的喂不下这些分身。
+        /// 与道具3 UFO 的 unmatched 口径一致：只销毁，不补 <c>ClearedPixelCount</c>。
+        /// </summary>
+        private void LogMagnetLeftover(List<PixelItem> leftover)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Magnet] 第 ").Append(GameData.CurrentLevel)
+              .Append(" 关有 ").Append(leftover.Count)
+              .Append(" 颗倍乘分身找不到同色车，已销毁。颜色：");
+            for (int i = 0; i < leftover.Count; i++)
+                sb.Append(leftover[i] != null ? leftover[i].colorId.ToString() : "?").Append(' ');
+            Debug.LogWarning(sb.ToString());
+
+            for (int i = 0; i < leftover.Count; i++)
+                if (leftover[i] != null)
+                    Destroy(leftover[i].gameObject);
+        }
+
+        /// <summary>
+        /// 取走像素后的收尾，必须与 <see cref="ResolveMatch"/> 的移出收尾**逐条对齐**（少一条就会留下"看不见的遮挡"）：
+        /// <c>TryOpenBoxes</c> / <c>TryAdvanceElevators</c> 释放箱子与升降台的占格（不释放那些格依旧是障碍，
+        /// 旁边的人既不会亮、也点不出去）；<c>RefreshExposed</c> 重算暴露；<c>RefreshFrame</c> 重建整体描边
+        /// （场景里有 FrameItem 时描边由它统一画，不重建就还是旧轮廓 → 「该发白光的没发」）。
+        /// </summary>
+        private void MagnetRefreshAfterRemoval()
+        {
+            pixelGroup.TryOpenBoxes();
+            pixelGroup.TryAdvanceElevators();
+            pixelGroup.RefreshExposed();
+            RefreshFrame();
+        }
+
+        /// <summary>
+        /// 把像素从像素网格摘掉（磁铁捞走后立刻瞬移上车，不走传送带）。
+        /// 与 <see cref="ResolveMatch"/> 的移出口径保持一致：置空格、关暴露 / 点击、清道具高亮、
+        /// 撤掉木箱遮盖，并记上「已点出」与进度分子（不记的话进度条永远到不了 100%）。
+        /// </summary>
+        private void DetachPixelForMagnet(PixelItem item)
+        {
+            int col = item.gridX;
+            int row = item.gridZ;
+
+            pixelGroup.grid[col, row] = null;
+            item.SetExposed(false);
+            item.RevealQuestion();     // 问号的人要坐进车里了：当场换成真实颜色（不揭晓的话车上顶着问号）
+            item.SetPropGlow(false);   // 道具3 的强制取出高亮一并复位：它已离格
+            item.SetCovered(false);    // 木箱盖住的：撤掉遮盖，否则渲染器还是关的 → 上了车是个隐形人
+            item.SetClickable(false);
+            item.SetWalking(false);    // 瞬移上车，不播走路
+
+            GameData.RemovePixelCount++;
+            GameData.ProgressPixelCount += Mathf.Max(1, pixelGroup.GateMultiplierAt(col, row));
+        }
+
         // ===== 道具「强制取出」模式 =====
 
         /// <summary>
@@ -1412,6 +2140,32 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// **最前排（<c>row 0</c>）车队的中心**（世界坐标）—— 道具2 磁铁特效的定位点。
+        /// 与 <see cref="FrontRowsCenter"/> 的区别：那个取的是前 <c>maxOpenRows</c> 排的平均（UFO 悬停用），
+        /// 这个只取第 0 排。没有车时退回容器组自身位置。
+        /// </summary>
+        public Vector3 FirstRowCenter()
+        {
+            if (containerGroup == null)
+                return Vector3.zero;
+
+            var grid = containerGroup.grid;
+            Vector3 sum = Vector3.zero;
+            int n = 0;
+
+            for (int c = 0; c < containerGroup.columns; c++)
+            {
+                var car = grid != null ? grid[c, 0] : null;
+                if (car == null)
+                    continue;
+                sum += car.transform.position;
+                n++;
+            }
+
+            return n > 0 ? sum / n : containerGroup.transform.position;
+        }
+
+        /// <summary>
         /// 视口坐标 → 世界坐标，深度取 <paramref name="depthRef"/> 距相机的距离 ——
         /// 这样"屏幕下方飞出的 UFO"落在棋盘所在平面附近，而不是贴在相机近裁剪面上。
         /// 相机缺失时退化为参照点上下偏移，保证不崩。
@@ -1768,62 +2522,14 @@ namespace CrowdMatch
         }
 
         /// <summary>
-        /// 同色组能否离开：把组内格视为即将腾空，检查是否存在一条只经过「空 / 组内」格、从组连通到首排（row 0）的路径。
-        /// 「空」与暴露判定完全对齐：活跃管道覆盖（新蛇即将填充）的格视为障碍，不可穿过。
-        /// 倍乘门门格同样按「门对区域外像素等同墙」处理：只有本组**来自该门闭合区域内**时才可穿过
-        /// （见 <see cref="PixelGroup.CollectPassGates"/>）—— 否则区域内的组会被门格挡死、永远点不动。
-        /// 有路径即可点击离开（组能寻路到出口）；否则组被其他像素完全包围、无法离开。
+        /// 同色组能否离开 —— 点击的门槛。
+        ///
+        /// **实现已挪到 <see cref="PixelGroup.CanGroupReachFront"/>**：暴露判定（"发不发白光"）也要用同一条
+        /// 判据，放在 PixelGroup 里两边才共用一份实现；各写一份就会分叉，表现就是"点得出去却不发白光"。
         /// </summary>
         private bool CanReachFront(List<PixelItem> matched)
         {
-            int cols = pixelGroup.columns;
-            int rows = pixelGroup.TotalRows;
-
-            var inGroup = new HashSet<PixelItem>(matched);
-            var visited = new bool[cols, rows];
-            var queue = new Queue<Vector2Int>();
-
-            // 本组能穿哪些门：按**来路**算一次（组内只要有一颗在该门区域内 → 整组都能过这道门）
-            var passGates = pixelGroup.CollectPassGates(matched);
-
-            foreach (var it in matched)
-            {
-                if (!pixelGroup.IsInRange(it.gridX, it.gridZ))
-                    continue;
-                queue.Enqueue(new Vector2Int(it.gridX, it.gridZ));
-                visited[it.gridX, it.gridZ] = true;
-            }
-
-            // 4 邻偏移用类级 static readonly（原来在这里 new 两个 int[4]，每次点击都分配一遍）
-            while (queue.Count > 0)
-            {
-                var cur = queue.Dequeue();
-                if (cur.y == 0)
-                    return true;   // 到达首排
-
-                for (int d = 0; d < 4; d++)
-                {
-                    int nx = cur.x + Dx4[d];
-                    int nz = cur.y + Dz4[d];
-                    if (!pixelGroup.IsInRange(nx, nz))
-                        continue;
-                    if (visited[nx, nz])
-                        continue;
-                    if (pixelGroup.IsBlocked(nx, nz) || pixelGroup.IsActivePipeBlocked(nx, nz))
-                        continue;   // 墙体/管道/活跃管道覆盖（新蛇即将填充）= 障碍，不可穿过
-                    if (pixelGroup.IsGateBlockedFor(nx, nz, passGates))
-                        continue;   // 不是本组来路的倍乘门门格 = 障碍（门对区域外像素等同墙）
-
-                    var cell = pixelGroup.grid[nx, nz];
-                    if (cell != null && !inGroup.Contains(cell))
-                        continue;   // 非组内像素 = 障碍
-
-                    visited[nx, nz] = true;
-                    queue.Enqueue(new Vector2Int(nx, nz));
-                }
-            }
-
-            return false;
+            return pixelGroup != null && pixelGroup.CanGroupReachFront(matched);
         }
 
         /// <summary>

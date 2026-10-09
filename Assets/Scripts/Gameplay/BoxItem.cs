@@ -335,6 +335,35 @@ namespace CrowdMatch
         }
 
         /// <summary>
+        /// 道具「磁铁」专用：从箱内取走**一颗**指定颜色的隐藏 Pixel 交给调用方（不落网格、不播开箱）。
+        ///
+        /// 取出后**必须同步 <see cref="capacity"/>**：它既是开箱触发阈值，也是
+        /// <c>PixelGroup.CollectPlanningSources</c> 认可的「箱内容量」（那里取 <c>min(capacity, colorIds.Length)</c>）。
+        /// 只减 <see cref="hiddenPixels"/> 不减它，开箱会变得比设计更难、规划总数也会比运行时多算一颗。
+        /// （<see cref="colorIds"/> 是关卡声明的原始内容，保持不动；它在上式里只当上界，不会造成漂移。）
+        ///
+        /// 取空后箱子自然走 <see cref="TryOpen"/> 的「无内容」分支：清障碍 + 消失。
+        /// </summary>
+        public PixelItem TryExtractOne(int colorId)
+        {
+            if (opened || hiddenPixels.Count == 0)
+                return null;
+
+            for (int i = 0; i < hiddenPixels.Count; i++)
+            {
+                var p = hiddenPixels[i];
+                if (p == null || p.colorId != colorId)
+                    continue;
+
+                hiddenPixels.RemoveAt(i);
+                capacity = Mathf.Max(0, capacity - 1);
+                UpdateCountText();
+                return p;
+            }
+            return null;
+        }
+
+        /// <summary>
         /// 尝试开箱：收集候选格（本体 + 相邻 4 方向 + 连通），满足触发条件（可用格 ≥ 容量）则
         /// 整体规划分配位置（同色像素各自连通），立即把释放的 Pixel 落到 grid
         /// （供多箱串行判定与后续逻辑看到），并启动两段开箱动画。返回是否实际开箱。
