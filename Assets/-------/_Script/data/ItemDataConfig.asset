@@ -17,17 +17,17 @@ MonoBehaviour:
     price: 100
     smallImg: {fileID: 21300000, guid: 7fdf925e202d81f41819b30a798d4485, type: 3}
     bigImg: {fileID: 21300000, guid: 17e07ec686b0798498def3e32e7201a2, type: 3}
-    unlockLvl: 3
+    unlockLvl: 0
   - type: 2
     price: 100
     smallImg: {fileID: 21300000, guid: 47378b39a98911e4fa2d5429a125634e, type: 3}
     bigImg: {fileID: 21300000, guid: 17e07ec686b0798498def3e32e7201a2, type: 3}
-    unlockLvl: 5
+    unlockLvl: 0
   - type: 3
     price: 100
     smallImg: {fileID: 21300000, guid: f750399b31651f943b56f3c485d546b8, type: 3}
     bigImg: {fileID: 21300000, guid: 7fd579ff1ddb77f428d1c9320e7ee4be, type: 3}
-    unlockLvl: 8
+    unlockLvl: 0
   itemUnlockBg: {fileID: 21300000, guid: fef1f7ce7b5070f4d8aa8d03bb12a2df, type: 3}
   itemLockBg: {fileID: 21300000, guid: 38332856e53bb394e8d0ff038bc48680, type: 3}
   goldImg: {fileID: 0}

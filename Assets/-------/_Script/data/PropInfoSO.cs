@@ -5,27 +5,27 @@
 public class PropInfo
 {
     public ItemType propType;
-    public string propId;
+    //public string propId;
     public string propName;
     public string buyLogWay;
     public string adSceneId;
     public Sprite propSpr;
-    public Sprite propSmallSpr;
-    public int price;
+    //public Sprite propSmallSpr;
+    //public int price;
     [TextArea(3, 5)]
     public string propContent;
-    public bool isShowTextTip = false;
+    //public bool isShowTextTip = false;
 
-    public static ItemType PropToType(string prop)
+    /*public static ItemType PropToType(string prop)
     {
         switch (prop)
         {
-            case "AddSlot":
-                return ItemType.Add;
-            case "RemoveAimTape":
+            case "Refresh":
+                return ItemType.Refresh;
+            case "Magnet":
+                return ItemType.Magnet;
+            case "Remove":
                 return ItemType.Remove;
-            case "ClearWaitSlot":
-                return ItemType.Clear;
             default:
                 return ItemType.None;
         }
@@ -35,21 +35,21 @@ public class PropInfo
     {
         switch (type)
         {
-            case ItemType.Add:
-                return "AddSlot";
+            case ItemType.Refresh:
+                return "Refresh";
+            case ItemType.Magnet:
+                return "Magnet";
             case ItemType.Remove:
-                return "RemoveAimTape";
-            case ItemType.Clear:
-                return "ClearWaitSlot";
+                return "Remove";
             default:
                 return "";
         }
-    }
+    }*/
 }
 
-[System.Serializable]
+/*[System.Serializable]
 public class GetPropInfo 
 {
     public string propId;
     public int count;
-}
+}*/

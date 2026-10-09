@@ -26,8 +26,34 @@ namespace CrowdMatch
         [Tooltip("显示聚集点单位数量的 UI 文本")]
         public Text gatherCountText;
 
+        /*[Tooltip("聚集数量的机械卷轴（十位 + 个位，0~30）；留空则只用上面的文本。" +
+                 "挂上后只在数值变化时驱动它，切关时直接落位不滚")]
+        public DoubleDigitRoller gatherCountRoller;*/
+
         [Tooltip("实时显示关卡进度的 UI 文本（形如 45%）；口径与复活 / 失败面板的进度条完全一致，见 GameData.ProgressPercent")]
         public Text progressText;
+
+        [Tooltip("显示当前关卡文本（如「北京」）的 UI 文本；留空则不更新。文本取自 GameManager.levelDataConfig 的 levelTexts / levelTextsLoop")]
+        public Text levelNameText;
+
+        [Header("关卡文本入场动画")]
+        [Tooltip("入场动画作用的 3D 物体；留空则用 levelNameText 的父物体的父物体（即祖父物体）")]
+        public Transform levelNameTextRoot;
+
+        [Tooltip("切关后等多久才开始播入场动画（秒）；0 = 立即开始")]
+        public float levelTextIntroDelay = 0.1f;
+
+        [Tooltip("父物体 y 上升 1 单位的时长（秒）")]
+        public float levelTextRiseDuration = 0.3f;
+
+        [Tooltip("父物体自转 3 圈的时长（秒）")]
+        public float levelTextRotateDuration = 0.6f;
+
+        [Tooltip("父物体自转的缓动；慢快慢要明显就选更陡的 InOutQuad / InOutCubic / InOutQuart（InOutSine 最平）")]
+        public Ease levelTextRotateEase = Ease.InOutCubic;
+
+        [Tooltip("父物体 y 落下 1 单位的时长（秒）")]
+        public float levelTextFallDuration = 0.3f;
 
         [Tooltip("管理的 PixelGroup，留空会自动查找")]
         public PixelGroup pixelGroup;
@@ -127,14 +153,6 @@ namespace CrowdMatch
         /// <summary>上一条失败判定诊断行：内容完全相同时不重复打印（复活期间会有几十次上车回调，行内容一模一样）。</summary>
         private string _lastFailCheckLog;
 
-        // ===== 计数 / 进度文本的「上次值」缓存（见 UpdateCountText）=====
-        // 文本是按帧刷的，但值只在像素上带、上车、通关时变。不缓存的话每帧都要拼字符串并写一次 UI Text，
-        // 白白产生 GC 垃圾。用 int.MinValue 当「还没写过」的哨兵，保证首帧一定写一次。
-        [System.NonSerialized] private int _lastBeltOccupied = int.MinValue;
-        [System.NonSerialized] private int _lastBeltTotal = int.MinValue;
-        [System.NonSerialized] private int _lastGatheredCount = int.MinValue;
-        [System.NonSerialized] private int _lastProgressPercent = int.MinValue;
-
         /// <summary>堆积进入限制：in-flight（带 + 已点未进带）达容量后的累计点击次数；总数低于容量时重置。</summary>
         private int _overflowClickCount;
 
@@ -150,6 +168,21 @@ namespace CrowdMatch
         private static readonly int[] Dx4 = { 1, -1, 0, 0 };
         private static readonly int[] Dz4 = { 0, 0, 1, -1 };
 
+        /// <summary>关卡文本入场动画的父物体（3D 物体）；懒解析一次，见 <see cref="CacheLevelTextRoot"/>。</summary>
+        private Transform _levelTextRoot;
+
+        /// <summary>父物体的初始位姿：每次起播前复位到它，避免上一次动画被杀在半空时从错的位置起播。</summary>
+        private Vector3 _levelTextRootBasePos;
+        private Quaternion _levelTextRootBaseRot;
+        private bool _levelTextRootCached;
+
+        /// <summary>正在播放的入场序列；重入时先 Kill，避免切关时两套动画同时改同一个 Transform。</summary>
+        private Sequence _levelTextSeq;
+
+        /// <summary>上一次写进聚集数量滚轮的值。滚轮必须只在数值变化时驱动：每帧都调 SetTargetNumber 会每帧
+        /// Kill 上一段 tween 再重开，轮子永远滚不到终点，只剩原地抖。</summary>
+        private int _lastGatherRollerCount;
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -158,6 +191,12 @@ namespace CrowdMatch
                 return;
             }
             Instance = this;
+
+            // 文本不再在这里隐藏：入场动画一开头就要显示「上一关的文本」（见 PlayLevelTextIntro）。
+            // 想恢复「动画跑完才出现」的旧行为，把下面这段注释放开、并在动画末尾再 SetActive(true)。
+            /*if (levelNameText != null)
+                levelNameText.gameObject.SetActive(false);*/
+            CacheLevelTextRoot();
         }
 
         private void Start()
@@ -257,6 +296,144 @@ namespace CrowdMatch
             //更新道具状态
             var gp= UIManager.Instance.gameInnerUI;
             gp.UpdateCurrentButtonInfo();
+
+            RefreshLevelText();
+
+            /*// 聚集数量卷轴：切关直接落位（不放进位/借位动画），否则会从上一关的数字一路滚过来
+            if (gatherCountRoller != null)
+            {
+                _lastGatherRollerCount = CurrentGatherCount();
+                gatherCountRoller.SetNumberImmediate(_lastGatherRollerCount);
+            }*/
+        }
+
+        /// <summary>
+        /// 按当前关卡刷新关卡文本：动画开头先显示上一关的文本（第一关为空白），转过 180° 后再换成当前关卡的文本。
+        /// </summary>
+        private void RefreshLevelText()
+        {
+            if (levelNameText == null)
+                return;
+
+            int level = GameData.CurrentLevel;
+            PlayLevelTextIntro(GetLevelText(level), level > 1 ? GetLevelText(level - 1) : string.Empty);
+        }
+
+        /// <summary>取指定关卡的文本；关卡配置缺失、没有这一关、或该关没配文本时返回空串。下标口径与关卡 JSON 一致（含循环关）。</summary>
+        private string GetLevelText(int level)
+        {
+            var gm = GameManager.Instance;
+            LevelDataConfig config = gm != null ? gm.levelDataConfig : null;
+            return config != null ? config.GetLevelText(level) : string.Empty;
+        }
+
+        /// <summary>写关卡文本；对象若被别处关掉了顺手打开，避免文本整段不显示。</summary>
+        private void SetLevelNameText(string text)
+        {
+            if (levelNameText == null)
+                return;
+
+            if (!levelNameText.gameObject.activeSelf)
+                levelNameText.gameObject.SetActive(true);
+            levelNameText.text = text ?? string.Empty;
+        }
+
+        /// <summary>解析入场动画作用的 3D 物体并记下初始位姿；未指定 <see cref="levelNameTextRoot"/> 时用文本的父物体的父物体。</summary>
+        private void CacheLevelTextRoot()
+        {
+            if (_levelTextRootCached || levelNameText == null)
+                return;
+
+            Transform parent = levelNameText.transform.parent;
+            _levelTextRoot = levelNameTextRoot != null
+                ? levelNameTextRoot
+                : (parent != null ? parent.parent : null);
+            if (_levelTextRoot == null)
+                return;   // 层级不足（没有祖父物体）：无动画可播，也不缓存，留待下次刷新再试
+
+            _levelTextRootBasePos = _levelTextRoot.position;
+            _levelTextRootBaseRot = _levelTextRoot.rotation;
+            _levelTextRootCached = true;
+        }
+
+        /// <summary>
+        /// 关卡文本入场：开头先把<b>上一关</b>的文本摆上（第一关为空白），3D 物体（文本的父物体的父物体）
+        /// 自转一圈（冲过 420° 再回弹到 360°）；转到 180° 那一刻换成<b>当前关卡</b>的文本 ——
+        /// 此时物体正好背对镜头，换字过程看不见。层级不足时不做动画，直接显示当前文本。
+        /// </summary>
+        private void PlayLevelTextIntro(string currentText, string previousText)
+        {
+            if (levelNameText == null)
+                return;
+
+            // 上一套还没跑完（连续切关 / 连点重载）：先杀掉，否则两套动画会同时改同一个 Transform
+            if (_levelTextSeq != null)
+            {
+                _levelTextSeq.Kill();
+                _levelTextSeq = null;
+            }
+
+            SetLevelNameText(previousText);
+
+            CacheLevelTextRoot();
+            if (_levelTextRoot == null)
+            {
+                SetLevelNameText(currentText);
+                return;
+            }
+
+            Transform root = _levelTextRoot;
+
+            // 先清掉挂在这个物体上的其它 tween：上一轮残留或别的脚本的动画会每帧回写 position / rotation，
+            // 只做复位不 Kill 的话，复位会在同一帧被覆盖 —— 表现就是「第一次对，切关后不从头开始」
+            root.DOKill();
+
+            // 复位到初始位姿（被杀在半空时位置也不对）
+            root.SetPositionAndRotation(_levelTextRootBasePos, _levelTextRootBaseRot);
+
+            _levelTextSeq = DOTween.Sequence();
+            // 切关后先空等一段再起播；这段时间里文本停在上面的「上一关文本」上
+            if (levelTextIntroDelay > 0f)
+                _levelTextSeq.AppendInterval(levelTextIntroDelay);
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos + Vector3.up, levelTextRiseDuration));
+            // 自转 3 整圈（360° × 3）：LocalAxisAdd 是在自身朝向基础上追加角度，终点朝向与起点一致
+            // InOutSine 的峰值速度只有平均速度的 1.57 倍，转 3 圈几乎看不出快慢；默认改用峰值 3 倍的 InOutCubic
+            /*_levelTextSeq.Append(root
+                .DORotate(new Vector3(0f, 360f, 0f), levelTextRotateDuration, RotateMode.LocalAxisAdd)
+                //.SetEase(levelTextRotateEase));
+                .SetEase(Ease.OutBack,1.8f));*/
+
+            //_levelTextSeq.Append(root.DOMove(_levelTextRootBasePos, levelTextFallDuration));
+            /*_levelTextSeq.OnComplete(() =>
+            {
+                if (levelNameText != null)
+                    levelNameText.gameObject.SetActive(true);
+            });*/
+            float overshootAngle = 420f;
+            float finalTotalAngle = 360f;
+            float bounceDelta = finalTotalAngle - overshootAngle; // -40
+
+            float timeGo = levelTextRotateDuration * 0.75f;
+            float timeBounce = levelTextRotateDuration * 0.25f;
+
+            _levelTextSeq.Append(
+                root.DORotate(new Vector3(0f, overshootAngle, 0f), timeGo, RotateMode.LocalAxisAdd)
+                    //.SetEase(Ease.InOutSine)
+                    .SetEase(Ease.InOutCirc)
+            );
+            _levelTextSeq.Append(
+                root.DORotate(new Vector3(0f, bounceDelta, 0f), timeBounce, RotateMode.LocalAxisAdd)
+                    .SetEase(Ease.OutBack, 1.5f)
+            );
+
+            // 转过 180° 的时间点：反解 InOutCirc 前半段（p = (1 − √(1 − 4t²)) / 2）得到
+            // t = √(1 − (1 − 2p)²) / 2，其中 p = 180 / 420 ≈ 0.43 < 0.5，正好落在前半段。
+            // 换了别的缓动（含改 overshootAngle）这个公式就不再成立，换缓动时记得同步改这里。
+            float p180 = 180f / overshootAngle;
+            float t180 = Mathf.Sqrt(1f - (1f - 2f * p180) * (1f - 2f * p180)) * 0.5f;
+            float rotStart = levelTextIntroDelay > 0f ? levelTextIntroDelay : 0f;
+            // 物体背对镜头的那一瞬间换字：换的过程看不见
+            _levelTextSeq.InsertCallback(rotStart + timeGo * t180, () => SetLevelNameText(currentText));
         }
 
         /// <summary>重建整体描边；未使用 FrameItem 时为空操作。</summary>
@@ -348,6 +525,10 @@ namespace CrowdMatch
             _winDeclared = true;
             Debug.Log("[胜利判定] 检查点=" + checkpoint + " ｜ 板上所有车均已完成匹配 → 判胜");
             GameState.GameWin();
+            //如果胜利时其他面板打开，关闭对应面板，包括后需可能的道具提示框
+            UIManager.Instance.ShowSettingPanel(false);
+            UIManager.Instance.showFailTipPanel(false);
+            UIManager.Instance.ShowPropGetTip(false);
             Invoke(nameof(DoGameWin), 2.5f);
             UIManager.Instance.ShowWinPart();
         }
@@ -554,13 +735,16 @@ namespace CrowdMatch
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
         public void DoRevive()
         {
-            Revive();
-            GameState.GameStart();   // 复活后回到游玩态，继续本关
-            _transitioning = false;
-            // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
-            // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
-            if (containerGroup != null)
-                containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            DOVirtual.DelayedCall(0.6f, () =>
+            {
+                Revive();
+                GameState.GameStart();   // 复活后回到游玩态，继续本关
+                _transitioning = false;
+                // 复活期间 _transitioning 为真，判胜会被 CheckWin 挡下；这里解锁后补查一次，
+                // 避免「复活过程中最后一辆车完成匹配」被永久吞掉（复活的匹配是同步登记的，此刻计数已是终值）。
+                if (containerGroup != null)
+                    containerGroup.TryCheckWin(WinCheckpoint.ReviveSettled);
+            });
         }
 
         /// <summary>
@@ -894,46 +1078,34 @@ namespace CrowdMatch
                 HandleClick();
         }
 
-        /// <summary>
-        /// 刷新聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。
-        /// 值没变就不拼串、不写 Text：本方法是每帧调的，而这两个值只在像素上带 / 上车 / 通关时才变，
-        /// 每帧无条件赋值会白白产生字符串垃圾（Text 的 setter 虽自带相等判断，但那是在新分配出来的字符串之间比）。
-        /// </summary>
+        /// <summary>刷新每帧变化的文本：聚集数量 + 关卡进度（进度与复活 / 失败面板同源同口径，封顶 99%）。</summary>
         private void UpdateCountText()
         {
+            int count = CurrentGatherCount();
+
             if (gatherCountText != null)
             {
                 if (conveyorZone != null)
-                {
-                    int occupied = conveyorZone.OccupiedSlots;
-                    int total = conveyorZone.TotalSlots;
-                    if (occupied != _lastBeltOccupied || total != _lastBeltTotal)
-                    {
-                        _lastBeltOccupied = occupied;
-                        _lastBeltTotal = total;
-                        gatherCountText.text = occupied + "/" + total;
-                    }
-                }
+                    gatherCountText.text = count + "/" + conveyorZone.TotalSlots;
                 else
-                {
-                    int count = gatheredItems.Count;
-                    if (count != _lastGatheredCount)
-                    {
-                        _lastGatheredCount = count;
-                        gatherCountText.text = count.ToString();
-                    }
-                }
+                    gatherCountText.text = count.ToString();
             }
 
-            if (progressText != null)
+            /*// 卷轴只在数值变化时驱动一次（理由见 _lastGatherRollerCount）
+            if (gatherCountRoller != null && count != _lastGatherRollerCount)
             {
-                int percent = GameData.ProgressPercent;
-                if (percent != _lastProgressPercent)
-                {
-                    _lastProgressPercent = percent;
-                    progressText.text = percent + "%";
-                }
-            }
+                _lastGatherRollerCount = count;
+                gatherCountRoller.SetTargetNumber(count);
+            }*/
+
+            if (progressText != null)
+                progressText.text = GameData.ProgressPercent + "%";
+        }
+
+        /// <summary>聚集数量口径：有传送带取「已占用槽位」，否则退回聚集点里的单位数。文本与卷轴共用，避免两处口径漂移。</summary>
+        private int CurrentGatherCount()
+        {
+            return conveyorZone != null ? conveyorZone.OccupiedSlots : gatheredItems.Count;
         }
 
         /// <summary>当前「传送带 + 已点未进带」的总占用数。</summary>

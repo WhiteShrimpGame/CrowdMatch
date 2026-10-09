@@ -152,9 +152,9 @@ public class RewardData
     public int FrameNum;
     public void AddReward(int multiple = 1, string way = "", string type = "0")
     {
-        var propAddSlot = "AddSlot";
-        var propRemoveAimTape = "RemoveAimTape";
-        var propClearWaitSlot = "ClearWaitSlot";
+        /*var refresh = "Refresh";
+        var magnet = "Magnet";
+        var remove = "Remove";*/
         if (gold > 0)
         {
             GameData.Gold.Add(gold * multiple, way, type);
@@ -164,19 +164,19 @@ public class RewardData
         {
             for (int i = 0; i < items.Count; i++)
             {
-                string propId = propAddSlot;
+                /*string propId = refresh;
                 switch (items[i].type)
                 {
-                    case ItemType.Add:
-                        propId = propAddSlot;
+                    case ItemType.Refresh:
+                        propId = refresh;
+                        break;
+                    case ItemType.Magnet:
+                        propId = magnet;
                         break;
                     case ItemType.Remove:
-                        propId = propRemoveAimTape;
+                        propId = remove;
                         break;
-                    case ItemType.Clear:
-                        propId = propClearWaitSlot;
-                        break;
-                }
+                }*/
 
                 GameData.itemPlayerData.AddCount(items[i].type, items[i].count * multiple, way, type);
                 
@@ -196,7 +196,7 @@ public class RewardData
         {
             for (int i = 0; i < staminaItems.Count; i++)
             {
-                string propId = propAddSlot;
+                //string propId = refresh;
                 switch (staminaItems[i].type)
                 {
                     case StaminaType.None:

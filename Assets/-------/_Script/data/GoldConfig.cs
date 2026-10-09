@@ -174,15 +174,15 @@ public static class GoldConfig
         int defaultVal;
         switch (type)
         {
-            case ItemType.Add:
+            case ItemType.Refresh:
                 index = 4;
                 defaultVal = 100;
                 break;
-            case ItemType.Remove:
+            case ItemType.Magnet:
                 index = 5;
                 defaultVal = 150;
                 break;
-            case ItemType.Clear:
+            case ItemType.Remove:
                 index = 6;
                 defaultVal = 200;
                 break;

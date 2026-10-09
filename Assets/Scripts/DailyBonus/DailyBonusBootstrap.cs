@@ -174,7 +174,9 @@ namespace WsGame.DailyBouns.Integration
         /// </summary>
         public static ItemType ToItemType(int type)
         {
-            if (type < (int)ItemType.Add || type > (int)ItemType.Clear)
+            /*if (type < (int)ItemType.Add || type > (int)ItemType.Clear)
+                return ItemType.None;*/
+            if (type < 1 || type > 3)
                 return ItemType.None;
             return (ItemType)type;
         }
