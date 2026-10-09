@@ -14,14 +14,26 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   NewFeatureDatas:
   - featureShowLevel: 5
-    featureTip: "\u73A9\u6CD51\u63CF\u8FF0"
+    featureTip: "\u7BA1\u9053"
     featureMinIcon: {fileID: 21300000, guid: 3c17f0de43ade554fa8b6c0e54add3e5, type: 3}
     featureBigIcon: {fileID: 21300000, guid: ff9df6a6162daf24f89bba8f6a1baf56, type: 3}
   - featureShowLevel: 10
-    featureTip: "\u73A9\u6CD53\u63CF\u8FF0"
+    featureTip: "\u5730\u6D1E"
     featureMinIcon: {fileID: 21300000, guid: 7206830e180cc2a40b94acac3903d20b, type: 3}
     featureBigIcon: {fileID: 21300000, guid: 7c58b2220d0036e48b9b7a63bd4ea2d6, type: 3}
+  - featureShowLevel: 15
+    featureTip: "\u672A\u77E5"
+    featureMinIcon: {fileID: 21300000, guid: 19cf608534c6f5542a1b12f119aba35c, type: 3}
+    featureBigIcon: {fileID: 21300000, guid: 342e495d6ad4e7543945f8f85a0b0f9a, type: 3}
+  - featureShowLevel: 20
+    featureTip: "\u7EF3\u5B50"
+    featureMinIcon: {fileID: 21300000, guid: 2fc54e7cf925a7a4d858323bab46581c, type: 3}
+    featureBigIcon: {fileID: 21300000, guid: a9f042302412f274b9c26ea024a879bd, type: 3}
   - featureShowLevel: 30
-    featureTip: "\u73A9\u6CD54\u63CF\u8FF0"
+    featureTip: "\u590D\u5236"
     featureMinIcon: {fileID: 21300000, guid: d7a6f09abef602d408f4c21a58f6b5dd, type: 3}
     featureBigIcon: {fileID: 21300000, guid: 9de2a07859b69cb40978b8a7145c2fa6, type: 3}
+  - featureShowLevel: 37
+    featureTip: "\u6728\u7BB1"
+    featureMinIcon: {fileID: 21300000, guid: 841cfd7cc68ccf344b2556117c24c83c, type: 3}
+    featureBigIcon: {fileID: 21300000, guid: 17670b0e691d97440807d45118662c74, type: 3}

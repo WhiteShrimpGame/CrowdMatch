@@ -25,28 +25,31 @@ MonoBehaviour:
   - {fileID: 4900000, guid: e4286f50c08bdc3439a4454ef3108dcb, type: 3}
   - {fileID: 4900000, guid: 531e6bcf83312824aac4f6a4fbfdaeb5, type: 3}
   - {fileID: 4900000, guid: a1f43863bf29a1945a517f35bd0bb3a0, type: 3}
-  - {fileID: 4900000, guid: 6e72ef97fccb3914a9d461e19997623d, type: 3}
+  - {fileID: 4900000, guid: 717bb8d6e695e6f4ebc9df7d597b4e7a, type: 3}
   - {fileID: 4900000, guid: 5a120f52b4d867b488e62a01101f399a, type: 3}
   - {fileID: 4900000, guid: c542255978c4da44aacf20963d6a4c6e, type: 3}
   - {fileID: 4900000, guid: fe250bbb3c8cbd246a99bca7da7ad0f9, type: 3}
   - {fileID: 4900000, guid: 08dc552127afca74cb08e6db297a7f27, type: 3}
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
+  - {fileID: 4900000, guid: 15acb1f3d0c99884fae7858eff00480a, type: 3}
+  - {fileID: 4900000, guid: 2fdc4fa2ae26e5542bfb21e29af375db, type: 3}
+  - {fileID: 4900000, guid: cf4bc00b928a31142b1cc3378baa9a5c, type: 3}
+  - {fileID: 4900000, guid: 91cb3c60763b1104a9d659d5cd01c7ec, type: 3}
+  - {fileID: 4900000, guid: c4a7f4973a9111f4090739e39b9582d7, type: 3}
   - {fileID: 4900000, guid: 04fd54d91ae0ba14bba88db8564c6ecc, type: 3}
-  - {fileID: 4900000, guid: d62383d32519b004ba1014b4927883eb, type: 3}
+  - {fileID: 4900000, guid: 12b71f27b08b8804eb87ca764e14e4f9, type: 3}
   - {fileID: 4900000, guid: 70d3e3495159d0f45a16ed2b143e057e, type: 3}
   - {fileID: 4900000, guid: 72ccbdc70cc759043b6e2a59b6fa6b3a, type: 3}
-  - {fileID: 4900000, guid: 71e17dd96301f454693e3683e484ccf2, type: 3}
-  - {fileID: 4900000, guid: 2feab82fd38f56549a1f749ce5dacbeb, type: 3}
+  - {fileID: 4900000, guid: 715f102ebda548842935a8ec95b32f14, type: 3}
   - {fileID: 4900000, guid: 93f3da4b4ac5cde4cac72bb9b3b4d55f, type: 3}
-  - {fileID: 4900000, guid: e26725ad938f96e4a89c9888aadbb378, type: 3}
-  - {fileID: 4900000, guid: 128f1cc852e37fc49afdf580891aa27c, type: 3}
-  - {fileID: 4900000, guid: e5ae20b896b80ba48885b939aad9e339, type: 3}
-  - {fileID: 4900000, guid: 786a88e8132a8aa439519c5bb7d0d4a1, type: 3}
   - {fileID: 4900000, guid: e0ab3fef179e6024492b83ca99696d59, type: 3}
   - {fileID: 4900000, guid: afc009c0e6395654ebf76338429d389f, type: 3}
   - {fileID: 4900000, guid: f5a37167846a1f64b82bbc7c1d85d835, type: 3}
-  - {fileID: 4900000, guid: 12b71f27b08b8804eb87ca764e14e4f9, type: 3}
-  - {fileID: 4900000, guid: 91cb3c60763b1104a9d659d5cd01c7ec, type: 3}
+  - {fileID: 4900000, guid: d62383d32519b004ba1014b4927883eb, type: 3}
+  - {fileID: 4900000, guid: 2feab82fd38f56549a1f749ce5dacbeb, type: 3}
+  - {fileID: 4900000, guid: 128f1cc852e37fc49afdf580891aa27c, type: 3}
+  - {fileID: 4900000, guid: e5ae20b896b80ba48885b939aad9e339, type: 3}
+  - {fileID: 4900000, guid: 786a88e8132a8aa439519c5bb7d0d4a1, type: 3}
   - {fileID: 4900000, guid: a0765d324e1d80342b88c4230fdf7132, type: 3}
   loopLevels:
   - {fileID: 4900000, guid: 9ace7a944d6697646ba4469f61f2ace5, type: 3}
@@ -61,28 +64,34 @@ MonoBehaviour:
   - {fileID: 4900000, guid: e4286f50c08bdc3439a4454ef3108dcb, type: 3}
   - {fileID: 4900000, guid: 531e6bcf83312824aac4f6a4fbfdaeb5, type: 3}
   - {fileID: 4900000, guid: a1f43863bf29a1945a517f35bd0bb3a0, type: 3}
-  - {fileID: 4900000, guid: 6e72ef97fccb3914a9d461e19997623d, type: 3}
+  - {fileID: 4900000, guid: 717bb8d6e695e6f4ebc9df7d597b4e7a, type: 3}
   - {fileID: 4900000, guid: 5a120f52b4d867b488e62a01101f399a, type: 3}
   - {fileID: 4900000, guid: c542255978c4da44aacf20963d6a4c6e, type: 3}
   - {fileID: 4900000, guid: fe250bbb3c8cbd246a99bca7da7ad0f9, type: 3}
   - {fileID: 4900000, guid: 08dc552127afca74cb08e6db297a7f27, type: 3}
   - {fileID: 4900000, guid: c909ba94089e5384aa940891ebf1ed7e, type: 3}
+  - {fileID: 4900000, guid: 15acb1f3d0c99884fae7858eff00480a, type: 3}
+  - {fileID: 4900000, guid: 2fdc4fa2ae26e5542bfb21e29af375db, type: 3}
+  - {fileID: 4900000, guid: cf4bc00b928a31142b1cc3378baa9a5c, type: 3}
+  - {fileID: 4900000, guid: 91cb3c60763b1104a9d659d5cd01c7ec, type: 3}
+  - {fileID: 4900000, guid: c4a7f4973a9111f4090739e39b9582d7, type: 3}
   - {fileID: 4900000, guid: 04fd54d91ae0ba14bba88db8564c6ecc, type: 3}
-  - {fileID: 4900000, guid: d62383d32519b004ba1014b4927883eb, type: 3}
+  - {fileID: 4900000, guid: 12b71f27b08b8804eb87ca764e14e4f9, type: 3}
   - {fileID: 4900000, guid: 70d3e3495159d0f45a16ed2b143e057e, type: 3}
   - {fileID: 4900000, guid: 72ccbdc70cc759043b6e2a59b6fa6b3a, type: 3}
-  - {fileID: 4900000, guid: 71e17dd96301f454693e3683e484ccf2, type: 3}
-  - {fileID: 4900000, guid: 2feab82fd38f56549a1f749ce5dacbeb, type: 3}
+  - {fileID: 4900000, guid: 715f102ebda548842935a8ec95b32f14, type: 3}
   - {fileID: 4900000, guid: 93f3da4b4ac5cde4cac72bb9b3b4d55f, type: 3}
-  - {fileID: 4900000, guid: e26725ad938f96e4a89c9888aadbb378, type: 3}
-  - {fileID: 4900000, guid: 128f1cc852e37fc49afdf580891aa27c, type: 3}
-  - {fileID: 4900000, guid: e5ae20b896b80ba48885b939aad9e339, type: 3}
-  - {fileID: 4900000, guid: 786a88e8132a8aa439519c5bb7d0d4a1, type: 3}
   - {fileID: 4900000, guid: e0ab3fef179e6024492b83ca99696d59, type: 3}
   - {fileID: 4900000, guid: afc009c0e6395654ebf76338429d389f, type: 3}
   - {fileID: 4900000, guid: f5a37167846a1f64b82bbc7c1d85d835, type: 3}
-  levelDiff: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-  levelDiffLoop: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  - {fileID: 4900000, guid: d62383d32519b004ba1014b4927883eb, type: 3}
+  - {fileID: 4900000, guid: 2feab82fd38f56549a1f749ce5dacbeb, type: 3}
+  - {fileID: 4900000, guid: 128f1cc852e37fc49afdf580891aa27c, type: 3}
+  - {fileID: 4900000, guid: e5ae20b896b80ba48885b939aad9e339, type: 3}
+  - {fileID: 4900000, guid: 786a88e8132a8aa439519c5bb7d0d4a1, type: 3}
+  - {fileID: 4900000, guid: a0765d324e1d80342b88c4230fdf7132, type: 3}
+  levelDiff: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  levelDiffLoop: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
   levelTexts:
   - "\u5317\u4EAC"
   - "\u4E0A\u6D77"
@@ -116,36 +125,48 @@ MonoBehaviour:
   - "\u592A\u539F"
   - "\u957F\u6625"
   - "\u54C8\u5C14\u6EE8"
-  levelTextsLoop:
   - "\u5357\u660C"
   - "\u4E1C\u839E"
   - "\u4F5B\u5C71"
   - "\u6CC9\u5DDE"
   - "\u70DF\u53F0"
   - "\u6F4D\u574A"
-  - "\u7ECD\u5174"
-  - "\u5E38\u5DDE"
-  - "\u4FDD\u5B9A"
-  - "\u90AF\u90F8"
-  - "\u5609\u5174"
-  - "\u91D1\u534E"
-  - "\u60E0\u5DDE"
-  - "\u4E2D\u5C71"
-  - "\u5170\u5DDE"
-  - "\u94F6\u5DDD"
-  - "\u897F\u5B81"
-  - "\u547C\u548C\u6D69\u7279"
+  levelTextsLoop:
   - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
-  - "\u5317\u4EAC"
+  - "\u4E0A\u6D77"
+  - "\u5E7F\u5DDE"
+  - "\u6DF1\u5733"
+  - "\u676D\u5DDE"
+  - "\u5357\u4EAC"
+  - "\u6210\u90FD"
+  - "\u91CD\u5E86"
+  - "\u6B66\u6C49"
+  - "\u897F\u5B89"
+  - "\u5929\u6D25"
+  - "\u82CF\u5DDE"
+  - "\u65E0\u9521"
+  - "\u5B81\u6CE2"
+  - "\u5408\u80A5"
+  - "\u957F\u6C99"
+  - "\u90D1\u5DDE"
+  - "\u9752\u5C9B"
+  - "\u5927\u8FDE"
+  - "\u53A6\u95E8"
+  - "\u798F\u5DDE"
+  - "\u6D4E\u5357"
+  - "\u6C88\u9633"
+  - "\u6606\u660E"
+  - "\u8D35\u9633"
+  - "\u5357\u5B81"
+  - "\u6D77\u53E3"
+  - "\u4E09\u4E9A"
+  - "\u77F3\u5BB6\u5E84"
+  - "\u592A\u539F"
+  - "\u957F\u6625"
+  - "\u54C8\u5C14\u6EE8"
+  - "\u5357\u660C"
+  - "\u4E1C\u839E"
+  - "\u4F5B\u5C71"
+  - "\u6CC9\u5DDE"
+  - "\u70DF\u53F0"
+  - "\u6F4D\u574A"
