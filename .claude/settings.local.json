@@ -87,7 +87,9 @@
       "Bash(sort *)",
       "Bash(U=\"/c/Program Files/Unity/Hub/Editor/2021.3.14f1/Editor/Data/Managed\" *)",
       "Bash(timeout 180 dotnet tool install -g ilspycmd)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(cp \"Assembly-CSharp-Editor.csproj.bak-fr\" \"Assembly-CSharp-Editor.csproj\")",
+      "Bash(rm \"Assembly-CSharp-Editor.csproj.bak-fr\")"
     ]
   }
 }
