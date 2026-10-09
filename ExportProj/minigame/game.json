@@ -2,7 +2,7 @@
 {
   "deviceOrientation" : "portrait",
   "iOSHighPerformance" : true,
-  "iOSHighPerformance+" : false,
+  "iOSHighPerformance+" : true,
   "subpackages"         : [
     {
       "name" : "wasmcode",
