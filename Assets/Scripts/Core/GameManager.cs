@@ -29,7 +29,7 @@ namespace CrowdMatch
         [Tooltip("关卡 JSON 列表（调试用，优先级高于 levelDataConfig；非空时按序号循环取关）")]
         public List<TextAsset> levelJsons = new List<TextAsset>();
 
-        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用；关卡显示文本也在它里面（levelTexts / levelTextsLoop）")]
+        [Tooltip("关卡编排 ScriptableObject（顺序关 + 循环关）。levelJsons 为空时使用；关卡显示文本也在它里面（levelTexts，按序号循环取用）")]
         public LevelDataConfig levelDataConfig;
 
         [Header("对象池")]

@@ -24,7 +24,7 @@ public class FailTipPanel : MonoBehaviour
             AudioManager.Instance.PlayButtonAudioAndVibrate();
             UIManager.Instance.showFailTipPanel(false);
         });
-        ShowWinStreak();
+        //ShowWinStreak();
     }
 
 

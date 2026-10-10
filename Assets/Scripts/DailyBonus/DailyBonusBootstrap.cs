@@ -56,9 +56,9 @@ namespace WsGame.DailyBouns.Integration
         }
 
         /// <summary>
-        /// 奖励图标解析：纯金币奖励用金币图，带道具的用第一件道具的小图。
-        /// 这里**不**按 sprite 原生尺寸改 sizeDelta —— 格子里的 ItemIcon 尺寸是美术摆好的，
-        /// 宿主的 RewardTips 对道具图标也是直接用（只有金币图才套原生尺寸）。
+        /// 奖励图标解析：纯金币奖励用金币图，带道具的用第一件道具的**大图**（签到格子显示尺寸大，
+        /// 小图放大会糊）。取到图后套 sprite 原生尺寸，再按类型叠一个缩放系数：金币 0.4、
+        /// 道具 3(Remove) 0.33、其余道具 0.35 —— 三种图源原生尺寸不一致，不归一大小会不齐。
         /// </summary>
         private static void RegisterIconResolvers()
         {
@@ -70,17 +70,30 @@ namespace WsGame.DailyBouns.Integration
                 // 只有「单件道具」和「纯金币」才走资源表换图。
                 // 多件道具（第7天礼包）保持 prefab 原图：格子放不下多件，换图只能显示第一件，会误导。
                 Sprite sprite;
+                float scale;
                 if (reward.items.Count == 1)
-                    sprite = GetItemSprite(DailyBonusRewardHandler.ToItemType(reward.items[0].type));
+                {
+                    sprite = GetItemSprite(DailyBonusRewardHandler.ToItemType(reward.items[0].type), true);
+                    scale = reward.items[0].type == (int)ItemType.Remove ? 0.33f : 0.35f;
+                }
                 else if (reward.items.Count == 0)
+                {
                     sprite = GetGoldSprite();
+                    scale = 0.4f;
+                }
                 else
+                {
                     return;
+                }
 
-                // 查不到就不覆盖：prefab 里本来就摆好了金币/礼包图，
-                // 赋 null 会把它抹成空白（ItemDataConfig.goldImg 目前就是未赋值状态）。
+                // 查不到就不覆盖：prefab 里本来就摆好了金币/礼包图，赋 null 会把它抹成空白，
+                // 连带 sizeDelta 也变成 sprite 原生尺寸以外的值（金币图走 ItemDataConfig.goldImg）。
                 if (sprite != null)
+                {
                     img.sprite = sprite;
+                    img.rectTransform.sizeDelta = sprite.rect.size;
+                }
+                img.rectTransform.localScale = Vector3.one * scale;
             };
             RewardEffect.GlobalIconResolver = (img, rewardType) =>
             {
@@ -96,10 +109,10 @@ namespace WsGame.DailyBouns.Integration
         }
 
         /// <summary>
-        /// 查道具小图。不用 ItemDataConfig.GetSmallImg —— 它内部是 indexDict[type]，
+        /// 查道具图。不用 ItemDataConfig.GetSmallImg/GetBigImg —— 它们内部是 indexDict[type]，
         /// 配置里缺这件道具时会抛 KeyNotFoundException；直接遍历 data 数组更安全。
         /// </summary>
-        private static Sprite GetItemSprite(ItemType type)
+        private static Sprite GetItemSprite(ItemType type, bool big = false)
         {
             var cfg = ItemConfig;
             if (cfg == null || cfg.data == null || type == ItemType.None)
@@ -108,7 +121,7 @@ namespace WsGame.DailyBouns.Integration
             for (int i = 0; i < cfg.data.Length; i++)
             {
                 if (cfg.data[i].type == type)
-                    return cfg.data[i].smallImg;
+                    return big ? cfg.data[i].bigImg : cfg.data[i].smallImg;
             }
             return null;
         }

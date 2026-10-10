@@ -884,7 +884,7 @@ MonoBehaviour:
   revivePanelPrefab: {fileID: 8783159860097895648, guid: 25d7700c4ce4c1a419a58fa4d5b3f651, type: 3}
   winPanelPrefab: {fileID: 8783159860097895648, guid: 8cdb88d12acc19246b57ef257ebff253, type: 3}
   failPanelPrefab: {fileID: 8783159860097895648, guid: 3125d3a69f84c9b4ca7b310cb341c322, type: 3}
-  failTipPanelPrefab: {fileID: 8783159860097895648, guid: dff99dc9f6af60c4a96b788c3ffcb3a3, type: 3}
+  failTipPanelPrefab: {fileID: 8783159860097895648, guid: 583f510013ed1d940b8dc501b2028234, type: 3}
   getRewardPanelPrefab: {fileID: 0}
   retryPanelPrefab: {fileID: 8783159860097895648, guid: 148d41f141af69c4fa1b84e4d5f6c5d0, type: 3}
   gameInnerUI: {fileID: 1607977078}
@@ -1178,6 +1178,14 @@ PrefabInstance:
   m_Modification:
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 2443458588547052193, guid: e8c0abf1b7790a8408b460cac99e9e0b, type: 3}
+      propertyPath: m_EffectColor.b
+      value: 0.40784314
+      objectReference: {fileID: 0}
+    - target: {fileID: 2443458588547052193, guid: e8c0abf1b7790a8408b460cac99e9e0b, type: 3}
+      propertyPath: m_EffectColor.g
+      value: 0.14509805
+      objectReference: {fileID: 0}
     - target: {fileID: 2443458588547052201, guid: e8c0abf1b7790a8408b460cac99e9e0b, type: 3}
       propertyPath: m_LocalPosition.z
       value: -0.1
@@ -1317,7 +1325,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 4
+      value: 3.85
       objectReference: {fileID: 0}
     - target: {fileID: 8855357013628419106, guid: a56918ee911e44d4f9d014e502322167, type: 3}
       propertyPath: m_LocalPosition.y
@@ -1469,6 +1477,10 @@ PrefabInstance:
       value: -240.8999
       objectReference: {fileID: 0}
     - target: {fileID: 1043676349807406064, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1045369704035880005, guid: da4b17d86347fb448b46ae97ed3404c5, type: 3}
       propertyPath: m_IsActive
       value: 0
       objectReference: {fileID: 0}
@@ -2033,7 +2045,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e19747de3f5aca642ab2be37e372fb86, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_EffectColor: {r: 0, g: 0, b: 0, a: 1}
+  m_EffectColor: {r: 0.09411765, g: 0.18431373, b: 0.34509805, a: 1}
   m_EffectDistance: {x: 2, y: 2}
   m_UseGraphicAlpha: 1
 --- !u!114 &1776938078

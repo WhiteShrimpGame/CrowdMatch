@@ -121,11 +121,11 @@ public class RevivePanel : MonoBehaviour,IPointerDownHandler, IPointerUpHandler
     {
         UIManager.Instance.HidePanel(transform, () =>
         {
-            if (GameData.WinStreak > 0)
+            /*if (GameData.WinStreak > 0)
             {
                 UIManager.Instance.ShowRetryPanel(true);
             }
-            else
+            else*/
             {
                 UIManager.Instance.showFailPanel(true);
             }

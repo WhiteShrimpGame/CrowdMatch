@@ -82,6 +82,8 @@ public class GetPropTipPanel : MonoBehaviour
             titleNameText.text = aimInfo.propName;
             propContentText.text = aimInfo.propContent;
             propIcon.sprite = aimInfo.propSpr;
+            if (aimInfo.propSpr != null)
+                propIcon.rectTransform.sizeDelta = aimInfo.propSpr.rect.size;
             buyLogWay = aimInfo.buyLogWay;
             adSceneId = aimInfo.adSceneId;
             //price = int.Parse(aimInfo.price);

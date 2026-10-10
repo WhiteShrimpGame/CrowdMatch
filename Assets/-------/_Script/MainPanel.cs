@@ -45,13 +45,13 @@ public class MainPanel : MonoBehaviour
         levelNum.text = "第 " + GameData.CurrentLevel + " 关";
 
         //if (GameData.IsWinStreakActive && GameData.WinStreak > 0)
-        if (GameData.WinStreak > 0)
+        /*if (GameData.WinStreak > 0)
         {
             var streak = transform.Find("WinStreak");
             streak.gameObject.SetActive(true);
             streak.Find("StreakCount").GetComponent<Text>().text =
                 Mathf.Min(GameData.WinStreak, 5).ToString();
-        }
+        }*/
         goldCountText = transform.Find("GoldFrame/GoldCount").GetComponent<Text>();
         transform.Find("SettingButton").GetComponent<Button>().onClick.AddListener(_OnSettingBtnClk);
         RefreshGoldCount();

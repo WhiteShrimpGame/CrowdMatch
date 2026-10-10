@@ -33,7 +33,7 @@ namespace CrowdMatch
         [Tooltip("实时显示关卡进度的 UI 文本（形如 45%）；口径与复活 / 失败面板的进度条完全一致，见 GameData.ProgressPercent")]
         public Text progressText;
 
-        [Tooltip("显示当前关卡文本（如「北京」）的 UI 文本；留空则不更新。文本取自 GameManager.levelDataConfig 的 levelTexts / levelTextsLoop")]
+        [Tooltip("显示当前关卡文本（如「北京」）的 UI 文本；留空则不更新。文本取自 GameManager.levelDataConfig 的 levelTexts，按序号循环取用")]
         public Text levelNameText;
 
         [Header("关卡文本入场动画")]
@@ -726,7 +726,7 @@ namespace CrowdMatch
         /// <summary>失败后的复活：保留固定数量像素在传送带，其余溢出像素直接匹配后排车；复活后回到游玩态继续本关。</summary>
         public void DoRevive()
         {
-            DOVirtual.DelayedCall(0.6f, () =>
+            DOVirtual.DelayedCall(0.3f, () =>
             {
                 Revive();
                 GameState.GameStart();   // 复活后回到游玩态，继续本关
