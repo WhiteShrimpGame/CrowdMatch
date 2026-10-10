@@ -433,6 +433,11 @@ namespace CrowdMatch
             if (float.IsNaN(prevX))
                 return false;   // 本槽首次记录：本帧只锚定起点，不判定
 
+            // 「刷新」道具滚动预览期间禁止上车：位置仍照常记录（保证 prevX 连续），但本帧不判定离开，
+            // 像素继续随传送带绕圈，滚动结束自然恢复。
+            if (containerGroup.IsRefreshRolling)
+                return false;
+
             // 复活保留：这颗在等复活队列叫它跳车，不许被正常匹配流程吃掉。
             // 放在锚点更新之后，保证它摘除后本槽新像素的 prevX 仍然连续。
             if (pixel.reviveReserved)

@@ -112,6 +112,12 @@ namespace CrowdMatch
         /// <summary>正在上车（jump 或回退 lerp）尚未落定的像素计数。失败判定用它做「静止门槛」。</summary>
         [System.NonSerialized] public int consumingCount;
 
+        /// <summary>「刷新」道具的滚动预览是否进行中（0.6s）。期间禁止上车、禁止点其他道具。</summary>
+        [System.NonSerialized] private bool _refreshRolling;
+
+        /// <summary>滚动预览期间真，可用于屏蔽上车 / 其他道具（见 <see cref="StartRefreshRoll"/>）。</summary>
+        public bool IsRefreshRolling { get { return _refreshRolling; } }
+
         /// <summary>
         /// 板上「未完成匹配」的车数（= 车上还有容量没被填满的车数）。胜利判定用它做 O(1) 过滤：
         /// 归零才值得做一次全盘复核。<see cref="RebuildGrid"/> 按盘面重算，其余时候由 <see cref="ConsumeCar"/> 递减。
@@ -130,6 +136,9 @@ namespace CrowdMatch
 
         /// <summary>关卡加载时传入的颜色配置（懒实例化补造车时要按它上色）。</summary>
         [System.NonSerialized] private ColorConfig _containerConfig;
+
+        /// <summary>本关用到的**全部颜色**（去重，含已出库车用过的颜色）。「刷新」滚动的取色范围，关卡加载时快照一次。</summary>
+        [System.NonSerialized] private readonly List<int> _levelColors = new List<int>();
 
         /// <summary>预制体层级快照（池化复用复位用；首次需要时从 containerPrefab 抓取）。</summary>
         [System.NonSerialized] private ContainerViewTemplate _viewTemplate;
@@ -1199,6 +1208,289 @@ namespace CrowdMatch
             _cells[from] = default(ContainerCell);
         }
 
+        /// <summary>
+        /// 道具1「刷新」：把**还没开走**的车的前后顺序随机重排（含载有乘客的车——乘客是车的子物体，会跟着一起走）。
+        ///
+        /// 口径（已与用户核对）：
+        /// · **只在参与范围内洗（可跨列）**：洗的是「谁占哪个格」，**格集合本身不动**，所以每列的占用行集合不变、
+        ///   「压紧连续」仍然成立。颜色 / 容量 / 乘客都跟着车走，不是重刷颜色；
+        /// · **绳组车（ropeGroupId != 0）原地不动**：绳链靠相邻列各车的相对偏移成立，动其中一辆会扯断；
+        /// · **正在补位 / 正在上车的车跳过**：挪它会和正在播的动画打架；
+        /// · **默认覆盖全盘、含未实例化的深排车**：参与格取自**数据层**（深排车也在内），遇到只有数据层的格
+        ///   就 <see cref="Materialize"/> 现造出来——与 <see cref="MatchPixelsToCars"/> 命中深排车时同款做法。
+        ///   落到视窗外（<c>row &gt;= WindowRows</c>）的**空车**会把状态回写数据层后**取消实例化**（恢复懒实例化）；
+        ///   **载着乘客的车**则保持实例化——<see cref="DespawnCar"/> 会连乘客像素一起清掉且拿不回来。
+        /// · **盖子的终态**：落到第一排 → 开盖；载着乘客的车不动它的盖子；其余非第一排的空车，
+        ///   只要**前方还堵着**（既不可能前移、也不会开盖）就重新盖上。
+        ///
+        /// 换位是**瞬间**的（直接改 grid / gridX / gridZ / localPosition），不播动画。
+        /// </summary>
+        /// <param name="frontRows">
+        /// 参与刷新的排数：**0（默认）= 全局刷新**（所有排）；n &gt; 0 = 只在前 n 排之间交换位置
+        /// （超出总排数时按全部处理）。取前 n 排即每列的行前缀，前缀内互换算不破坏「列内压紧连续」。
+        /// </param>
+        public void ShuffleRemainingCars(int frontRows = 0)
+        {
+            if (grid == null && !HasData)
+                return;
+
+            int rowLimit = frontRows > 0 ? Mathf.Min(frontRows, rows) : rows;
+
+            var slots = new List<Vector2Int>();    // 参与洗牌的格 (col, row)
+            var cars = new List<ContainerItem>();  // 与 slots 一一对应的车
+            var cells = new List<ContainerCell>(); // 与 cars 配对的数据层条目
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rowLimit; row++)
+                {
+                    var item = grid != null ? grid[col, row] : null;
+
+                    if (item != null)
+                    {
+                        if (item.ropeGroupId != 0)
+                            continue;                  // 绳组：原地不动
+                        if (item.isRefilling || item.IsBoarding)
+                            continue;                  // 正在动：跳过
+                    }
+                    else
+                    {
+                        if (!CarAt(col, row))
+                            continue;                  // 空格
+                        if (_cells[CellIndex(col, row)].ropeGroupId != 0)
+                            continue;                  // 只有数据层的深排绳组（绳未生效）：不动
+
+                        // 懒实例化：这格的车只有数据层 —— 现造出来，紧随其后与别的车一起落位。
+                        // 与 MatchPixelsToCars 命中深排车时同款：造出来后保持实例化（见下）。
+                        item = Materialize(col, row);
+                        if (item == null)
+                            continue;                  // 造不出来就跳过，保证 slots/cars/cells 仍 1:1
+                    }
+
+                    slots.Add(new Vector2Int(col, row));
+                    cars.Add(item);
+                    cells.Add(HasData ? _cells[CellIndex(col, row)] : default(ContainerCell));
+                }
+
+            if (cars.Count < 2)
+                return;                                    // 0/1 辆：洗了也不变
+
+            // Fisher-Yates：车与数据层条目一起洗，保持二者配对
+            for (int i = cars.Count - 1; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                var tc = cars[i]; cars[i] = cars[j]; cars[j] = tc;
+                var td = cells[i]; cells[i] = cells[j]; cells[j] = td;
+            }
+
+            // 全部落位。格集合与车集合是 1:1，逐个写入即可覆盖所有格，不会留下旧的 grid 残留。
+            var frontCars = new List<ContainerItem>();
+            for (int i = 0; i < cars.Count; i++)
+            {
+                int col = slots[i].x;
+                int row = slots[i].y;
+                var item = cars[i];
+
+                grid[col, row] = item;
+                item.gridX = col;
+                item.gridZ = row;
+                item.transform.localPosition = GetLocalPosition(col, row);
+
+                if (HasData)
+                {
+                    var c = cells[i];
+                    c.col = col;
+                    c.row = row;
+                    _cells[CellIndex(col, row)] = c;
+                }
+
+                if (row == 0)
+                {
+                    item.HideLid();   // 与 RebuildGrid 同口径：落到第一排的车直接开盖
+                    frontCars.Add(item);
+                }
+            }
+
+            // 落位之后、出库检查之前：修正盖子的终态，并把落在视窗外的空车取消实例化。
+            // 必须等**全部落位完成**再看 —— IsFrontCleared 要读该列前方各排的最终状态。
+            for (int i = 0; i < cars.Count; i++)
+            {
+                int col = slots[i].x;
+                int row = slots[i].y;
+                var item = cars[i];
+
+                if (row == 0 || item.HasPassengers)
+                    continue;   // 第一排已开盖；载着乘客的车不动它的盖子、也不能回收（会丢乘客像素）
+
+                // 非第一排的空车：本来不该开着的就重新盖上。
+                // 判据用 IsFrontCleared 而**不是** IsOpen —— HasPendingFrontTransition 正是拿
+                // 「盖开着 且 前方已放行」当作「还有进度、先别判失败」的信号；动那种车会误判失败。
+                // 也就是说：只有「前方还堵着（不可能前移、也不可能开盖）」的车才盖上。
+                if (!IsFrontCleared(col, row))
+                    item.ShowLid();
+
+                if (HasData && row >= WindowRows)
+                {
+                    // 落在**视窗外的空车**：取消实例化，恢复懒实例化。
+                    // 先把实例的当前状态回写数据层——实例一走，数据层就成了该格唯一权威，
+                    // 而它此刻对已实例化的格是陈旧的（remaining / lidOpened 都对不上）。
+                    WriteCellFromInstance(col, row, item);
+                    DespawnCar(item);
+                    grid[col, row] = null;
+                }
+            }
+
+            // 落位之后再触发出库检查：新落到第一排的车可能已经装满，该走就得走。
+            // 必须放在落位循环之后 —— 出库会引发补位、改动盘面，边放边查会错位。
+            for (int i = 0; i < frontCars.Count; i++)
+            {
+                var item = frontCars[i];
+                if (item != null)
+                    TryExitIfAtFront(item, item.gridX);
+            }
+        }
+
+        /// <summary>
+        /// 把实例的**当前状态**回写进它所在格的数据层。取消实例化前的必要动作：实例一走，
+        /// 数据层就成了该格**唯一权威**，而它对「有实例」的格是陈旧的（<see cref="ConsumeCar"/> 只扣实例、从不回写）。
+        /// 只覆盖会变的字段；<c>originCol</c> / <c>originRow</c>（车的稳定身份）由原条目原样保留。
+        /// </summary>
+        private void WriteCellFromInstance(int col, int row, ContainerItem item)
+        {
+            int i = CellIndex(col, row);
+            var c = _cells[i];
+            c.col = col;
+            c.row = row;
+            c.occupied = true;
+            c.colorId = item.colorId;
+            c.capacity = item.capacity;
+            c.remaining = item.Remaining;
+            c.ropeGroupId = item.ropeGroupId;
+            c.isQuestion = item.isQuestion;
+            c.revealed = item.revealed;
+            c.lidOpened = item.lidOpened;
+            _cells[i] = c;
+        }
+
+        /// <summary>
+        /// 道具1「刷新」的**带表现**入口：先在本关颜色里滚动 0.6s（每 0.1s 每辆车各自随机换一个颜色），
+        /// 滚动结束后再执行真正的 <see cref="ShuffleRemainingCars"/>。
+        ///
+        /// 滚动只改**外观**（<see cref="ContainerItem.SetVisualColorOverride"/>），真实 colorId 不动，
+        /// 所以匹配 / 判胜口径全程不受影响。滚动期间 <see cref="IsRefreshRolling"/> 为真：
+        /// 传送带不许上车、道具按钮被 UI 挡掉（见 ConveyorBeltZone / GameInnerUI）。
+        /// </summary>
+        /// <param name="frontRows">同 <see cref="ShuffleRemainingCars"/>：0 = 全局，n &gt; 0 = 只在前 n 排之间。</param>
+        public void StartRefreshRoll(int frontRows = 0)
+        {
+            if (_refreshRolling || !isActiveAndEnabled)
+                return;
+            StartCoroutine(RefreshRollRoutine(frontRows));
+        }
+
+        private IEnumerator RefreshRollRoutine(int frontRows)
+        {
+            _refreshRolling = true;
+
+            int rowLimit = frontRows > 0 ? Mathf.Min(frontRows, rows) : rows;
+            var cars = new List<ContainerItem>();
+            CollectShuffleCars(rowLimit, cars);
+
+            const float duration = 0.6f;    // 滚动总时长
+            const int ticks = 6;            // 每 0.1s 换一次颜色
+            const float pulseCount = 2f;    // 缩放脉冲次数（0.95 ↔ 1.05，末值恰好回 1）
+            const float pulseAmp = 0.05f;
+            const float step = duration / ticks;
+
+            // 变色前：把车上的乘客藏起来、开着的盖子重新盖上（滚动期间不留「车上有人 / 已开盖」这类真实信息），
+            // 并记下基态缩放供脉冲与还原使用。
+            for (int i = 0; i < cars.Count; i++)
+                if (cars[i] != null)
+                    cars[i].BeginRollVisuals();
+
+            // 第 1 次换色在 t=0 立即生效，之后每 0.1s 一次
+            int colorTick = 0;
+            if (_levelColors.Count > 0)
+            {
+                ApplyRollColors(cars);
+                colorTick++;
+            }
+
+            // 逐帧循环：缩放要跟帧平滑，换色则按 0.1s 节拍触发
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                // 2 个完整正弦周期：p=0 与 p=1 处 sin 均为 0 → 起止都是 1
+                float p = elapsed / duration;
+                float s = 1f + pulseAmp * Mathf.Sin(2f * Mathf.PI * pulseCount * p);
+                for (int i = 0; i < cars.Count; i++)
+                    if (cars[i] != null)
+                        cars[i].SetRollScale(s);
+
+                yield return null;
+                elapsed += Time.deltaTime;
+
+                while (colorTick < ticks && elapsed >= colorTick * step)
+                {
+                    if (_levelColors.Count > 0)
+                        ApplyRollColors(cars);
+                    colorTick++;
+                }
+            }
+
+            // 滚动结束：清掉外观覆盖（真实 colorId 从未改过，恢复即本来颜色），还原乘客 / 盖子 / 缩放，
+            // 再正式刷新 —— 落到第一排的车由 ShuffleRemainingCars 里的 HideLid 处理。
+            for (int i = 0; i < cars.Count; i++)
+            {
+                var car = cars[i];
+                if (car == null)
+                    continue;
+                car.SetVisualColorOverride(-1);
+                car.EndRollVisuals();
+            }
+
+            ShuffleRemainingCars(frontRows);
+            _refreshRolling = false;
+        }
+
+        /// <summary>给每辆参与车各自随机换一个本关颜色（滚动预览用；只改外观，不动 colorId）。</summary>
+        private void ApplyRollColors(List<ContainerItem> cars)
+        {
+            for (int i = 0; i < cars.Count; i++)
+            {
+                var car = cars[i];
+                if (car == null)
+                    continue;
+                car.SetVisualColorOverride(_levelColors[UnityEngine.Random.Range(0, _levelColors.Count)]);
+            }
+        }
+
+        /// <summary>
+        /// 收集滚动预览要变色的车：**当前有实例的**（= 看得见的）参与车，前 <paramref name="rowLimit"/> 排内、
+        /// 跳过绳组 / 补位中 / 上车中。
+        ///
+        /// 与 <see cref="ShuffleRemainingCars"/> 的范围**不完全相同**：那边会连未实例化的深排车一起洗，
+        /// 而深排车此刻没有实例、本来也不可见，所以不参与滚动（它们是在滚动结束后正式刷新时才现造的）。
+        /// </summary>
+        private void CollectShuffleCars(int rowLimit, List<ContainerItem> outCars)
+        {
+            if (grid == null)
+                return;
+
+            for (int col = 0; col < columns; col++)
+                for (int row = 0; row < rowLimit; row++)
+                {
+                    var item = grid[col, row];
+                    if (item == null)
+                        continue;
+                    if (item.ropeGroupId != 0)
+                        continue;
+                    if (item.isRefilling || item.IsBoarding)
+                        continue;
+
+                    outCars.Add(item);
+                }
+        }
+
         private IEnumerator MoveContainer(ContainerItem item, int col, int row)
         {
             item.isRefilling = true;
@@ -1309,6 +1601,7 @@ namespace CrowdMatch
             _containerConfig = config;
             _cells = new ContainerCell[Mathf.Max(1, columns * rows)];
             grid = new ContainerItem[columns, rows];
+            _levelColors.Clear();
 
             if (cells != null)
                 for (int i = 0; i < cells.Count; i++)
@@ -1316,6 +1609,9 @@ namespace CrowdMatch
                     var c = cells[i];
                     if (!IsInRange(c.col, c.row))
                         continue;
+
+                    if (!_levelColors.Contains(c.colorId))
+                        _levelColors.Add(c.colorId);   // 本关颜色集合（含之后会出库的）
 
                     // 原始格坐标 = 关卡数据里的出生格。补位前移只改 col/row，这两个始终是身份的锚点
                     // （车实例化时按它命名，见 Materialize）。

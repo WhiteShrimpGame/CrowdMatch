@@ -134,6 +134,7 @@ public class GameInnerUI : MonoBehaviour
     private void OnMagnetBtnClick()
     {
         if (GameState.IsGameWin) return;
+        if (IsRefreshRolling()) return;   // 刷新滚动中：其他道具一律不响应
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -226,6 +227,7 @@ public class GameInnerUI : MonoBehaviour
     private void OnRemoveBtnClick()
     {
         if (GameState.IsGameWin) return;
+        if (IsRefreshRolling()) return;   // 刷新滚动中：其他道具一律不响应
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -294,6 +296,7 @@ public class GameInnerUI : MonoBehaviour
     private void OnRefreshBtnClick()
     {
         if (GameState.IsGameWin) return;
+        if (IsRefreshRolling()) return;   // 已在滚动中：不重复触发、不重复扣道具
         if (obj != null)
         {
             //obj.GetComponent<GuideMaskPanel>().Hide();
@@ -340,11 +343,15 @@ public class GameInnerUI : MonoBehaviour
                 UIManager.Instance.ShowTip("槽位已满，无法添加");
                 return;
             }*/
-            Debug.Log("使用了道具1刷新");
+            // 道具1「刷新」：先在本关颜色里滚动 0.6s（每 0.1s 每辆车随机换色），再正式把车的前后顺序随机重排
+            // （绳组车原地不动）。按约定「点按钮就扣」—— 即使洗了看不出变化，也照扣。
+            var cg = GameController.Instance != null ? GameController.Instance.containerGroup : null;
+            if (cg != null)
+                cg.StartRefreshRoll();
+
+            Debug.Log("使用了道具1刷新：滚动后随机重排未开走的车");
             CousmeProp(itemType);
             UpdateCurrentButtonInfo();
-            //LogicAddSlot();
-            //WS_TapAway_Cloud.LevelRecord.SaveLevelRecord();
             PlayerPrefs.Save();
         }
     }
@@ -361,6 +368,13 @@ public class GameInnerUI : MonoBehaviour
     private bool CanUseProp(ItemType type)
     {
         return  GameData.itemPlayerData.GetCount(type) > 0;
+    }
+
+    /// <summary>「刷新」道具的滚动预览期间：不能上车（传送带侧已挡），也不能再点任何道具。</summary>
+    private bool IsRefreshRolling()
+    {
+        var gc = GameController.Instance;
+        return gc != null && gc.containerGroup != null && gc.containerGroup.IsRefreshRolling;
     }
 
     /*private void CousmeProp(string propId)

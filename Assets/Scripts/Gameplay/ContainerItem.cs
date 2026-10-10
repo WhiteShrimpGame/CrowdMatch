@@ -79,6 +79,24 @@ namespace CrowdMatch
         /// <summary>是否正在补位移动（Row 间 lerp）中。移动中禁止匹配与出库，避免与补位动画冲突。</summary>
         [System.NonSerialized] public bool isRefilling;
 
+        /// <summary>
+        /// 「刷新」道具滚动预览用的**外观颜色覆盖**：>=0 时 <see cref="ApplyMaterial"/> 按它上色，
+        /// 真实 <see cref="colorId"/> 保持不动 —— 匹配 / 判胜口径完全不受影响。传 -1 恢复正常显示。
+        /// </summary>
+        [System.NonSerialized] public int visualColorId = -1;
+
+        /// <summary>滚动预览期间被临时藏起的乘客（<see cref="BeginRollVisuals"/> / <see cref="EndRollVisuals"/> 配对）。</summary>
+        [System.NonSerialized] private readonly List<GameObject> _rollHiddenPassengers = new List<GameObject>();
+
+        /// <summary>滚动预览开始前盖子是否是「盖着」（显示）的，用于结束后还原。</summary>
+        [System.NonSerialized] private bool _rollLidWasShown;
+
+        /// <summary>滚动预览开始前的整车缩放（基态，通常为 1）；缩放脉冲以它为基准并按它还原。</summary>
+        [System.NonSerialized] private Vector3 _rollBaseScale = Vector3.one;
+
+        /// <summary>当前是否处于滚动预览的临时外观态。ApplyCell 复用时清零，防晚到的还原误改新车。</summary>
+        [System.NonSerialized] private bool _rollVisualsActive;
+
         /// <summary>所属 ContainerGroup（运行时赋值，不序列化）</summary>
         [System.NonSerialized] public ContainerGroup group;
 
@@ -176,6 +194,12 @@ namespace CrowdMatch
         public int Remaining => _remaining;
 
         public bool IsEmpty => _remaining <= 0;
+
+        /// <summary>
+        /// 车上是否已有人（座位被占）。座位一旦被像素占用就不再释放（见 <see cref="_occupiedPos"/>），
+        /// 所以「有座位被占」等价于「车上载着乘客」——这正是「取消实例化」不能碰的车。
+        /// </summary>
+        public bool HasPassengers => _occupiedPos.Count > 0;
 
         private void Awake()
         {
@@ -280,6 +304,9 @@ namespace CrowdMatch
             this.ropeGroupId = ropeGroupId;
             this.revealed = revealed;
             this.lidOpened = lidOpened;
+            visualColorId = -1;   // 池化复用时清掉滚动预览残留
+            _rollVisualsActive = false;
+            _rollHiddenPassengers.Clear();
 
             SetCapacity(capacity);
             _remaining = Mathf.Max(0, remaining);   // 覆盖 SetCapacity 的「满容量」：数据层可能已经被扣过
@@ -309,6 +336,66 @@ namespace CrowdMatch
             }
         }
 
+        /// <summary>
+        /// 「刷新」滚动预览**开始**：把车上的乘客藏起来、开着的盖子重新盖上 ——
+        /// 滚动期间整车一色，不能留下「车上有人」「已开盖」这类真实信息；同时记下基态缩放供脉冲/还原。
+        /// 与 <see cref="EndRollVisuals"/> 配对，中间不改变任何逻辑状态（<c>lidOpened</c> 等一律不动）。
+        /// </summary>
+        public void BeginRollVisuals()
+        {
+            _rollVisualsActive = true;
+
+            _rollHiddenPassengers.Clear();
+            if (posList != null)
+                for (int i = 0; i < posList.Count; i++)
+                {
+                    var seat = posList[i];
+                    if (seat == null)
+                        continue;
+                    var passenger = seat.GetComponentInChildren<PixelItem>(true);
+                    if (passenger == null || !passenger.gameObject.activeSelf)
+                        continue;
+
+                    passenger.gameObject.SetActive(false);
+                    _rollHiddenPassengers.Add(passenger.gameObject);
+                }
+
+            _rollLidWasShown = lidTransform != null && lidTransform.gameObject.activeSelf;
+            if (lidTransform != null && !_rollLidWasShown)
+                lidTransform.gameObject.SetActive(true);   // 开着（隐藏）→ 重新盖上
+
+            _rollBaseScale = transform.localScale;
+        }
+
+        /// <summary>
+        /// 「刷新」滚动预览的缩放脉冲：按 <paramref name="scale"/> 缩放整车（1 = 原始大小，
+        /// 相对 <see cref="BeginRollVisuals"/> 时的基态）。未处于滚动预览时忽略。
+        /// </summary>
+        public void SetRollScale(float scale)
+        {
+            if (!_rollVisualsActive)
+                return;
+            transform.localScale = _rollBaseScale * scale;
+        }
+
+        /// <summary>「刷新」滚动预览**结束**：还原 <see cref="BeginRollVisuals"/> 藏起的乘客、盖子与缩放。未开始过则空操作。</summary>
+        public void EndRollVisuals()
+        {
+            if (!_rollVisualsActive)
+                return;
+            _rollVisualsActive = false;
+
+            for (int i = 0; i < _rollHiddenPassengers.Count; i++)
+                if (_rollHiddenPassengers[i] != null)
+                    _rollHiddenPassengers[i].SetActive(true);
+            _rollHiddenPassengers.Clear();
+
+            if (lidTransform != null && !_rollLidWasShown)
+                lidTransform.gameObject.SetActive(false);
+
+            transform.localScale = _rollBaseScale;   // 缩放归位（基态即 1）
+        }
+
         /// <summary>直接隐藏盖子（初始就在第一排的小车使用）。</summary>
         public void HideLid()
         {
@@ -316,6 +403,17 @@ namespace CrowdMatch
             if (lidTransform != null)
                 lidTransform.gameObject.SetActive(false);
             RevealQuestion();   // 前排车初始即暴露：问号车立即揭晓为本来颜色
+        }
+
+        /// <summary>
+        /// 把盖子重新盖上（显示）并解除「已开盖」标记——<see cref="HideLid"/> 的反操作。
+        /// 问号车的揭晓是**单向**的，这里不回退（<c>revealed</c> 保持）。
+        /// </summary>
+        public void ShowLid()
+        {
+            lidOpened = false;
+            if (lidTransform != null)
+                lidTransform.gameObject.SetActive(true);
         }
 
         /// <summary>播放开盖动画（后排小车满足「前方全部找全匹配对象」时使用），幂等：只播放一次。</summary>
@@ -354,6 +452,7 @@ namespace CrowdMatch
 
         /// <summary>
         /// 按 colorId 应用材质，config 为空时从 GameManager 获取。
+        /// <see cref="visualColorId"/> &gt;= 0 时改用该「假颜色」（滚动预览），并跳过问号分支。
         /// 正常路径：按 materialReplacements 逐项替换（materialType 决定取车材质还是车内部材质）；
         /// 无任何替换项时回退旧逻辑：用基础材质给首个 Renderer 整车上色。
         /// </summary>
@@ -367,8 +466,11 @@ namespace CrowdMatch
             if (_cachedConfig == null)
                 return;
 
+            // 滚动预览覆盖生效时按假颜色上色，且**不走问号分支**（滚动中整车都要变，问号车也不例外）
+            int cid = visualColorId >= 0 ? visualColorId : colorId;
+
             // 问号车未揭晓：按材质类型（Car/Interior）分别换成对应问号材质（隐藏真实颜色）
-            if (isQuestion && !revealed)
+            if (visualColorId < 0 && isQuestion && !revealed)
             {
                 // 回退路径：无替换项时用问号车体材质给首个 Renderer 整车上色
                 if (materialReplacements == null || materialReplacements.Count == 0)
@@ -399,7 +501,7 @@ namespace CrowdMatch
             // 回退：未配置任何替换项时，用基础材质给首个 Renderer 整车上色（旧逻辑）
             if (materialReplacements == null || materialReplacements.Count == 0)
             {
-                var mat = _cachedConfig.GetMaterial(colorId);
+                var mat = _cachedConfig.GetMaterial(cid);
                 if (_renderer == null)
                     _renderer = GetComponent<Renderer>();
                 if (_renderer != null && mat != null)
@@ -407,18 +509,28 @@ namespace CrowdMatch
                 return;
             }
 
-            // 正常路径：按配置替换指定 Renderer 的指定材质槽位（颜色仍用 colorId；materialType 决定取车材质还是车内部材质）
+            // 正常路径：按配置替换指定 Renderer 的指定材质槽位（颜色用 cid；materialType 决定取车材质还是车内部材质）
             foreach (var rep in materialReplacements)
             {
                 if (rep == null || rep.renderer == null)
                     continue;
                 var repMat = rep.materialType == ContainerMaterialType.Interior
-                    ? _cachedConfig.GetInteriorMaterial(colorId)
-                    : _cachedConfig.GetCarMaterial(colorId);
+                    ? _cachedConfig.GetInteriorMaterial(cid)
+                    : _cachedConfig.GetCarMaterial(cid);
                 if (repMat == null)
                     continue;   // 该组未配置此颜色，跳过
                 ApplyToMaterialSlot(rep.renderer, rep.materialSlotIndex, repMat);
             }
+        }
+
+        /// <summary>
+        /// 「刷新」道具滚动预览：只把**外观**刷成 <paramref name="fakeColorId"/>，真实 <see cref="colorId"/> 不动
+        /// （匹配 / 判胜口径不受影响）。传 -1 恢复正常显示。
+        /// </summary>
+        public void SetVisualColorOverride(int fakeColorId)
+        {
+            visualColorId = fakeColorId;
+            ApplyMaterial();
         }
 
         /// <summary>把 renderer 的 materials 数组里 index 下标处替换为 mat（越界则忽略）。</summary>
