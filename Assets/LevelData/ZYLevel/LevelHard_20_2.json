@@ -8,8 +8,8 @@
         "cells": [
             -1,
             -1,
-            2,
-            2,
+            4,
+            4,
             -1,
             -1,
             12,
@@ -22,10 +22,10 @@
             -1,
             -1,
             -1,
+            2,
+            4,
             4,
             2,
-            2,
-            1,
             12,
             12,
             12,
@@ -37,12 +37,12 @@
             4,
             -1,
             6,
+            2,
+            4,
             4,
             2,
             2,
-            1,
-            1,
-            1,
+            2,
             12,
             2,
             2,
@@ -52,12 +52,12 @@
             4,
             0,
             6,
-            4,
+            2,
             1,
             -1,
             -1,
             -1,
-            1,
+            2,
             19,
             2,
             -1,
@@ -67,12 +67,12 @@
             4,
             0,
             6,
-            4,
+            2,
             1,
             -1,
             -1,
             -1,
-            1,
+            2,
             19,
             2,
             -1,
@@ -82,7 +82,7 @@
             4,
             0,
             6,
-            4,
+            2,
             1,
             -1,
             -1,
@@ -97,12 +97,12 @@
             4,
             0,
             6,
-            4,
+            2,
             1,
-            4,
-            4,
-            4,
-            4,
+            2,
+            2,
+            2,
+            2,
             19,
             1,
             1,
@@ -115,12 +115,12 @@
             -1,
             1,
             1,
-            4,
-            4,
-            1,
             2,
             2,
             1,
+            0,
+            0,
+            1,
             1,
             2,
             2,
@@ -131,55 +131,55 @@
             -1,
             -1,
             -1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            -1,
+            -1,
+            -1,
+            -1,
+            -1,
+            19,
+            19,
+            19,
+            19,
+            -1,
+            1,
+            1,
+            1,
+            0,
+            6,
+            -1,
+            4,
+            4,
+            4,
+            4,
+            19,
+            -1,
+            -1,
+            19,
             15,
-            1,
-            2,
-            2,
-            6,
-            -1,
-            -1,
-            -1,
-            -1,
-            -1,
-            19,
-            19,
-            19,
-            19,
-            -1,
-            15,
-            1,
-            1,
-            2,
-            6,
-            -1,
-            8,
-            8,
-            8,
-            8,
-            19,
-            -1,
-            -1,
-            19,
             15,
             15,
-            1,
-            1,
-            2,
+            15,
             6,
             6,
-            8,
+            6,
+            4,
             -1,
             -1,
-            8,
+            4,
             5,
             -1,
             -1,
             5,
             15,
             15,
-            4,
-            0,
-            0,
+            15,
+            6,
+            6,
             6,
             6,
             19,
@@ -192,10 +192,10 @@
             5,
             -1,
             15,
+            1,
+            1,
             4,
             4,
-            0,
-            6,
             -1,
             19,
             19,
@@ -206,11 +206,11 @@
             -1,
             -1,
             -1,
-            15,
+            1,
+            1,
+            1,
             4,
             4,
-            0,
-            6,
             -1,
             -1,
             -1,
@@ -222,9 +222,9 @@
             6,
             6,
             6,
+            1,
             4,
-            0,
-            0,
+            4,
             15,
             15,
             15,
@@ -484,6 +484,14 @@
             {
                 "x": 0,
                 "y": 2,
+                "colorId": 4,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 1
+            },
+            {
+                "x": 0,
+                "y": 3,
                 "colorId": 2,
                 "capacity": 3,
                 "question": false,
@@ -491,19 +499,11 @@
             },
             {
                 "x": 0,
-                "y": 3,
-                "colorId": 6,
+                "y": 4,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 4,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 1
             },
             {
                 "x": 0,
@@ -516,15 +516,15 @@
             {
                 "x": 0,
                 "y": 6,
-                "colorId": 5,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
-                "ropeGroupId": 0
+                "ropeGroupId": 5
             },
             {
                 "x": 0,
                 "y": 7,
-                "colorId": 0,
+                "colorId": 1,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -532,7 +532,7 @@
             {
                 "x": 0,
                 "y": 8,
-                "colorId": 2,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -540,46 +540,6 @@
             {
                 "x": 0,
                 "y": 9,
-                "colorId": 15,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 10,
-                "colorId": 2,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 11,
-                "colorId": 8,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 12,
-                "colorId": 4,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 13,
-                "colorId": 1,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 14,
                 "colorId": 6,
                 "capacity": 3,
                 "question": false,
@@ -587,31 +547,7 @@
             },
             {
                 "x": 0,
-                "y": 15,
-                "colorId": 19,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 3
-            },
-            {
-                "x": 0,
-                "y": 16,
-                "colorId": 12,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 17,
-                "colorId": 1,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 18,
+                "y": 10,
                 "colorId": 4,
                 "capacity": 3,
                 "question": false,
@@ -619,31 +555,15 @@
             },
             {
                 "x": 0,
-                "y": 19,
-                "colorId": 1,
+                "y": 11,
+                "colorId": 2,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
             },
             {
                 "x": 0,
-                "y": 20,
-                "colorId": 22,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 4
-            },
-            {
-                "x": 0,
-                "y": 21,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 22,
+                "y": 12,
                 "colorId": 8,
                 "capacity": 3,
                 "question": false,
@@ -651,8 +571,88 @@
             },
             {
                 "x": 0,
-                "y": 23,
+                "y": 13,
+                "colorId": 0,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 14,
+                "colorId": 15,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 15,
+                "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 16,
+                "colorId": 19,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 3
+            },
+            {
+                "x": 0,
+                "y": 17,
+                "colorId": 12,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 18,
+                "colorId": 1,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 19,
                 "colorId": 4,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 20,
+                "colorId": 1,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 21,
+                "colorId": 22,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 4
+            },
+            {
+                "x": 0,
+                "y": 22,
+                "colorId": 5,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 23,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -660,14 +660,6 @@
             {
                 "x": 0,
                 "y": 24,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 25,
                 "colorId": 4,
                 "capacity": 3,
                 "question": false,
@@ -675,8 +667,16 @@
             },
             {
                 "x": 0,
-                "y": 26,
+                "y": 25,
                 "colorId": 5,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
+                "y": 26,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -684,14 +684,6 @@
             {
                 "x": 0,
                 "y": 27,
-                "colorId": 19,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 0,
-                "y": 28,
                 "colorId": 5,
                 "capacity": 3,
                 "question": false,
@@ -699,8 +691,16 @@
             },
             {
                 "x": 0,
+                "y": 28,
+                "colorId": 19,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 0,
                 "y": 29,
-                "colorId": 22,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -743,12 +743,12 @@
                 "colorId": 2,
                 "capacity": 3,
                 "question": false,
-                "ropeGroupId": 0
+                "ropeGroupId": 5
             },
             {
                 "x": 1,
                 "y": 4,
-                "colorId": 5,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -756,15 +756,15 @@
             {
                 "x": 1,
                 "y": 5,
-                "colorId": 4,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
-                "ropeGroupId": 2
+                "ropeGroupId": 0
             },
             {
                 "x": 1,
                 "y": 6,
-                "colorId": 0,
+                "colorId": 1,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -772,7 +772,7 @@
             {
                 "x": 1,
                 "y": 7,
-                "colorId": 6,
+                "colorId": 0,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -780,15 +780,15 @@
             {
                 "x": 1,
                 "y": 8,
-                "colorId": 0,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
-                "ropeGroupId": 0
+                "ropeGroupId": 2
             },
             {
                 "x": 1,
                 "y": 9,
-                "colorId": 15,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -796,22 +796,6 @@
             {
                 "x": 1,
                 "y": 10,
-                "colorId": 0,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 1,
-                "y": 11,
-                "colorId": 19,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 3
-            },
-            {
-                "x": 1,
-                "y": 12,
                 "colorId": 12,
                 "capacity": 3,
                 "question": false,
@@ -819,7 +803,7 @@
             },
             {
                 "x": 1,
-                "y": 13,
+                "y": 11,
                 "colorId": 22,
                 "capacity": 3,
                 "question": false,
@@ -827,8 +811,24 @@
             },
             {
                 "x": 1,
-                "y": 14,
+                "y": 12,
+                "colorId": 19,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 3
+            },
+            {
+                "x": 1,
+                "y": 13,
                 "colorId": 8,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 1,
+                "y": 14,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -954,6 +954,14 @@
                 "ropeGroupId": 0
             },
             {
+                "x": 1,
+                "y": 30,
+                "colorId": 22,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
                 "x": 2,
                 "y": 0,
                 "colorId": 2,
@@ -980,7 +988,7 @@
             {
                 "x": 2,
                 "y": 3,
-                "colorId": 6,
+                "colorId": 4,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -991,12 +999,12 @@
                 "colorId": 2,
                 "capacity": 3,
                 "question": false,
-                "ropeGroupId": 0
+                "ropeGroupId": 5
             },
             {
                 "x": 2,
                 "y": 5,
-                "colorId": 4,
+                "colorId": 1,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1004,14 +1012,6 @@
             {
                 "x": 2,
                 "y": 6,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 7,
                 "colorId": 0,
                 "capacity": 3,
                 "question": false,
@@ -1019,7 +1019,23 @@
             },
             {
                 "x": 2,
+                "y": 7,
+                "colorId": 5,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
                 "y": 8,
+                "colorId": 1,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
+                "y": 9,
                 "colorId": 4,
                 "capacity": 3,
                 "question": false,
@@ -1027,16 +1043,8 @@
             },
             {
                 "x": 2,
-                "y": 9,
-                "colorId": 1,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
                 "y": 10,
-                "colorId": 8,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1044,7 +1052,7 @@
             {
                 "x": 2,
                 "y": 11,
-                "colorId": 1,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1068,7 +1076,7 @@
             {
                 "x": 2,
                 "y": 14,
-                "colorId": 4,
+                "colorId": 15,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1076,7 +1084,7 @@
             {
                 "x": 2,
                 "y": 15,
-                "colorId": 6,
+                "colorId": 8,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1084,7 +1092,7 @@
             {
                 "x": 2,
                 "y": 16,
-                "colorId": 8,
+                "colorId": 6,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1116,14 +1124,6 @@
             {
                 "x": 2,
                 "y": 20,
-                "colorId": 1,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 21,
                 "colorId": 0,
                 "capacity": 3,
                 "question": false,
@@ -1131,8 +1131,16 @@
             },
             {
                 "x": 2,
-                "y": 22,
+                "y": 21,
                 "colorId": 6,
+                "capacity": 3,
+                "question": false,
+                "ropeGroupId": 0
+            },
+            {
+                "x": 2,
+                "y": 22,
+                "colorId": 5,
                 "capacity": 3,
                 "question": false,
                 "ropeGroupId": 0
@@ -1140,14 +1148,6 @@
             {
                 "x": 2,
                 "y": 23,
-                "colorId": 5,
-                "capacity": 3,
-                "question": false,
-                "ropeGroupId": 0
-            },
-            {
-                "x": 2,
-                "y": 24,
                 "colorId": 1,
                 "capacity": 3,
                 "question": false,
@@ -1155,7 +1155,7 @@
             },
             {
                 "x": 2,
-                "y": 25,
+                "y": 24,
                 "colorId": 19,
                 "capacity": 3,
                 "question": false,
@@ -1163,7 +1163,7 @@
             },
             {
                 "x": 2,
-                "y": 26,
+                "y": 25,
                 "colorId": 5,
                 "capacity": 3,
                 "question": false,
@@ -1171,7 +1171,7 @@
             },
             {
                 "x": 2,
-                "y": 27,
+                "y": 26,
                 "colorId": 15,
                 "capacity": 3,
                 "question": false,
@@ -1179,7 +1179,7 @@
             },
             {
                 "x": 2,
-                "y": 28,
+                "y": 27,
                 "colorId": 6,
                 "capacity": 3,
                 "question": false,
@@ -1187,7 +1187,7 @@
             },
             {
                 "x": 2,
-                "y": 29,
+                "y": 28,
                 "colorId": 8,
                 "capacity": 3,
                 "question": false,
@@ -1195,7 +1195,7 @@
             },
             {
                 "x": 2,
-                "y": 30,
+                "y": 29,
                 "colorId": 6,
                 "capacity": 3,
                 "question": false,
@@ -1380,7 +1380,7 @@
                 }
             ],
             "colors": [
-                2,
+                8,
                 4,
                 5
             ]
