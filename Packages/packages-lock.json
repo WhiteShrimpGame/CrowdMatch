@@ -1,5 +1,11 @@
 {
   "dependencies": {
+    "com.qq.weixin.minigame": {
+      "version": "file:pkgs/com.qq.weixin.minigame-0.1.30.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {}
+    },
     "com.unity.2d.sprite": {
       "version": "1.0.0",
       "depth": 0,
@@ -69,8 +75,8 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.nuget.newtonsoft-json": {
-      "version": "3.0.2",
-      "depth": 2,
+      "version": "3.2.1",
+      "depth": 0,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
@@ -160,6 +166,30 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
+    },
+    "com.zmy.gravityengine": {
+      "version": "file:pkgs/com.zmy.gravityengine-4.8.27.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {}
+    },
+    "com.zmy.wxfunction": {
+      "version": "file:pkgs/com.zmy.wxfunction-9.2.18.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {}
+    },
+    "com.zmy.xyxcommon": {
+      "version": "file:pkgs/com.zmy.xyxcommon-2.4.21.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {}
+    },
+    "com.zmy.zmysdk_core": {
+      "version": "file:pkgs/com.zmy.zmysdk_core-2.27.5.tgz",
+      "depth": 0,
+      "source": "local-tarball",
+      "dependencies": {}
     },
     "com.unity.modules.ai": {
       "version": "1.0.0",

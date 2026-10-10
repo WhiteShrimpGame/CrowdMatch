@@ -1,0 +1,278 @@
+{
+  "group": "E",
+  "publish": {
+    "id": 1,
+    "keyword": "duobite",
+    "name": "多比特",
+    "domain": "publish.wedobest.com.cn"
+  },
+  "game": null,
+  "sdk": {
+    "adsapi": {
+      "biz": "adsapi",
+      "domain": "https://fixfun.lumosfun.com:8502",
+      "accelerate": "",
+      "ip": ""
+    },
+    "adsbidding": {
+      "biz": "adsbidding",
+      "domain": "https://fixgniinsl.lumosfun.com:8501",
+      "accelerate": "",
+      "ip": ""
+    },
+    "adscfg": {
+      "biz": "adscfg",
+      "domain": "https://fixhkl.lumosfun.com:8500",
+      "accelerate": "",
+      "ip": ""
+    },
+    "adsreport": {
+      "biz": "adsreport",
+      "domain": "https://gjyxkvuxz.lumosfun.com:8528",
+      "accelerate": "",
+      "ip": ""
+    },
+    "adsup": {
+      "biz": "adsup",
+      "domain": "fixzu.lumosfun.com:7001",
+      "accelerate": "",
+      "ip": "81.69.166.245:7001"
+    },
+    "announcement": {
+      "biz": "announcement",
+      "domain": "https://fsstzshjrjsy.lumosfun.com:8529",
+      "accelerate": "",
+      "ip": ""
+    },
+    "attribution": {
+      "biz": "attribution",
+      "domain": "https://fyywngzynts.lumosfun.com:8538",
+      "accelerate": "",
+      "ip": ""
+    },
+    "bestword": {
+      "biz": "bestword",
+      "domain": "https://gjxybtwi.lumosfun.com:8518",
+      "accelerate": "",
+      "ip": ""
+    },
+    "bvcfg": {
+      "biz": "bvcfg",
+      "domain": "https://gahkl.lumosfun.com:8520",
+      "accelerate": "",
+      "ip": ""
+    },
+    "cdn": {
+      "biz": "cdn",
+      "domain": "https://itgjxytxx.lumosfun.com",
+      "accelerate": "",
+      "ip": ""
+    },
+    "cdn-archive": {
+      "biz": "cdn-archive",
+      "domain": "https://his-fwhmnaj.lumosfun.com",
+      "accelerate": "",
+      "ip": ""
+    },
+    "check": {
+      "biz": "check",
+      "domain": "hmjhp.lumosfun.com:6505",
+      "accelerate": "",
+      "ip": "47.98.101.119:6505"
+    },
+    "cloudarchive": {
+      "biz": "cloudarchive",
+      "domain": "https://fwhmnaj.lumosfun.com:8537",
+      "accelerate": "",
+      "ip": ""
+    },
+    "codeman": {
+      "biz": "codeman",
+      "domain": "https://htijrfsflj.lumosfun.com:8514",
+      "accelerate": "",
+      "ip": ""
+    },
+    "dads": {
+      "biz": "dads",
+      "domain": "https://ifix.lumosfun.com:8512",
+      "accelerate": "",
+      "ip": ""
+    },
+    "datatrack": {
+      "biz": "datatrack",
+      "domain": "https://ifyf-ywfhp.lumosfun.com:8524",
+      "accelerate": "",
+      "ip": ""
+    },
+    "dr": {
+      "biz": "dr",
+      "domain": "https://iw.comestuff.com:8522",
+      "accelerate": "",
+      "ip": ""
+    },
+    "event": {
+      "biz": "event",
+      "domain": "https://jajsy.lumosfun.com:8507",
+      "accelerate": "",
+      "ip": ""
+    },
+    "feedback": {
+      "biz": "feedback",
+      "domain": "https://kjjigfhp.lumosfun.com:8511",
+      "accelerate": "",
+      "ip": ""
+    },
+    "feedbackv6": {
+      "biz": "feedbackv6",
+      "domain": "https://kjjigfhp.lumosfun.com:8511",
+      "accelerate": "",
+      "ip": ""
+    },
+    "helpcenter": {
+      "biz": "helpcenter",
+      "domain": "https://mjquhjsyjw.lumosfun.com:8542",
+      "accelerate": "",
+      "ip": ""
+    },
+    "interview": {
+      "biz": "interview",
+      "domain": "https://nsyjwanjb.lumosfun.com:8523",
+      "accelerate": "",
+      "ip": ""
+    },
+    "intranet": {
+      "biz": "intranet",
+      "domain": "https://nsywfsjy.lumosfun.com:8539",
+      "accelerate": "",
+      "ip": ""
+    },
+    "minigamescene": {
+      "biz": "minigamescene",
+      "domain": "https://rnsnlfrjxhjsj.lumosfun.com:8541",
+      "accelerate": "",
+      "ip": ""
+    },
+    "newword": {
+      "biz": "newword",
+      "domain": "https://sjbbtwi.lumosfun.com:8521",
+      "accelerate": "",
+      "ip": ""
+    },
+    "oldevent": {
+      "biz": "oldevent",
+      "domain": "https://tqijajsy.lumosfun.com:8506",
+      "accelerate": "",
+      "ip": ""
+    },
+    "ops": {
+      "biz": "ops",
+      "domain": "https://tux.lumosfun.com:8504",
+      "accelerate": "",
+      "ip": ""
+    },
+    "pay": {
+      "biz": "pay",
+      "domain": "https://ufd.lumosfun.com:8509",
+      "accelerate": "",
+      "ip": ""
+    },
+    "pushmsg": {
+      "biz": "pushmsg",
+      "domain": "https://uzxmrxl.lumosfun.com:8530",
+      "accelerate": "",
+      "ip": ""
+    },
+    "remotecfg": {
+      "biz": "remotecfg",
+      "domain": "https://wjrtyjhkl.lumosfun.com:8508",
+      "accelerate": "",
+      "ip": ""
+    },
+    "rn": {
+      "biz": "rn",
+      "domain": "https://ws.lumosfun.com:8510",
+      "accelerate": "",
+      "ip": ""
+    },
+    "rtev": {
+      "biz": "rtev",
+      "domain": "https://wyja.lumosfun.com:8505",
+      "accelerate": "",
+      "ip": ""
+    },
+    "sensitivewordserv": {
+      "biz": "sensitivewordserv",
+      "domain": "https://xjsxnynajbtwixjwa.lumosfun.com:8532",
+      "accelerate": "",
+      "ip": ""
+    },
+    "share": {
+      "biz": "share",
+      "domain": "https://xmfwj.lumosfun.com:8513",
+      "accelerate": "",
+      "ip": ""
+    },
+    "share-v2": {
+      "biz": "share-v2",
+      "domain": "https://xmfwj-a7.lumosfun.com:8515",
+      "accelerate": "",
+      "ip": ""
+    },
+    "sts": {
+      "biz": "sts",
+      "domain": "https://xyx.lumosfun.com:8544",
+      "accelerate": "",
+      "ip": ""
+    },
+    "userlogin": {
+      "biz": "userlogin",
+      "domain": "https://zxjwqtlns.lumosfun.com:8503",
+      "accelerate": "",
+      "ip": ""
+    },
+    "utils": {
+      "biz": "utils",
+      "domain": "https://azory.lumosfun.com:8525",
+      "accelerate": "",
+      "ip": ""
+    },
+    "utils4": {
+      "biz": "utils4",
+      "domain": "https://azory0.lumosfun.com:8526",
+      "accelerate": "",
+      "ip": ""
+    },
+    "wxproxy": {
+      "biz": "wxproxy",
+      "domain": "https://cdvxude.lumosfun.com:8533",
+      "accelerate": "",
+      "ip": ""
+    }
+  },
+  "cdn": {
+    "app-fn": {
+      "cdn_key": "app-fn",
+      "domain": "https://lfrjtxx-cou.quetus.net"
+    },
+    "cdn-hz": {
+      "cdn_key": "cdn-hz",
+      "domain": "https://lfrjtxx-cou.gusspro.com"
+    },
+    "cdn-hz-whc": {
+      "cdn_key": "cdn-hz-whc",
+      "domain": "https://lfrjtxx-cou-whc.gusspro.com"
+    },
+    "cdn-xjp": {
+      "cdn_key": "cdn-xjp",
+      "domain": "https://lfrjtxx-cou.quetus.net"
+    },
+    "cdn-xjp-whc": {
+      "cdn_key": "cdn-xjp-whc",
+      "domain": "https://lfrjtxx-cou-whc.quetus.net"
+    },
+    "dobestapposs": {
+      "cdn_key": "dobestapposs",
+      "domain": "https://lfrjtxx-cou.gusspro.com"
+    }
+  }
+}

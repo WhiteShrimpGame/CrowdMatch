@@ -1,0 +1,69 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -2101231874, guid: 984d929535979e840a34b6dd0432650b, type: 3}
+  m_Name: XYXGlobalConfig
+  m_EditorClassIdentifier: 
+  ActiveDevLog: 0
+  DebugMode: 0
+  Version: 1.0.0
+  DomainGameKey: 
+  DomainGroup: 5
+  PackageName: com.scwzl.weixin
+  DbtId: b36c94bca8051b79185c5
+  AppId: wxf95d1c83572d3bb7
+  YL_accToken: 5aQhpCvVRgry3tx89A4iib1rooXwKfTt
+  AbfileName: 
+  AbfileNameArray: []
+  AgeLimitLevel: 8
+  PrivacyBodyID: QX
+  Privacy_url: https://publish.creatvista.com/privacy/qianxun/xyx/privacy.txt
+  UserAgree_url: https://publish.creatvista.com/privacy/qianxun/xyx/xieyi.txt
+  reportChnl: 0
+  statName: 
+  appNameInStore: "\u8C01\u8FD8\u6CA1\u4E0A\u8F66"
+  m_dbtInfo:
+    ApprovalNumber: 
+    PublicationNumber: 
+    PublishingUnit: 
+    CopyrightOwner: 
+    OperatingUnit: 
+    RecordNumber: None
+    NetworkPublishingNumber: 
+    CertificationNumber: 
+    AllVersionNumberInfo: 
+  Banner: 
+  RewardVideo: 
+  Insert: 
+  NewAdsRequestDelayEnable: 0
+  cdnType: 0
+  ResBundleID: 0
+  ResCDN_DOMAIN: https://lfrjtxx-cou.gusspro.com
+  ResCDN_DOMAIN_NoCache: https://lfrjtxx-cou-whc.gusspro.com
+  UseDefaultResCDN: 0
+  CDN_Test: 0
+  IsOverseas: 0
+  mjbName: 
+  ResCDN: https://lfrjtxx-cou.gusspro.com/app-3/Release/com.scwzl.weixin/XYX/WebGL/base/1.0.0
+  MinIOCDNAddress: 
+  LocalCDNAddress: 
+  UsePayModule: 0
+  HuaWeiPublicKey: 
+  HonorCpId: 
+  payEnv: 1
+  MinPayTest: 0
+  MiniServerRankURL: 
+  MiniGameGiftEnable: 0
+  CodeOptimization: Speed
+  WebGLLTOEnable: 0
+  UserRandomUIDAsDeviceID: 0
+  PlayAdDefaultPauseGame: 1
+  GameName: XYX

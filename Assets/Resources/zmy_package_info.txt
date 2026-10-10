@@ -1,0 +1,4 @@
+"com.zmy.wxfunction" : "file:pkgs/com.zmy.wxfunction-9.2.18.tgz",
+"com.zmy.xyxcommon" : "file:pkgs/com.zmy.xyxcommon-2.4.21.tgz",
+"com.zmy.gravityengine" : "file:pkgs/com.zmy.gravityengine-4.8.27.tgz",
+"com.zmy.zmysdk_core" : "file:pkgs/com.zmy.zmysdk_core-2.27.5.tgz",

@@ -1,0 +1,26 @@
+<linker>
+    <!--整个程序集-->
+    <!--指定程序集中的指定命名空间-->
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK" preserve="all"/>
+    </assembly>
+    
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="UnityAsyncAwaitUtil" preserve="all"/>
+    </assembly>
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK.IAP" preserve="all"/>
+    </assembly>
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK.Report" preserve="all"/>
+    </assembly>
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK.Report.JsonProperties" preserve="all"/>
+    </assembly>
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK.Util.Event" preserve="all"/>
+    </assembly>
+    <assembly fullname="ZMYSDK">
+        <namespace fullname="ZMYSDK.Util.Lang" preserve="all"/>
+    </assembly>
+</linker>

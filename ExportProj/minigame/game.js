@@ -10,13 +10,13 @@ import checkVersion from './check-version';
 import { launchEventType, scaleMode } from './plugin-config';
 import { preloadWxCommonFont } from './unity-sdk/font/index';
 const managerConfig = {
-    DATA_FILE_MD5: '079f0b74e8e91143',
-    CODE_FILE_MD5: 'f69b5fe94c7ded0d',
+    DATA_FILE_MD5: 'e4d2d970ae0d6deb',
+    CODE_FILE_MD5: '0a7846e18cdbd8f0',
     GAME_NAME: 'webgl',
-    APPID: 'wx20aae48086f32200',
-    DATA_FILE_SIZE: '15033184',
+    APPID: 'wxf95d1c83572d3bb7',
+    DATA_FILE_SIZE: '19520729',
     OPT_DATA_FILE_SIZE: '$OPT_DATA_FILE_SIZE',
-    DATA_CDN: '',
+    DATA_CDN: 'https://lfrjtxx-cou.gusspro.com/app-3/Release/com.scwzl.weixin/XYX/WebGL/base/1.0.0',
     // 资源包是否作为小游戏分包加载
     loadDataPackageFromSubpackage: true,
     // 资源包放小游戏分包加载时，是否br压缩
@@ -28,7 +28,11 @@ const managerConfig = {
         ,
     ],
     contextConfig: {
-        contextType: 1, // 1: webgl1  2: webgl2
+        contextType: 1,
+        contextExt: {
+            enableGLX: false,
+            enableMetal: false,
+        }
     },
     PROFILER_UPLOAD_URL: '',
 };
@@ -118,7 +122,7 @@ checkVersion().then((enable) => {
                     // 背景图或背景视频，两者都填时，先展示背景图，视频可播放后，播放视频
                     backgroundImage: 'images/background.jpg',
                     backgroundVideo: '',
-                    iconImage: 'images/unity_logo.png', // icon图片，一般不更换
+                     // icon图片，一般不更换
                 },
             },
         });
@@ -187,3 +191,20 @@ checkVersion().then((enable) => {
         });
     }
 });
+
+
+let ams_actionid = GameGlobal.WXWASMSDK.GetJsonValue("ams_actionid");
+let ams_secretkey = GameGlobal.WXWASMSDK.GetJsonValue("ams_secretkey");
+let ams_appid = GameGlobal.WXWASMSDK.GetJsonValue("ams_appid");
+
+if(ams_actionid && ams_secretkey && ams_appid)
+{
+    ams_actionid = Number(ams_actionid);
+    GameGlobal.WXWASMSDK.InitAMS(ams_actionid,ams_secretkey,ams_appid);
+
+    let UsePayModule = GameGlobal.WXWASMSDK.GetJsonValue("UsePayModule");
+    if(!UsePayModule || UsePayModule === "0")
+    {
+      GameGlobal.WXWASMSDK.START_LOAD();
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "name": "com.zmy.zmysdkpackagemanager",
+    "displayName": "ZMYSDKPackageManager",
+    "version": "1.1.0",
+    "unity": "2021.3",
+    "author": "zmy",
+    "description": "",
+    "dependencies": {}
+}

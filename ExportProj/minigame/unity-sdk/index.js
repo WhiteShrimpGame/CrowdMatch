@@ -1,4 +1,4 @@
-﻿
+
 import storage from './storage';
 import userInfo from './userinfo';
 import moduleHelper from './module-helper';
@@ -31,6 +31,9 @@ import TCPSocket from './TCPSocket/index';
 import UDPSocket from './UDPSocket/index';
 import bluetooth from './bluetooth/index';
 import gyroscope from './gyroscope/index';
+import getPlugin from './getPlugin';
+import ams_sdk from './ams_sdk';
+import wxsdk from './wxsdk';
 const unityVersion = '2021.3.14f1';
 GameGlobal.unityNamespace = GameGlobal.unityNamespace || {};
 GameGlobal.unityNamespace.unityVersion = unityVersion;
@@ -110,5 +113,8 @@ const WXWASMSDK = {
     ...UDPSocket,
     ...bluetooth,
     ...gyroscope,
+...getPlugin,
+...ams_sdk,
+...wxsdk,
 };
 GameGlobal.WXWASMSDK = WXWASMSDK;

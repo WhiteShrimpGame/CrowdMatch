@@ -1,7 +1,7 @@
 import response from './response';
 import moduleHelper from './module-helper';
-import { getDefaultData } from './utils';
-import { isDebug, isSupportSharedCanvasMode } from '../check-version';
+import { getDefaultData, debugLog } from './utils';
+import { isSupportSharedCanvasMode } from '../check-version';
 
 let cachedOpenDataContext;
 let cachedSharedCanvas;
@@ -12,7 +12,6 @@ var SharedCanvasMode;
 })(SharedCanvasMode || (SharedCanvasMode = {}));
 let sharedCanvasMode;
 let timerId;
-let textureObject = null;
 let textureId;
 
 function getOpenDataContext(mode) {
@@ -21,6 +20,9 @@ function getOpenDataContext(mode) {
     }
     
     if (!isSupportSharedCanvasMode) {
+        if (mode === 'ScreenCanvas') {
+            console.warn('[unity-sdk]: 当前环境不支持 ScreenCanvas 模式');
+        }
         sharedCanvasMode = SharedCanvasMode.OffScreenCanvas;
     }
     
@@ -32,6 +34,7 @@ function getOpenDataContext(mode) {
             sharedCanvasMode = SharedCanvasMode.OffScreenCanvas;
         }
     }
+    console.log(`[unity-sdk]: 当前开放数据域为 ${sharedCanvasMode} 模式`);
     // @ts-ignore
     cachedOpenDataContext = wx.getOpenDataContext({
         sharedCanvasMode,
@@ -47,34 +50,25 @@ function hookUnityRender() {
     if (!textureId) {
         return;
     }
-    const { GL } = GameGlobal.manager.gameInstance.Module;
+    const Module = GameGlobal.manager.gameInstance.Module;
+    const { GL } = Module;
     const gl = GL.currentContext.GLctx;
-    if (!textureObject) {
-        textureObject = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, textureObject);
-        if (GameGlobal.unityNamespace.unityColorSpace === 'Linear') {
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, getSharedCanvas());
-        }
-        else {
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, getSharedCanvas());
-        }
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const isLinearColorSpace = GameGlobal.unityNamespace.unityColorSpace === 'Linear';
+    
+    if (gl.emscriptenGLX) {
+        Module.ccall('glxShowOpenData', null, ['number', 'number', 'bool'], [textureId, getSharedCanvas().__uid(), isLinearColorSpace]);
     }
     else {
         
-        gl.bindTexture(gl.TEXTURE_2D, textureObject);
-        if (GameGlobal.unityNamespace.unityColorSpace === 'Linear') {
+        gl.bindTexture(gl.TEXTURE_2D, GL.textures[textureId]);
+        if (isLinearColorSpace) {
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, getSharedCanvas());
         }
         else {
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, getSharedCanvas());
         }
+        timerId = requestAnimationFrame(hookUnityRender);
     }
-    GL.textures[textureId] = textureObject;
-    timerId = requestAnimationFrame(hookUnityRender);
 }
 
 function stopLastRenderLoop() {
@@ -94,30 +88,38 @@ function stopHookUnityRender() {
     sharedCanvas.width = 1;
     sharedCanvas.height = 1;
     
-    const { GL } = GameGlobal.manager.gameInstance.Module;
+    const Module = GameGlobal.manager.gameInstance.Module;
+    const { GL } = Module;
     const gl = GL.currentContext.GLctx;
-    gl.deleteTexture(textureObject);
-    textureObject = null;
+    
+    if (gl.emscriptenGLX) {
+        Module.ccall('glxHideOpenData', null, [], []);
+    }
 }
+wx.onShow(() => {
+    if (cachedOpenDataContext) {
+        getOpenDataContext().postMessage({
+            type: 'WXShow',
+        });
+    }
+});
 export default {
     WXGetOpenDataContext(mode) {
-        if (isDebug) {
-            console.warn('WXGetOpenDataContext:', mode);
-        }
+        debugLog('WXGetOpenDataContext:', mode);
         getOpenDataContext(mode);
     },
     WXDataContextPostMessage(msg) {
-        if (isDebug) {
-            console.warn('WXDataContextPostMessage:', msg);
-        }
+        debugLog('WXDataContextPostMessage:', msg);
         getOpenDataContext().postMessage(msg);
     },
     WXShowOpenData(id, x, y, width, height) {
-        if (isDebug) {
-            console.warn('WXShowOpenData:', id, x, y, width, height);
-        }
+        debugLog('WXShowOpenData:', id, x, y, width, height);
         if (width <= 0 || height <= 0) {
             console.error('[unity-sdk]: WXShowOpenData要求 width 和 height 参数必须大于0');
+        }
+        
+        if (!cachedOpenDataContext) {
+            console.warn('[unity-sdk]: 请先调用 WXGetOpenDataContext');
         }
         
         const openDataContext = getOpenDataContext();
@@ -144,8 +146,10 @@ export default {
         }
     },
     WXHideOpenData() {
-        if (isDebug) {
-            console.warn('WXHideOpenData');
+        debugLog('WXHideOpenData');
+        if (!cachedOpenDataContext) {
+            console.warn('[unity-sdk]: 请先调用 WXGetOpenDataContext');
+            return;
         }
         getOpenDataContext().postMessage({
             type: 'WXDestroy',
@@ -161,9 +165,7 @@ export default {
         }
     },
     WXOpenDataToTempFilePathSync(conf) {
-        if (isDebug) {
-            console.warn('WXOpenDataToTempFilePathSync', conf);
-        }
+        debugLog('WXOpenDataToTempFilePathSync', conf);
         const sharedCanvas = getSharedCanvas();
         if (!sharedCanvas) {
             return 'Please use WX.GetOpenDataContext() first';
@@ -171,9 +173,7 @@ export default {
         return sharedCanvas.toTempFilePathSync(getDefaultData(sharedCanvas, conf));
     },
     WXOpenDataToTempFilePath(conf, s, f, c) {
-        if (isDebug) {
-            console.warn('WXOpenDataToTempFilePath', conf);
-        }
+        debugLog('WXOpenDataToTempFilePath', conf);
         if (conf) {
             const sharedCanvas = getSharedCanvas();
             if (!sharedCanvas) {

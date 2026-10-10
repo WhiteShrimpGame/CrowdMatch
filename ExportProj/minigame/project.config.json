@@ -33,9 +33,9 @@
     "packNpmRelationList": []
   },
   "compileType": "game",
-  "libVersion": "3.5.1",
-  "appid": "wx20aae48086f32200",
-  "projectname": "通关我贼六",
+  "libVersion": "latest",
+  "appid": "wxf95d1c83572d3bb7",
+  "projectname": "CrowdMatch",
   "simulatorType": "wechat",
   "simulatorPluginLibVersion": {},
   "packOptions": {
@@ -47,6 +47,10 @@
       {
         "type": "suffix",
         "value": ".symbols.unityweb"
+      },
+      {
+        "type": "suffix",
+        "value": ".symbols.unityweb.br"
       }
     ]
   },

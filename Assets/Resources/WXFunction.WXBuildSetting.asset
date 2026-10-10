@@ -1,0 +1,44 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -625159328, guid: 890dcf02987705c4abc14c85cb0ea811, type: 3}
+  m_Name: WXFunction.WXBuildSetting
+  m_EditorClassIdentifier: 
+  UpdateAndClearAllAssets: 0
+  UseWXAssetBundle: 1
+  NotTipWxPrivacy: 1
+  BannerWidth: 800
+  BannerOffsetY: 0
+  BannerHeight: 0
+  FourlineADAutoHide: 0
+  ShowShareMenuAppMessage: 0
+  ShareTitle: 
+  ShareImageUrlArray: []
+  ShowShareMenuTimeline: 0
+  FriendShareTitle: 
+  FriendShareImageUrlArray: []
+  ZoneID: 
+  OfferID: 
+  IOSPayCardGameName: "\u8C01\u8FD8\u6CA1\u4E0A\u8F66"
+  WXAMSActionid: 1224314373
+  WXAMSSecretKey: 67e8ffdaa0875b43ffbe3504d287c9c2
+  MiniGameCommonPlugin: 1
+  WXADpredict: 0
+  ADTTConversion: 0
+  TTConversionAppKey: 
+  WXCPSConfig:
+    CPSId_Single: 
+    CPSId_Multi: 
+    CPSId_MultiPlace: 0
+    CPSId_FullScreen: 
+    IsShowFullScreenWhenIntersAdShowFail: 1
+  EnableWXLeiTai: 0
+  EnableFeedSimulate: 0

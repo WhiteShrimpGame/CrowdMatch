@@ -18,7 +18,7 @@ const unityNamespace = {
     unityVersion: '2021.3.14f1',
     // Color Space: Gamma、Linear、Uninitialized(未初始化的颜色空间)
     unityColorSpace: 'Gamma',
-    convertPluginVersion: '202501140351',
+    convertPluginVersion: '202509110649',
     // 拼在StreamingAssets前面的path，DATA_CDN + streamingUrlPrefixPath + StreamingAssets
     streamingUrlPrefixPath: '',
     // DATA_CDN + dataFileSubPrefix + datafilename
@@ -50,13 +50,15 @@ const unityNamespace = {
     // 是否用了多线程brotli压缩
     useBrotliMT: true,
     // Boot config配置，包含例如wait-for-native-debugger、player-connection-ip等信息
-    bootConfig: 'player-connection-ip=192.168.3.65',
+    bootConfig: 'player-connection-ip=192.168.3.22',
     // 是否以Development Build构建
     isDevelopmentBuild: false,
     // 是否以Profiling Build导出
     isProfilingBuild: false,
     // 预留的堆内存
     unityHeapReservedMemory: 256,
+    // 是否向Perfstream上报数据
+    sendData2PerfStream: false,
 };
 // 最佳实践检测配置
 unityNamespace.monitorConfig = {
@@ -113,6 +115,7 @@ GameGlobal.WebAssembly = GameGlobal.WXWebAssembly;
 GameGlobal.unityNamespace = GameGlobal.unityNamespace || unityNamespace;
 GameGlobal.realtimeLogManager = wx.getRealtimeLogManager();
 GameGlobal.logmanager = wx.getLogManager({ level: 0 });
+GameGlobal.disableMultiTouch = false;
 // 提前监听错误并打日志
 function bindGloblException() {
     // 默认上报小游戏实时日志与用户反馈日志(所有error日志+小程序框架异常)

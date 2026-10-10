@@ -13,13 +13,14 @@ MonoBehaviour:
   m_Name: MiniGameConfig
   m_EditorClassIdentifier: 
   ProjectConf:
-    projectName: "\u901A\u5173\u6211\u8D3C\u516D"
-    Appid: wx20aae48086f32200
-    CDN: 
+    projectName: CrowdMatch
+    Appid: wxf95d1c83572d3bb7
+    CDN: https://lfrjtxx-cou.gusspro.com/app-3/Release/com.scwzl.weixin/XYX/WebGL/base/1.0.0
     assetLoadType: 1
     compressDataPackage: 1
     VideoUrl: 
-    DST: F:/CrowdMatch_wxtest/ExportProj
+    relativeDST: E:/GitHub/CrowdMatch/ExportProj
+    DST: E:/GitHub/CrowdMatch/ExportProj
     StreamCDN: 
     bundleHashLength: 32
     bundlePathIdentifier: StreamingAssets;
@@ -45,6 +46,7 @@ MonoBehaviour:
     UseCompressedTexture: 0
     UseMiniGameChat: 0
     PreloadWXFont: 0
+    disableMultiTouch: 0
   CompileOptions:
     DevelopBuild: 0
     AutoProfile: 0
@@ -64,6 +66,8 @@ MonoBehaviour:
     enablePerfAnalysis: 0
     iOSAutoGCInterval: 10000
     enableIOSPerformancePlus: 0
+    enableiOSMetal: 0
+    enableEmscriptenGLX: 0
     brotliMT: 1
     enableWasm2023: 0
   CompressTexture:

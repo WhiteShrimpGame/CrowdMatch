@@ -89,7 +89,9 @@
       "Bash(timeout 180 dotnet tool install -g ilspycmd)",
       "Bash(echo \"exit=$?\")",
       "Bash(cp \"Assembly-CSharp-Editor.csproj.bak-fr\" \"Assembly-CSharp-Editor.csproj\")",
-      "Bash(rm \"Assembly-CSharp-Editor.csproj.bak-fr\")"
+      "Bash(rm \"Assembly-CSharp-Editor.csproj.bak-fr\")",
+      "Read(//c/Program Files/Unity/Hub/Editor/**)",
+      "Read(//c/Program Files/Tuanjie/Hub/**)"
     ]
   }
 }

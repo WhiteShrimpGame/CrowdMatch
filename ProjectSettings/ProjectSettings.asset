@@ -808,7 +808,7 @@ PlayerSettings:
   webGLDecompressionFallback: 0
   webGLPowerPreference: 2
   scriptingDefineSymbols:
-    WebGL: WeChat
+    WebGL: WeChat;GRAVITY_WECHAT_GAME_MODE;ZMY
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend: {}
