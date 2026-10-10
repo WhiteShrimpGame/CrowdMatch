@@ -1,0 +1,29 @@
+{
+    "segments": [
+        {
+            "percent": 30,
+            "backlogMin": 0,
+            "backlogMax": 15
+        },
+        {
+            "percent": 40,
+            "backlogMin": 10,
+            "backlogMax": 30
+        },
+        {
+            "percent": 65,
+            "backlogMin": 15,
+            "backlogMax": 50
+        },
+        {
+            "percent": 85,
+            "backlogMin": 10,
+            "backlogMax": 25
+        },
+        {
+            "percent": 100,
+            "backlogMin": 30,
+            "backlogMax": 50
+        }
+    ]
+}

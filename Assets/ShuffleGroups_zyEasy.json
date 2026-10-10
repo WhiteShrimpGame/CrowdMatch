@@ -1,0 +1,153 @@
+{
+    "groups": [
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 0,
+                    "maxPercent": 10
+                },
+                {
+                    "column": 1,
+                    "minPercent": 0,
+                    "maxPercent": 10
+                },
+                {
+                    "column": 2,
+                    "minPercent": 0,
+                    "maxPercent": 10
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 10,
+                    "maxPercent": 25
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 1,
+                    "minPercent": 10,
+                    "maxPercent": 25
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 2,
+                    "minPercent": 10,
+                    "maxPercent": 25
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 25,
+                    "maxPercent": 35
+                },
+                {
+                    "column": 1,
+                    "minPercent": 25,
+                    "maxPercent": 35
+                },
+                {
+                    "column": 2,
+                    "minPercent": 25,
+                    "maxPercent": 35
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 35,
+                    "maxPercent": 60
+                },
+                {
+                    "column": 1,
+                    "minPercent": 35,
+                    "maxPercent": 60
+                },
+                {
+                    "column": 2,
+                    "minPercent": 35,
+                    "maxPercent": 60
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 60,
+                    "maxPercent": 75
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 1,
+                    "minPercent": 60,
+                    "maxPercent": 75
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 2,
+                    "minPercent": 60,
+                    "maxPercent": 75
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 75,
+                    "maxPercent": 85
+                },
+                {
+                    "column": 1,
+                    "minPercent": 75,
+                    "maxPercent": 85
+                },
+                {
+                    "column": 2,
+                    "minPercent": 75,
+                    "maxPercent": 85
+                }
+            ]
+        },
+        {
+            "items": [
+                {
+                    "column": 0,
+                    "minPercent": 85,
+                    "maxPercent": 100
+                },
+                {
+                    "column": 1,
+                    "minPercent": 85,
+                    "maxPercent": 100
+                },
+                {
+                    "column": 2,
+                    "minPercent": 85,
+                    "maxPercent": 100
+                }
+            ]
+        }
+    ]
+}
