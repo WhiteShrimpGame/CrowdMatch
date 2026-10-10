@@ -1041,6 +1041,8 @@ namespace CrowdMatch
                 popDuration = magnetPopDuration,
                 shrinkDuration = magnetShrinkDuration,
                 sitDownDuration = magnetSitDownDuration,
+                deferExitUntilSeated = true,   // 人坐稳之后车才开走
+                landingSfxWhenLast = true,     // 最后一颗落座补一声「Geton」（人上车）
             };
         }
 

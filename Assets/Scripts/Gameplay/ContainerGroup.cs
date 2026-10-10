@@ -461,6 +461,15 @@ namespace CrowdMatch
             public float elasticScaleDuration;     // 落地弹性放大
             public float elasticRecoverDuration;   // 弹性复原
             public float sitDownDuration;          // 上车坐回（exposeMoveTarget 移到 boardSitDownYOffset）
+
+            /// <summary>
+            /// 磁铁专用：**上车完成（含出库判定）推迟到"落座"之后**（不落座完，车不开走）。
+            /// 默认 false —— 复活 / UFO 走原口径（挂到落点即算完成）。
+            /// </summary>
+            public bool deferExitUntilSeated;
+
+            /// <summary>磁铁专用：最后一颗**落座**时补一声「Geton」（人上车的音效）。默认 false。</summary>
+            public bool landingSfxWhenLast;
         }
 
         /// <summary>消失两段时长的兜底值（与 <c>DisappearWithPop</c> 的默认参数一致）。</summary>
@@ -691,29 +700,53 @@ namespace CrowdMatch
 
         /// <summary>
         /// 起播一个「原地消失」条目（<see cref="PrepareBoarding"/> 以 <c>jump = false</c> 登记之后调）：
-        /// 像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现 → **落座坐定**。
+        /// 像素原地消失（DisappearWithPop，参考开盖 tween）→ 瞬移到目标车落点出现。
         /// 仍走 OnPixelConsumed（失败判定 + 出库 / 原地销毁）完整链路，只是省略 jump。
         ///
-        /// **"上车完成"（onConsumed）推迟到落座之后** —— 与跳车那条路在 <c>BoardRoutine</c> 里
-        /// "等弹性和落地都播完才 onBoarded" 是同一条口径：否则车会在人还没坐稳时就开走。
+        /// 调用方有三个：**道具磁铁**（<see cref="ConsumePixelInstant"/>）、复活的深排匹配、道具3 UFO 的深排。
+        /// 只有磁铁会传 <see cref="BoardingTiming.deferExitUntilSeated"/>（把出库推迟到落座之后）
+        /// 与 <see cref="BoardingTiming.landingSfxWhenLast"/>（最后一颗落座补一声人上车）——
+        /// **后两者不传，行为与改动前逐字一致**（挂到落点即算上车完成）。
         /// </summary>
         private void PlayInstantBoarding(PixelItem pixel, ContainerItem container, int col, bool isLast,
             bool destroyInPlace, BoardingTiming timing)
         {
-            System.Action onConsumed = () => OnPixelConsumed(container, col, isLast, destroyInPlace);
+            System.Action consumed = () => OnPixelConsumed(container, col, isLast, destroyInPlace);
+            bool deferExit = timing.deferExitUntilSeated;
+
+            // 只有磁铁需要"落座之后才算完成"；其余调用方 onSeated 传 null，落点挂好即完成（旧口径）
+            System.Action onSeated = null;
+            if (deferExit)
+            {
+                onSeated = () =>
+                {
+                    if (isLast && timing.landingSfxWhenLast && AudioManager.Instance != null)
+                        AudioManager.Instance.Play("Geton");
+                    consumed();
+                };
+            }
 
             // 原地消失（pop 1.1× → 缩到 0，与开盖同一 tween）后，瞬移到目标车落点出现
             PlayDisappear(pixel, timing, () =>
             {
                 if (pixel == null)
                     return;
+
                 bool placed = container != null
-                    && container.PlacePixelInstant(pixel, timing.sitDownDuration, onConsumed);
+                    && container.PlacePixelInstant(pixel,
+                        deferExit ? timing.sitDownDuration : -1f,
+                        onSeated);
+
                 if (!placed)
                 {
                     Destroy(pixel.gameObject);   // 无空闲落点（或车已销毁）：销毁
-                    onConsumed();                // 没落座，上车流程到此结束
+                    consumed();                  // 没落座：直接收尾（不发声）
                 }
+                else if (!deferExit)
+                {
+                    consumed();                  // 旧口径：挂到落点即算上车完成
+                }
+
                 GameData.ClearedPixelCount++;
             });
         }
